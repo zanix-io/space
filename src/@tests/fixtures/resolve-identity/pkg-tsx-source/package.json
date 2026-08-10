@@ -1,0 +1,6 @@
+{
+  "name": "pkg-tsx-source",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.tsx"
+}

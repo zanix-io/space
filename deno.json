@@ -1,0 +1,145 @@
+{
+  "name": "@zanix/space",
+  "version": "0.1.0",
+  "zanix": {
+    "project": "library",
+    "hash": "pn287r"
+  },
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitAny": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "react"
+  },
+  "lint": {
+    "rules": {
+      "tags": [
+        "recommended",
+        "jsr",
+        "react",
+        "jsx"
+      ],
+      "include": [
+        "eqeqeq",
+        "default-param-last",
+        "camelcase",
+        "no-await-in-loop",
+        "no-const-assign",
+        "no-eval",
+        "no-non-null-asserted-optional-chain",
+        "no-non-null-assertion",
+        "no-self-compare",
+        "no-sync-fn-in-async-fn",
+        "no-throw-literal",
+        "no-useless-rename"
+      ]
+    },
+    "exclude": [
+      ".dist",
+      // Deliberately real, hand-written CommonJS (`require`/`exports.x`) — the fixtures
+      // `bare-specifier-resolve.ts`'s own regression tests need. Linting them as this project's
+      // own source style would fight their entire purpose.
+      "src/@tests/fixtures/resolve-identity"
+    ],
+    "plugins": [
+      "jsr:@zanix/utils/linter/deno-zanix-plugin"
+    ],
+    "report": "pretty"
+  },
+  "fmt": {
+    "exclude": [
+      ".dist",
+      "src/@tests/fixtures/resolve-identity"
+    ],
+    "proseWrap": "always",
+    "indentWidth": 2,
+    "singleQuote": true,
+    "lineWidth": 100,
+    "useTabs": false,
+    "semiColons": false
+  },
+  "imports": {
+    "@std/assert": "jsr:@std/assert@0.224",
+    "@std/path": "jsr:@std/path@0.224",
+    "typings/": "./src/typings/",
+    "modules/": "./src/modules/",
+    // Local path during development, same convention already used by @zanix/app/@zanix/core for
+    // in-flight cross-package work (see app/deno.jsonc) — restore the JSR line before publishing.
+    //"@zanix/app": "jsr:@zanix/app@^0.1.0",
+    "@zanix/app": "../app/mod.ts",
+    //"@zanix/app/runtime": "jsr:@zanix/app@^0.1.0/runtime",
+    "@zanix/app/runtime": "../app/runtime.ts",
+    //"@zanix/server": "jsr:@zanix/server@^3.2.0",
+    "@zanix/server": "../server/mod.ts",
+    "@zanix/errors": "jsr:@zanix/utils@^2.5.1/errors",
+    "@zanix/logger": "jsr:@zanix/utils@^2.5.1/logger",
+    "@zanix/helpers": "jsr:@zanix/utils@^2.5.1/helpers",
+    "react": "npm:react@^19.2.0",
+    "react-dom": "npm:react-dom@^19.2.0",
+    "@types/react": "npm:@types/react@^19.2.0",
+    "@types/react-dom": "npm:@types/react-dom@^19.2.0",
+    "vite": "npm:vite@^8.0.0",
+    // JSX transform + real React Fast Refresh for the `client` environment (Comets) — confirmed
+    // via its own published `peerDependencies` to declare real, official Vite 8 support (not
+    // assumed from an older major). `@rolldown/plugin-babel`/`babel-plugin-react-compiler` are its
+    // own optional peers (React Compiler support specifically) — not declared here unless a real
+    // spike shows Fast Refresh itself needs one of them under Vite 8's Rolldown transform.
+    "@vitejs/plugin-react": "npm:@vitejs/plugin-react@^6.0.5",
+    // Resolves Deno-style specifiers (deno.json import-map aliases, `npm:`/`jsr:`/`http(s):`) inside
+    // Vite's own module graph — `createSpaceDevEngine` needs this for ANY bare specifier a real page
+    // imports (`@zanix/space` itself, `react`, ...); confirmed via a real spike that Vite/Rolldown
+    // has no other resolution path to a Deno import map on its own.
+    "@deno/vite-plugin": "npm:@deno/vite-plugin@^2.0.3",
+    // The same resolver `@deno/vite-plugin` uses internally, invoked directly by
+    // `space/bundler/cjs-interop.ts` to resolve/load a CJS dependency's own relative `require()`
+    // subtree by hand — needed because routing those sub-requires back through Vite's own module
+    // graph bypasses `@deno/vite-plugin`'s `onLoad` hook for any already-resolved absolute path
+    // (confirmed empirically; see that file's own doc for the full reasoning).
+    "@deno/loader": "jsr:@deno/loader@^0.5.0",
+    "@tailwindcss/vite": "npm:@tailwindcss/vite@^4.3.3",
+    // Never imported directly from any .ts/.tsx source — listed so Deno hoists it to a top-level
+    // `node_modules/tailwindcss` symlink. `@tailwindcss/vite` resolves it by walking up from the
+    // *.css file's own directory (Tailwind's own `@import "tailwindcss"` mechanism), which Deno's
+    // flattened `.deno` package store otherwise never surfaces at a location that walk would find.
+    // A consuming app needs this exact same entry in its own `deno.json` for the same reason.
+    "tailwindcss": "npm:tailwindcss@^4.3.3",
+    "@vanilla-extract/vite-plugin": "npm:@vanilla-extract/vite-plugin@^5.2.6",
+    "typed-css-modules": "npm:typed-css-modules@^0.9.1",
+    // Build-time only (icon resizing for the PWA manifest) — never imported by anything that ships
+    // to the browser or runs in the deployed server process.
+    "sharp": "npm:sharp@^0.34.5",
+    // Permanent fixtures for `bare-specifier-resolve.ts`'s own regression suite — stand-ins for
+    // real npm packages (a real disposable spike already confirmed the identity bug and its fix
+    // against real `react`/`react-dom`; these let the same shape of bug — ESM<->ESM, CJS<->CJS,
+    // CJS<->ESM, all reached via a bare specifier from a `node_modules`-like importer — get
+    // regression-tested deterministically, without depending on any particular npm package's own
+    // internal module structure staying stable). Namespaced under `@test-fixtures/` so the name can
+    // never collide with a real, future npm package. Never imported outside `src/@tests`.
+    "@test-fixtures/pkg-a": "./src/@tests/fixtures/resolve-identity/pkg-a/index.mjs",
+    "@test-fixtures/pkg-b": "./src/@tests/fixtures/resolve-identity/pkg-b/index.mjs",
+    "@test-fixtures/pkg-c": "./src/@tests/fixtures/resolve-identity/pkg-c/index.js",
+    "@test-fixtures/pkg-d": "./src/@tests/fixtures/resolve-identity/pkg-d/index.js",
+    "@test-fixtures/pkg-ts-source": "./src/@tests/fixtures/resolve-identity/pkg-ts-source/index.ts",
+    "@test-fixtures/pkg-tsx-source": "./src/@tests/fixtures/resolve-identity/pkg-tsx-source/index.tsx"
+  },
+  "exports": {
+    ".": "./mod.ts",
+    "./vite": "./src/modules/bundler/mod.ts",
+    "./client": "./src/modules/client/mod.ts",
+    "./testing": "./src/modules/testing/mod.ts",
+    "./dev": "./src/modules/dev/mod.ts"
+  },
+  "nodeModulesDir": "auto",
+  "publish": {
+    "exclude": [
+      ".github",
+      "src/@tests"
+    ]
+  },
+  "test": {
+    "include": [
+      "src/@tests/**/*.test.ts",
+      "src/@tests/**/*.test.tsx"
+    ]
+  }
+}

@@ -1,6 +1,9 @@
 import { assert, assertEquals } from '@std/assert'
 import { join } from '@std/path'
+import { getTemporaryFolder } from '@zanix/helpers'
 import { createSpaceDevEngine, type SsrModuleChangedEvent } from 'modules/bundler/dev-engine.ts'
+
+const TMP_ROOT = getTemporaryFolder(import.meta.url)
 
 const isRouteEntry = (id: string) => id.endsWith('/page.tsx') || id.endsWith('page.tsx')
 
@@ -22,14 +25,16 @@ async function waitUntil<T>(
     // deno-lint-ignore no-await-in-loop -- same reason as above
     await new Promise((resolve) => setTimeout(resolve, 100))
   }
-  throw new Error(`waitUntil: condition never became truthy within ${timeoutMs}ms`)
+  throw new Error(
+    `waitUntil: condition never became truthy within ${timeoutMs}ms`,
+  )
 }
 
 async function withTempProject(
   build: (root: string) => Promise<void>,
   run: (root: string) => Promise<void>,
 ): Promise<void> {
-  const root = await Deno.makeTempDir()
+  const root = await Deno.makeTempDir({ dir: TMP_ROOT })
   try {
     await build(root)
     await run(root)
@@ -97,7 +102,10 @@ Deno.test(
   async () => {
     await withTempProject(
       async (root) => {
-        await Deno.writeTextFile(join(root, 'page.tsx'), `export const marker = 'v1'\n`)
+        await Deno.writeTextFile(
+          join(root, 'page.tsx'),
+          `export const marker = 'v1'\n`,
+        )
       },
       async (root) => {
         const events: SsrModuleChangedEvent[] = []
@@ -109,10 +117,15 @@ Deno.test(
         try {
           await engine.ssrLoadModule('/page.tsx') // establish the module graph before editing
 
-          await Deno.writeTextFile(join(root, 'page.tsx'), `export const marker = 'v2'\n`)
+          await Deno.writeTextFile(
+            join(root, 'page.tsx'),
+            `export const marker = 'v2'\n`,
+          )
 
           const event = await waitUntil(() => events.find((e) => e.changeType === 'update'))
-          assert(event.affectedRoutes.some((route) => route.endsWith('page.tsx')))
+          assert(
+            event.affectedRoutes.some((route) => route.endsWith('page.tsx')),
+          )
         } finally {
           await engine.close()
         }
@@ -171,7 +184,10 @@ Deno.test(
   async () => {
     await withTempProject(
       async (root) => {
-        await Deno.writeTextFile(join(root, 'styles.css'), `.counter { color: red; }\n`)
+        await Deno.writeTextFile(
+          join(root, 'styles.css'),
+          `.counter { color: red; }\n`,
+        )
       },
       async (root) => {
         const engine = await createSpaceDevEngine({ root, isRouteEntry })
@@ -212,7 +228,10 @@ Deno.test(
         try {
           const asset = await engine.transformClientAsset('/counter.tsx')
           assert(asset)
-          assertEquals(asset.contentType, 'application/javascript; charset=utf-8')
+          assertEquals(
+            asset.contentType,
+            'application/javascript; charset=utf-8',
+          )
           // Real evidence the transitive `./helper.ts` import survived transformation, rewritten
           // to a real, servable url — not just "some JS came back".
           assert(asset.code.includes('/helper.ts'), asset.code)
@@ -233,7 +252,9 @@ Deno.test(
       async (root) => {
         const engine = await createSpaceDevEngine({ root, isRouteEntry })
         try {
-          const asset = await engine.transformClientAsset('/does-not-exist.css')
+          const asset = await engine.transformClientAsset(
+            '/does-not-exist.css',
+          )
           assertEquals(asset, null)
         } finally {
           await engine.close()
@@ -248,7 +269,10 @@ Deno.test(
   async () => {
     await withTempProject(
       async (root) => {
-        await Deno.writeTextFile(join(root, 'broken.tsx'), `export default function( {\n`)
+        await Deno.writeTextFile(
+          join(root, 'broken.tsx'),
+          `export default function( {\n`,
+        )
       },
       async (root) => {
         const engine = await createSpaceDevEngine({ root, isRouteEntry })
@@ -260,7 +284,10 @@ Deno.test(
             threw = true
             assert(String((error as Error).message).length > 0)
           }
-          assert(threw, 'transformClientAsset should reject for a real syntax error')
+          assert(
+            threw,
+            'transformClientAsset should reject for a real syntax error',
+          )
         } finally {
           await engine.close()
         }
@@ -274,18 +301,28 @@ Deno.test(
   async () => {
     await withTempProject(
       async (root) => {
-        await Deno.writeTextFile(join(root, 'styles.css'), `.marker { color: red; }\n`)
+        await Deno.writeTextFile(
+          join(root, 'styles.css'),
+          `.marker { color: red; }\n`,
+        )
       },
       async (root) => {
         const engine = await createSpaceDevEngine({ root, isRouteEntry })
         try {
-          const before = await engine.transformClientAsset('/styles.css?direct')
+          const before = await engine.transformClientAsset(
+            '/styles.css?direct',
+          )
           assert(before?.code.includes('color: red'))
 
-          await Deno.writeTextFile(join(root, 'styles.css'), `.marker { color: blue; }\n`)
+          await Deno.writeTextFile(
+            join(root, 'styles.css'),
+            `.marker { color: blue; }\n`,
+          )
 
           const after = await waitUntil(async () => {
-            const asset = await engine.transformClientAsset('/styles.css?direct')
+            const asset = await engine.transformClientAsset(
+              '/styles.css?direct',
+            )
             return asset?.code.includes('color: blue') ? asset : undefined
           })
           assert(after.code.includes('color: blue'))
@@ -341,7 +378,10 @@ Deno.test(
   async () => {
     await withTempProject(
       async (root) => {
-        await Deno.writeTextFile(join(root, 'page.tsx'), realPageFixture('Example'))
+        await Deno.writeTextFile(
+          join(root, 'page.tsx'),
+          realPageFixture('Example'),
+        )
       },
       async (root) => {
         const engine = await createSpaceDevEngine({ root, isRouteEntry })
@@ -377,14 +417,20 @@ Deno.test(
   async () => {
     await withTempProject(
       async (root) => {
-        await Deno.writeTextFile(join(root, 'page.tsx'), realPageFixture('Example'))
+        await Deno.writeTextFile(
+          join(root, 'page.tsx'),
+          realPageFixture('Example'),
+        )
       },
       async (root) => {
         const engine = await createSpaceDevEngine({ root, isRouteEntry })
         try {
           const before = await engine.ssrLoadModule('/page.tsx')
 
-          await Deno.writeTextFile(join(root, 'page.tsx'), realPageFixture('Example-Edited'))
+          await Deno.writeTextFile(
+            join(root, 'page.tsx'),
+            realPageFixture('Example-Edited'),
+          )
 
           const after = await waitUntil(async () => {
             const mod = await engine.ssrLoadModule('/page.tsx')
@@ -406,7 +452,10 @@ Deno.test(
   async () => {
     await withTempProject(
       async (root) => {
-        await Deno.writeTextFile(join(root, 'broken.tsx'), 'export default class {{{ broken')
+        await Deno.writeTextFile(
+          join(root, 'broken.tsx'),
+          'export default class {{{ broken',
+        )
       },
       async (root) => {
         const engine = await createSpaceDevEngine({ root, isRouteEntry })
@@ -432,8 +481,14 @@ Deno.test(
   async () => {
     await withTempProject(
       async (root) => {
-        await Deno.writeTextFile(join(root, 'page.tsx'), realPageFixture('Example'))
-        await Deno.writeTextFile(join(root, 'styles.css'), `.marker { color: red; }\n`)
+        await Deno.writeTextFile(
+          join(root, 'page.tsx'),
+          realPageFixture('Example'),
+        )
+        await Deno.writeTextFile(
+          join(root, 'styles.css'),
+          `.marker { color: red; }\n`,
+        )
       },
       async (root) => {
         const engine = await createSpaceDevEngine({ root, isRouteEntry })
@@ -487,14 +542,20 @@ Deno.test(
   async () => {
     await withTempProject(
       async (root) => {
-        await Deno.writeTextFile(join(root, 'page.tsx'), reactSsrFixture('Hello-Cjs'))
+        await Deno.writeTextFile(
+          join(root, 'page.tsx'),
+          reactSsrFixture('Hello-Cjs'),
+        )
       },
       async (root) => {
         const engine = await createSpaceDevEngine({ root, isRouteEntry })
         try {
           const mod = await engine.ssrLoadModule('/page.tsx')
           assert(typeof mod.html === 'string', String(mod.html))
-          assert((mod.html as string).includes('Hello-Cjs'), mod.html as string)
+          assert(
+            (mod.html as string).includes('Hello-Cjs'),
+            mod.html as string,
+          )
           assert((mod.html as string).includes('<p>'), mod.html as string)
         } finally {
           await engine.close()
@@ -519,7 +580,7 @@ Deno.test(
     // real `ReferenceError: module is not defined` at `react/index.js`. A real `deno install` below
     // is what actually materializes this project's own `node_modules`, the same as any real app's
     // `nodeModulesDir: 'auto'` would.
-    const root = await Deno.makeTempDir()
+    const root = await Deno.makeTempDir({ dir: TMP_ROOT })
     try {
       await Deno.writeTextFile(
         join(root, 'deno.json'),
@@ -528,16 +589,25 @@ Deno.test(
           nodeModulesDir: 'auto',
         }),
       )
-      const install = await new Deno.Command('deno', { args: ['install'], cwd: root }).output()
+      const install = await new Deno.Command('deno', {
+        args: ['install'],
+        cwd: root,
+      }).output()
       assert(install.success, new TextDecoder().decode(install.stderr))
 
-      await Deno.writeTextFile(join(root, 'page.tsx'), reactSsrFixture('Hello-NodeModules'))
+      await Deno.writeTextFile(
+        join(root, 'page.tsx'),
+        reactSsrFixture('Hello-NodeModules'),
+      )
 
       const engine = await createSpaceDevEngine({ root, isRouteEntry })
       try {
         const mod = await engine.ssrLoadModule('/page.tsx')
         assert(typeof mod.html === 'string', String(mod.html))
-        assert((mod.html as string).includes('Hello-NodeModules'), mod.html as string)
+        assert(
+          (mod.html as string).includes('Hello-NodeModules'),
+          mod.html as string,
+        )
       } finally {
         await engine.close()
       }
@@ -577,13 +647,21 @@ Deno.test(
   async () => {
     await withTempProject(
       async (root) => {
-        await Deno.writeTextFile(join(root, 'page.tsx'), identityFixture('page'))
+        await Deno.writeTextFile(
+          join(root, 'page.tsx'),
+          identityFixture('page'),
+        )
       },
       async (root) => {
         const engine = await createSpaceDevEngine({ root, isRouteEntry })
         try {
           const mod = await engine.ssrLoadModule('/page.tsx') as {
-            result: { aEqualsB: boolean; aEqualsD: boolean; touchedBy: string[]; count: number }
+            result: {
+              aEqualsB: boolean
+              aEqualsD: boolean
+              touchedBy: string[]
+              count: number
+            }
           }
           // page.tsx (NOT a node_modules-like importer) importing `pkg-a` directly, and `pkg-b`
           // (ESM -> ESM bare import, itself a node_modules-like importer) importing the SAME
@@ -611,7 +689,10 @@ Deno.test(
   async () => {
     await withTempProject(
       async (root) => {
-        await Deno.writeTextFile(join(root, 'page.tsx'), identityFixture('page-v1'))
+        await Deno.writeTextFile(
+          join(root, 'page.tsx'),
+          identityFixture('page-v1'),
+        )
       },
       async (root) => {
         const engine = await createSpaceDevEngine({ root, isRouteEntry })
@@ -619,9 +700,15 @@ Deno.test(
           const before = await engine.ssrLoadModule('/page.tsx') as {
             result: { touchedBy: string[] }
           }
-          assert(before.result.touchedBy.includes('page-v1'), JSON.stringify(before.result))
+          assert(
+            before.result.touchedBy.includes('page-v1'),
+            JSON.stringify(before.result),
+          )
 
-          await Deno.writeTextFile(join(root, 'page.tsx'), identityFixture('page-v2'))
+          await Deno.writeTextFile(
+            join(root, 'page.tsx'),
+            identityFixture('page-v2'),
+          )
 
           const after = await waitUntil(async () => {
             const mod = await engine.ssrLoadModule('/page.tsx') as {
@@ -635,9 +722,18 @@ Deno.test(
           // of `pkg-a`/`pkg-b`/`pkg-c`/`pkg-d` were themselves edited, so Vite correctly has no
           // reason to invalidate them; a singleton that reset on an unrelated file's edit would be
           // its own, different bug (a second, incoherent notion of "fresh"), not a fix.
-          assert(after.result.touchedBy.includes('page-v2'), JSON.stringify(after.result))
-          assert(after.result.touchedBy.includes('page-v1'), JSON.stringify(after.result))
-          assert(after !== before, 'the page module itself must still be a fresh generation')
+          assert(
+            after.result.touchedBy.includes('page-v2'),
+            JSON.stringify(after.result),
+          )
+          assert(
+            after.result.touchedBy.includes('page-v1'),
+            JSON.stringify(after.result),
+          )
+          assert(
+            after !== before,
+            'the page module itself must still be a fresh generation',
+          )
         } finally {
           await engine.close()
         }
@@ -698,7 +794,117 @@ Deno.test(
           // specifier resolution (Vite's normal browser-bundle path, entirely unrelated to this
           // SSR-only fix) still runs unaffected.
           assert(asset.code.includes('react'), asset.code)
-          assertEquals(asset.contentType, 'application/javascript; charset=utf-8')
+          assertEquals(
+            asset.contentType,
+            'application/javascript; charset=utf-8',
+          )
+        } finally {
+          await engine.close()
+        }
+      },
+    )
+  },
+)
+
+Deno.test(
+  'createSpaceDevEngine: onClientModuleChanged reports a real Comet .tsx edit',
+  async () => {
+    await withTempProject(
+      async (root) => {
+        await Deno.writeTextFile(
+          join(root, 'counter.tsx'),
+          `export default function Counter() { return 'v1' }\n`,
+        )
+      },
+      async (root) => {
+        const urls: string[][] = []
+        const engine = await createSpaceDevEngine({
+          root,
+          isRouteEntry,
+          onClientModuleChanged: (changed) => urls.push(changed),
+        })
+        try {
+          // Establish the module in the `client` environment's own graph before editing — same
+          // reasoning as `ssrLoadModule` above establishing the SSR graph first.
+          await engine.transformClientAsset('/counter.tsx')
+
+          await Deno.writeTextFile(
+            join(root, 'counter.tsx'),
+            `export default function Counter() { return 'v2' }\n`,
+          )
+
+          const reported = await waitUntil(() => urls.find((u) => u.includes('/counter.tsx')))
+          assert(reported.includes('/counter.tsx'), JSON.stringify(reported))
+        } finally {
+          await engine.close()
+        }
+      },
+    )
+  },
+)
+
+Deno.test(
+  "createSpaceDevEngine: onClientModuleChanged is never called for a .css edit (that stays onClientCssChanged's own job)",
+  async () => {
+    await withTempProject(
+      async (root) => {
+        await Deno.writeTextFile(
+          join(root, 'styles.css'),
+          `.counter { color: red; }\n`,
+        )
+      },
+      async (root) => {
+        const cssUrls: string[][] = []
+        const moduleUrls: string[][] = []
+        const engine = await createSpaceDevEngine({
+          root,
+          isRouteEntry,
+          onClientCssChanged: (urls) => cssUrls.push(urls),
+          onClientModuleChanged: (urls) => moduleUrls.push(urls),
+        })
+        try {
+          await engine.transformClientAsset('/styles.css?direct')
+
+          await Deno.writeTextFile(
+            join(root, 'styles.css'),
+            `.counter { color: blue; }\n`,
+          )
+
+          await waitUntil(() => cssUrls.length > 0 ? true : undefined)
+          assertEquals(moduleUrls.length, 0, JSON.stringify(moduleUrls))
+        } finally {
+          await engine.close()
+        }
+      },
+    )
+  },
+)
+
+Deno.test(
+  'createSpaceDevEngine: a client module edit is a silent no-op when onClientModuleChanged is unset, unchanged from before',
+  async () => {
+    await withTempProject(
+      async (root) => {
+        await Deno.writeTextFile(
+          join(root, 'counter.tsx'),
+          `export default function Counter() { return 'v1' }\n`,
+        )
+      },
+      async (root) => {
+        // No `onClientModuleChanged` here at all — this is React's own real call shape today
+        // (`render-page-react.tsx` never wires it), and every existing caller of this engin.
+        // Confirms the new hook is purely additive: omitting it never throws and
+        // never changes `transformClientAsset`'s own, unrelated behavior.
+        const engine = await createSpaceDevEngine({ root, isRouteEntry })
+        try {
+          await engine.transformClientAsset('/counter.tsx')
+          await Deno.writeTextFile(
+            join(root, 'counter.tsx'),
+            `export default function Counter() { return 'v2' }\n`,
+          )
+          await new Promise((resolve) => setTimeout(resolve, 300))
+          const asset = await engine.transformClientAsset('/counter.tsx')
+          assert(asset?.code.includes('v2'), asset?.code)
         } finally {
           await engine.close()
         }

@@ -3,9 +3,13 @@ import type { ReactElement } from 'react'
 import { RequestCacheProvider } from './request-cache.tsx'
 import type { RequestCache } from './request-cache.tsx'
 import { INITIAL_STATE_GLOBAL } from './initial-state-global.ts'
+import { stringifyForWire } from './serialization-codec.ts'
 import { buildDevClientScript } from '../dev/dev-client-script.ts'
 import type { DevClientScriptOptions } from '../dev/dev-client-script.ts'
 import { buildFastRefreshPreambleScript } from '../dev/dev-fast-refresh-preamble.ts'
+import type { HeadLinkTag, HeadMetaTag } from '../router/head-descriptor.ts'
+import { linkIdentityKey, metaIdentityKey } from '../router/head-descriptor.ts'
+import type { StylesheetRef } from './css-manifest.ts'
 
 /**
  * Options for {@linkcode renderToResponse}.
@@ -32,19 +36,58 @@ export type RenderToResponseOptions = {
    * Needed to keep a strict `script-src` (no `'unsafe-inline'`) from blocking those scripts; see
    * `cspGuard`'s nonce-generating form, which is what `SpacePageController` sources this from. */
   nonce?: string
-  /** Stylesheet URLs to link into the document — from {@linkcode getCssManifest}, resolved by the
-   * caller (never read from here directly, so a fragment-only Orbit response can omit it: its
-   * stylesheets are already loaded on the page it's swapping into). Rendered as
-   * `<link rel="stylesheet" precedence="space">` elements anywhere in the tree — React 19 hoists
-   * them into `<head>` regardless of where the actual `<head>` element lives (the default shell's
-   * or a root layout's own), the same mechanism already relied on for `<title>`/`<meta>` hoisting. */
-  cssHrefs?: string[]
+  /** GLOBAL-scope stylesheet refs to link into the document — from `resolveCssHrefs()`, resolved by
+   * the caller (never read from here directly, so a fragment-only Orbit response can omit it: its
+   * stylesheets are already loaded on the page it's swapping into). A comet's own CSS is never part
+   * of this list — it's rendered separately, at that comet's own tree position, by `defineComet`
+   * itself (see that module's own doc for why). A plain `string` renders
+   * `<link rel="stylesheet" href precedence="space">`; `{href, media}` additionally sets `media` —
+   * either way, React 19 hoists the element into `<head>` regardless of where the actual `<head>`
+   * lives, the same mechanism already relied on for `<title>`/`<meta>` hoisting. */
+  cssHrefs?: StylesheetRef[]
+  /** This request's own resolved design-token overrides — from `serializeThemeStyle()`
+   * (`theme/theme-style.ts`), already a complete, sanitized `:root{...}` rule string, resolved by
+   * the caller (never read from here directly, so a fragment-only Orbit response can omit it: it's
+   * already in effect on the page it's swapping into, same reasoning as `cssHrefs`/`pwaHead`).
+   * Rendered as a PLAIN `<style nonce={nonce}>` — deliberately NOT given a `precedence` prop the way
+   * `cssHrefs`' `<link>`s are: confirmed empirically that React 19 silently drops a manually-set
+   * `nonce` prop on a `precedence`-managed `<style>` tag (it wants the nonce via
+   * `renderToReadableStream`'s own render option instead, which this function already reserves for
+   * the bootstrap script — mixing the two isn't supported). A plain `<style>` isn't hoisted into
+   * `<head>` the way a `precedence`d one is — it renders at its own literal tree position — but CSS
+   * cascade order for equal-specificity `:root` rules is determined by DOCUMENT order, not by
+   * whether the containing element happens to be inside `<head>` vs `<body>`: rendered AFTER
+   * `cssHrefs` below, this still correctly overrides the static stylesheet's own token declarations
+   * regardless of where in the DOM it physically ends up. */
+  themeStyle?: string
   /** Web App Manifest link + theme-color meta to inject — from `getPwaConfig()`, resolved by the
    * caller (never read from here directly, so a fragment-only Orbit response can omit it: it's
    * page-independent, already in effect from the first full-document load). Rendered as
    * `<link rel="manifest">`/`<meta name="theme-color">` anywhere in the tree, hoisted into `<head>`
    * the same way `cssHrefs` already is. */
-  pwaHead?: { manifestHref: string; themeColor?: string; serviceWorkerHref?: string }
+  pwaHead?: {
+    manifestHref: string
+    themeColor?: string
+    serviceWorkerHref?: string
+  }
+  /** This page's own resolved `<title>` — from `resolveHead()` (`router/head-descriptor.ts`),
+   * already merged across the page's own `SpacePageController.head` and its whole layout chain by
+   * the caller (never read from here directly, same reasoning as `cssHrefs`/`pwaHead`). Rendered as
+   * a real `<title>` element, positioned BEFORE `element` in this function's own tree — hoisted
+   * into `<head>` by React 19 like `cssHrefs`/`pwaHead` already are. Confirmed empirically (a real
+   * `renderToReadableStream` render, not assumed) that this positioning is what makes it the
+   * document's FIRST `<title>` element, and therefore `document.title` per the HTML Living
+   * Standard, even when an author separately renders their own `<title>` deeper in `element` — see
+   * `head-descriptor.ts`'s own doc for the full coexistence contract with hand-authored JSX. */
+  title?: string
+  /** This page's own resolved `<meta>` tags — same resolution/positioning contract as `title`
+   * above. */
+  meta?: HeadMetaTag[]
+  /** This page's own resolved `<link>` tags — same resolution/positioning contract as `title`
+   * above. Never includes `cssHrefs`' own stylesheet links (a separate, deliberately independent
+   * mechanism — see `cssHrefs`'s own doc for why it stays on React's `precedence`-based resource
+   * dedup instead). */
+  link?: HeadLinkTag[]
   /** Dev-only client script options — from `isDevClientEnabled()`/`getPageTree()`, resolved by
    * the caller (never read from here directly, same reasoning as `cssHrefs`/`pwaHead`: a
    * fragment-only Orbit response omits it, since the full document it's swapping into already has
@@ -94,13 +137,57 @@ export async function renderToResponse(
   element: ReactElement,
   options: RenderToResponseOptions = {},
 ): Promise<Response> {
-  const { initialState, bootstrapModules, nonce, cssHrefs, pwaHead, devClient, onError } = options
+  const {
+    initialState,
+    bootstrapModules,
+    nonce,
+    cssHrefs,
+    themeStyle,
+    pwaHead,
+    title,
+    meta,
+    link,
+    devClient,
+    onError,
+  } = options
   const cache: RequestCache = new Map()
   let onErrorCalled = false
 
   const tree = (
     <RequestCacheProvider cache={cache}>
-      {cssHrefs?.map((href) => <link key={href} rel='stylesheet' href={href} precedence='space' />)}
+      {
+        // Rendered FIRST, before anything else this function emits (including `cssHrefs`/`pwaHead`)
+        // and before `element` itself — this exact position is what `head-descriptor.ts`'s own
+        // coexistence contract with hand-authored JSX relies on (confirmed empirically): React 19
+        // hoists tags into `<head>` in ENCOUNTER order, so rendering these first is what makes them
+        // the document's FIRST `<title>`/matching `<meta>`, deterministically, without touching
+        // React's own hoisting or anything an author separately renders elsewhere in `element`.
+      }
+      {title && <title>{title}</title>}
+      {
+        // Keys come from `head-descriptor.ts`'s own identity functions — the SAME ones
+        // `resolveHead` deduplicated these tags by — never a second, independently-computed shape.
+        // See `linkIdentityKey`'s own doc for the real duplicate-key bug that drift caused on every
+        // i18n page (an `x-default` hreflang entry legitimately shares its `href` with the default
+        // language's entry, so a `rel:href` key collided for two tags that are deliberately
+        // distinct). `metaIdentityKey` returns `undefined` for a tag declaring no
+        // `name`/`property`/`httpEquiv` at all — a documented, supported case that `resolveHead`
+        // never dedupes — so those fall back to a positional key rather than several tags sharing
+        // one `undefined`.
+      }
+      {meta?.map((tag, index) => <meta key={metaIdentityKey(tag) ?? `meta-${index}`} {...tag} />)}
+      {link?.map((tag) => <link key={linkIdentityKey(tag)} {...tag} />)}
+      {cssHrefs?.map((ref) => {
+        const href = typeof ref === 'string' ? ref : ref.href
+        const media = typeof ref === 'string' ? undefined : ref.media
+        return <link key={href} rel='stylesheet' href={href} media={media} precedence='space' />
+      })}
+      {
+        // Rendered AFTER cssHrefs, deliberately — see `themeStyle`'s own doc for why document order
+        // (not head/body position) is what makes this correctly override the static stylesheet's
+        // own `:root` token declarations.
+      }
+      {themeStyle && <style nonce={nonce}>{themeStyle}</style>}
       {pwaHead && (
         <>
           <link rel='manifest' href={pwaHead.manifestHref} />
@@ -137,7 +224,9 @@ export async function renderToResponse(
             type='module'
             nonce={nonce}
             // deno-lint-ignore react-no-danger
-            dangerouslySetInnerHTML={{ __html: buildFastRefreshPreambleScript() }}
+            dangerouslySetInnerHTML={{
+              __html: buildFastRefreshPreambleScript(),
+            }}
           />
           {
             // Same `nonce` reasoning as the PWA service-worker registration script above — an
@@ -147,7 +236,9 @@ export async function renderToResponse(
           <script
             nonce={nonce}
             // deno-lint-ignore react-no-danger
-            dangerouslySetInnerHTML={{ __html: buildDevClientScript(devClient) }}
+            dangerouslySetInnerHTML={{
+              __html: buildDevClientScript(devClient),
+            }}
           />
         </>
       )}
@@ -155,15 +246,35 @@ export async function renderToResponse(
     </RequestCacheProvider>
   )
 
+  // Computed BEFORE `renderToReadableStream` is ever called, in its own try/catch — a
+  // `JSON.stringify` failure (a circular `initialState`, a `BigInt` anywhere inside it) is a
+  // serialization failure, not a render failure, but this function's own documented contract
+  // ("always resolves, never throws") doesn't distinguish the two: either one must still resolve
+  // gracefully with a reported `onError` and a `500`. Failing here, before the render even starts,
+  // also means a bad `initialState` never wastes a real render pass — same fail-fast behavior
+  // `renderToResponse` (Preact)'s own copy of this fix uses, for the same externally observable
+  // contract on both renderers. See `typings/comet.ts`'s own module doc for the full serialization
+  // contract this participates in (supported types, exact behavior for every unsupported one).
+  let bootstrapScriptContent: string | undefined
+  if (initialState !== undefined) {
+    try {
+      // Encoded only when the app opted in — with the codec off this is the same string it has
+      // always been. `readInitialState` decodes on the client; the script itself stays a bare
+      // assignment either way. See `serialization-codec.ts`.
+      bootstrapScriptContent = `self.${INITIAL_STATE_GLOBAL}=${stringifyForWire(initialState)}`
+    } catch (error) {
+      onError?.(error)
+      return new Response(null, { status: 500 })
+    }
+  }
+
   try {
     const stream = await renderToReadableStream(
       tree,
       {
         bootstrapModules,
         nonce,
-        bootstrapScriptContent: initialState === undefined
-          ? undefined
-          : `self.${INITIAL_STATE_GLOBAL}=${JSON.stringify(initialState)}`,
+        bootstrapScriptContent,
         onError(error) {
           onErrorCalled = true
           onError?.(error)

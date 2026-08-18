@@ -1,3 +1,6 @@
+// Installs a renderer, exactly as a real app does: `@zanix/space` itself ships none, so a
+// test that renders must import the entry point it is testing against.
+import '../../../../mod-react.ts'
 import { assert, assertEquals } from '@std/assert'
 import { SpacePageController } from 'modules/router/mod.ts'
 import { mockHandlerContext } from 'modules/testing/mod.ts'
@@ -37,7 +40,9 @@ Deno.test(
       public override component = View
     }
 
-    const response = await new RedirectPage(mockHandlerContext()).handleGet(mockHandlerContext())
+    const response = await new RedirectPage(mockHandlerContext()).handleGet(
+      mockHandlerContext(),
+    )
 
     assertEquals(response.status, 307)
     await response.body?.cancel()
@@ -48,7 +53,10 @@ Deno.test(
   'SpacePageController.handleGet: a redirect condition that returns false falls through to a normal render',
   async () => {
     class ConditionalRedirectPage extends SpacePageController {
-      public static override redirect = { to: '/target', condition: () => false }
+      public static override redirect = {
+        to: '/target',
+        condition: () => false,
+      }
       public override component = View
       public override loader = () => ({ value: 'rendered' })
     }
@@ -90,13 +98,17 @@ Deno.test(
       public override loader = () => ({ value: 'cached' })
     }
 
-    const first = await new CachedPage(mockHandlerContext()).handleGet(mockHandlerContext())
+    const first = await new CachedPage(mockHandlerContext()).handleGet(
+      mockHandlerContext(),
+    )
     const etag = first.headers.get('etag')
     assert(etag)
     await first.body?.cancel()
 
     const secondCtx = mockHandlerContext({
-      req: new Request('http://localhost/', { headers: { 'if-none-match': etag } }),
+      req: new Request('http://localhost/', {
+        headers: { 'if-none-match': etag },
+      }),
     })
     const second = await new CachedPage(secondCtx).handleGet(secondCtx)
 
@@ -116,7 +128,9 @@ Deno.test(
     }
 
     const ctx = mockHandlerContext({
-      req: new Request('http://localhost/', { headers: { 'if-none-match': '"stale"' } }),
+      req: new Request('http://localhost/', {
+        headers: { 'if-none-match': '"stale"' },
+      }),
     })
     const response = await new CachedPage(ctx).handleGet(ctx)
 

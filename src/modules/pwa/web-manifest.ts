@@ -35,7 +35,9 @@ export function buildWebManifest(config: PwaConfig): Record<string, unknown> {
   }
 
   if (config.themeColor) manifest['theme_color'] = config.themeColor
-  if (config.backgroundColor) manifest['background_color'] = config.backgroundColor
+  if (config.backgroundColor) {
+    manifest['background_color'] = config.backgroundColor
+  }
   if (config.shortcuts?.length) {
     manifest.shortcuts = config.shortcuts.map((shortcut) => ({
       name: shortcut.name,

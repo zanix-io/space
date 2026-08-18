@@ -1,10 +1,12 @@
 /**
  * Manifest types for a `@zanix/space` frontend app — `SpaceAppConfig` is the surface an author
  * writes when calling `defineSpaceApp()`. It is intentionally scoped to what's implemented so far:
- * app identity, `@zanix/app` pass-through fields, routing/headers/CSS/PWA fields, and the
- * request-render lifecycle hook. Fields for features not built yet (population/personalization,
- * i18n) are added when those are implemented — never stubbed ahead of time with a placeholder
- * type, since that would advertise API surface nothing implements yet.
+ * app identity, `@zanix/app` pass-through fields, routing/headers/CSS/PWA/`messagesDir` fields, and
+ * the request-render lifecycle hook. Fields for features not built yet are added when those are
+ * implemented — never stubbed ahead of time with a placeholder type, since that would advertise API
+ * surface nothing implements yet. Population/language IDENTIFICATION isn't a manifest field at all
+ * — `populationGuard`/`langPreHandler`/`langGuard` (`modules/middleware`) are opted into per-page or
+ * via `defineMiddleware()`, not declared here.
  *
  * Tailwind/CSS-Modules/vanilla-extract *processing* is still a build-time Vite concern
  * (`cssPlugin`, declared once wherever `vite.config.ts`-equivalent composition happens) — this
@@ -16,7 +18,12 @@
  */
 import type { AppSetupContext, ConfigAccessor, RuntimeContext } from '@zanix/app'
 import type { PageHeaderOptions } from 'modules/router/space-page-controller.tsx'
+import type { SitemapSource } from 'modules/seo/sitemap.ts'
+import type { SpaceRobotsConfig } from 'modules/seo/robots.ts'
+import type { ThemeResolver } from 'modules/theme/theme-registry.ts'
+import type { StylesheetRef } from 'modules/render/css-manifest.ts'
 import type { PwaConfig } from './pwa.ts'
+import type { ValidationConfig } from 'modules/validation/engine.ts'
 
 // Re-exported (not just imported) because `SpaceAppConfig.setup` below references
 // `AppSetupContext`, which extends `RuntimeContext`, which in turn holds a `ConfigAccessor` —
@@ -47,16 +54,123 @@ export interface SpaceAppConfig {
   /** Forwarded as-is to `defineZanixApp({ dependencies })` — declares which resource slots this
    * app needs, never a concrete resource name (that's the host's `uses` binding). */
   dependencies?: Record<string, { type: string; required?: boolean }>
-  /** Root directory `loadRoutes()` scans for `page.tsx` files, resolved automatically as part of
-   * this app's own `setup(ctx)` — an author never calls `loadRoutes()` by hand. Defaults to
-   * `'./routes'`; a directory that doesn't exist yet is treated as zero pages, not an error, so a
-   * brand new app with no `routes/` folder still starts. */
-  routesDir?: string
+  /** Root directory (or directories) `loadRoutes()` scans for `page.tsx` files, resolved
+   * automatically as part of this app's own `setup(ctx)` — an author never calls `loadRoutes()` by
+   * hand. Defaults to `'./routes'`; a directory that doesn't exist yet is treated as zero pages, not
+   * an error, so a brand new app with no `routes/` folder still starts.
+   *
+   * An array (mirroring `@zanix/core`'s own `rootDir: string[]`) lets a HOST compose a base app's
+   * pages with its own override directory without forking either tree — e.g.
+   * `['./overrides', './node_modules/@acme/shop-app/routes']` overrides only the pages it declares,
+   * falling back to the base app's own for everything else. Two distinct resolution rules apply, in
+   * this order of `routesDir`:
+   * - **Pages**: first-match-wins by route path — a page found in an earlier directory shadows the
+   *   same route in a later one entirely; the later directory's own version is never even imported.
+   * - **`layout.tsx`/`not-found.tsx` directly at a directory's root**: whole-app singletons, resolved
+   *   ONCE — the first directory that declares either file wins, app-wide, regardless of which
+   *   directory ends up serving any given page.
+   *
+   * A page's own nested `layout.tsx`/`error.tsx`/`loading.tsx` chain (its ancestors, not the app
+   * root) is always resolved entirely within the SAME directory that provided that page — never
+   * completed by reaching into a different `routesDir` entry for a missing ancestor. This is
+   * deliberate: assembling a page from one directory's file and a layout from another's would
+   * produce a "Frankenstein page" whose pieces were never designed to compose together. */
+  routesDir?: string | string[]
+  /**
+   * Root directory (or directories) of static assets (images, fonts) this app serves at
+   * `/assets/<relative-path>` — e.g. `assetsDir: './assets'` with a file at
+   * `./assets/logo.svg` serves it at `/assets/logo.svg`. Resolved once, automatically, as part of
+   * this app's own `setup(ctx)` (same timing as `routesDir`) — an author never scans or registers
+   * this by hand.
+   *
+   * **Omitted entirely by default — no directory is scanned, no route is registered, at zero
+   * cost.** Unlike `routesDir` (every Space app has pages, so it defaults to `'./routes'`), not
+   * every app has extra static assets beyond what Comets/`globalCss` already cover — declaring
+   * `assetsDir` is an explicit opt-in, so an app that never declares it never changes behavior.
+   *
+   * An array (mirroring `routesDir`'s own precedent) lets a HOST compose a base app's own assets
+   * with its own override directory without forking either tree — e.g.
+   * `['./assets-override', './node_modules/@acme/shop-app/assets']` overrides only the files it
+   * declares, falling back to the base app's own for everything else. Resolution is first-match-wins
+   * by relative path, evaluated independently per file — identical in spirit to `routesDir`'s own
+   * page resolution, simpler in practice since an asset is a single, self-contained file with no
+   * ancestor chain to keep from crossing directories.
+   *
+   * **An asset is only overridable if it's referenced by this stable public path** (a string, e.g.
+   * `/assets/logo.svg`, or a future `resolveAssetHref('logo.svg')`) — never via a bare
+   * `import logo from './logo.svg'` inside a component, which resolves through Vite's own module
+   * graph, entirely independent of `assetsDir`'s own resolution. Deliberately out of scope: making a
+   * module-imported asset host-overridable would require Vite-level module aliasing, a different,
+   * bigger mechanism not built here.
+   *
+   * Also deliberately out of scope: PWA icons/favicon, which stay under `pwaPlugin`/`registerPwa` —
+   * a separate, already-working pipeline for site identity, not general component-referenced
+   * content.
+   *
+   * Served via a single route (`@zanix/server`'s own trailing catch-all, `Get('/assets/:path*')`)
+   * over the already-resolved `Map` — never by concatenating the request's own path against the
+   * filesystem directly, so a path that was never actually resolved (including any attempted
+   * traversal) simply isn't a key in that `Map` and 404s like any other unmatched route. The exact
+   * same resolution/serving code runs in both `znx space dev` and production — no separate
+   * build-time-only path to keep in sync. The catch-all preserves the request's own casing (see
+   * `@zanix/server`'s own CHANGELOG), so `/assets/Logo.svg` and `/assets/logo.svg` resolve to
+   * different `Map` entries if both genuinely exist on disk, exactly as a real filesystem would.
+   */
+  assetsDir?: string | string[]
+  /**
+   * Root directory (or directories) of i18n message catalogs this app resolves via `loadMessages()`
+   * — e.g. `messagesDir: './messages'` with `./messages/en/index.json` resolves `loadMessages({
+   * lang: 'en' })`. Stored as-is, EAGERLY (same timing as `assetsDir`'s own path, NOT inside
+   * `setup(ctx)` — so `zanix space build`, which never calls `activateApps()`, can still read it
+   * back via `getMessagesDir()`); the actual per-`(lang, population)` file reads are LAZY, done by
+   * `loadMessages()` on first access — unlike `assetsDir`, which eagerly scans into a `Map` upfront
+   * (worth doing there because it must serve arbitrary request paths; a message catalog has a
+   * small, bounded key space instead).
+   *
+   * **Omitted entirely by default — no directory is read, at zero cost**, same reasoning as
+   * `assetsDir`: not every app needs i18n content.
+   *
+   * An array (mirroring `routesDir`/`assetsDir`'s own precedent) lets a HOST compose a base app's
+   * own catalogs with its own override directory without forking either tree — first-match-wins,
+   * resolved independently for the base file and the population-override file (so a base catalog
+   * resolved from one directory and an override resolved from a different one is fine, same
+   * independent-per-relative-path philosophy `assetsDir` already establishes).
+   *
+   * Convention: `{messagesDir}/{lang}/index.json` for the base catalog, and
+   * `{messagesDir}/{lang}/populations/{population}.json` for a population override (only the keys
+   * that differ from the base need to be present) — see `loadMessages()`'s own doc for the full
+   * resolution/merge/caching contract.
+   */
+  messagesDir?: string | string[]
   /**
    * This app's own global stylesheet source path(s) — e.g.
-   * `['./styles/reset.css', './styles/app.css']`, resolved automatically as part of this app's
-   * own `setup(ctx)`, same timing as `pwa`. Order matters, same as `getCssManifest`'s own shape
-   * (later entries can override earlier ones via normal CSS cascade).
+   * `['./styles/reset.css', './styles/app.css']`, resolved automatically, eagerly, as part of THIS
+   * `defineSpaceApp()` call itself (same timing as `pwa`/`headers` — never deferred to `setup(ctx)`).
+   * Order matters, same as `getCssManifest`'s own shape (later entries can override earlier ones via
+   * normal CSS cascade) — preserved exactly through the build (`css-manifest.json`'s `global` entries
+   * are written in this same declared order, never re-sorted).
+   *
+   * A plain `string` is the original, unchanged contract. An entry can also be
+   * `{href, media}` (the same `StylesheetRef` shape `getCssManifest()`'s own `global`/`comets`
+   * scopes use) to give that ONE stylesheet a `media` attribute — e.g.
+   * `{href: './styles/mobile.css', media: '(max-width: 599px)'}` renders
+   * `<link rel="stylesheet" href="..." media="(max-width: 599px)">`. `media` is opaque, author-
+   * supplied data: Space never parses it, validates it, or ships any breakpoint presets/names —
+   * an invalid media query is simply ignored by the browser, same as if hand-written in HTML.
+   * Deliberately only affects render-blocking/applicability, never bytes transferred — the browser
+   * still downloads a non-matching stylesheet, just without blocking first render on it.
+   *
+   * **Composes across apps, automatically — a HOST never needs to know a base app's own paths.**
+   * Every `defineSpaceApp({ globalCss })` call APPENDS to a single, process-wide list (via
+   * `addGlobalCssPaths`) rather than replacing it — so if a base app's own `defineSpaceApp()` call
+   * executes first (e.g. its module is activated before a host's own customization app), and the
+   * host's own `defineSpaceApp({ globalCss: ['./custom.css'] })` executes after, `getGlobalCssPaths()`
+   * resolves to `['./base.css', './custom.css']` — the base app's own declaration preserved, the
+   * host's own appended after it, letting normal cascade/specificity decide what actually overrides
+   * what. Neither app references the other's file paths; composition is purely a function of WHEN
+   * each `defineSpaceApp()` call runs, same "declaration order wins" principle `activateApps()`'s own
+   * `onStart` sequencing already follows — never a separately-declared priority. An app that omits
+   * `globalCss` entirely contributes nothing, leaving whatever another app already declared untouched.
    *
    * This is the **single declared source of truth** behind every full-document response's
    * `<link rel="stylesheet">` tags, for BOTH dev and production — never two independent
@@ -64,20 +178,22 @@ export interface SpaceAppConfig {
    * - **In `znx space dev`**: each path resolves directly through `SpaceDevEngine`'s
    *   `transformClientAsset`, with zero build step — no manifest file, no hashing, involved at
    *   all.
-   * - **In production**: `cssPlugin`'s own `css-manifest.json` is meant to be exactly these same
-   *   files, translated to their real, hashed build-output URLs — never an independently
-   *   "discovered" list. **Known, honest gap, not yet wired**: the real client build
-   *   (`rollupOptions.input`) doesn't automatically include `globalCss`'s files as build inputs
-   *   yet — until that's connected, a production build needs its own `vite.config.ts` to declare
-   *   these same paths as real Rollup inputs for `cssPlugin`'s manifest to pick them up. Tracked
-   *   as follow-up work, not silently assumed to already work end-to-end.
+   * - **In production**: `cssPlugin`'s own `css-manifest.json` is exactly these same files,
+   *   translated to their real, hashed build-output URLs — never an independently "discovered"
+   *   list. `buildSpaceClient({ globalCss })` (`modules/bundler/build-client.ts`) is what wires
+   *   each path as a real `rollupOptions.input` entry; its own `globalCss` option DEFAULTS to
+   *   `getGlobalCssPaths()` — the same already-composed (base + host) list this field populates —
+   *   so a build script that imports the app's `space.app.ts` before calling `buildSpaceClient()`
+   *   needs no separate `globalCss` declaration of its own. A build script that never imports
+   *   `space.app.ts` (or wants to build against a different list on purpose) still can, by passing
+   *   `globalCss` explicitly to `buildSpaceClient()`.
    *
    * Never used for a Comet's own CSS (`import './x.module.css'` inside a `.tsx` file) — that
    * case resolves on its own, transitively, through the Comet's own build chunk (production) or
    * Vite's client runtime (`/@vite/client`, dev) — see `cometPlugin`'s own doc. `globalCss` is
    * specifically for CSS a page's *initial* HTML needs before any component-level code runs.
    */
-  globalCss?: string[]
+  globalCss?: StylesheetRef[]
   /**
    * App-wide default for every page's `headers` (CSP + security headers) — set once here instead
    * of repeating it on every page's own `Page({ headers })`/`static headers`. A specific page's own
@@ -89,6 +205,56 @@ export interface SpaceAppConfig {
    */
   headers?: PageHeaderOptions | false
   /**
+   * Runtime, per-request design-token personalization — `resolve(ctx)` receives this request's own
+   * `population`/`lang`/`request` and returns a `Record<string, string>` of `--space-*` custom
+   * property overrides (or `undefined`/`{}` for "no override, the static `globalCss` tokens apply
+   * as-is") — injected as a nonced `<style>` block on every full-document response. App-wide only in
+   * this first version — no per-page override. See `docs/theming.md` for the full static-token
+   * convention this layers on top of, and `theme/theme-registry.ts`'s own doc for the exact
+   * precedence (a guard-registered CSP always still applies to whatever this resolves — see
+   * `PageOptions.headers`'s own doc — and a custom page/app CSP that replaces the framework's own
+   * default must grant its own `style-src` + nonce for a resolved override to actually apply, same
+   * disclosure the nonce-based `script-src` default already requires).
+   *
+   * @example
+   * ```ts
+   * defineSpaceApp({
+   *   name: 'storefront',
+   *   theme: {
+   *     resolve: ({ population }) =>
+   *       population === 'tenant-b' ? { '--space-color-primary': '#16a34a' } : undefined,
+   *   },
+   * })
+   * ```
+   */
+  theme?: { resolve: ThemeResolver }
+
+  /**
+   * Opts this app into carrying `Date`, `Map` and `Set` across the server → client boundary.
+   *
+   * Space's data channel — `renderToResponse`'s own `initialState` and a Comet's own props — is
+   * plain JSON (see `initial-state-global.ts` for the full contract). That contract documents
+   * three values it cannot carry faithfully: a `Date` arrives as an ISO string, and a `Map` or
+   * `Set` arrives as `{}` with every entry lost. Enabling this makes those three round-trip as
+   * real instances.
+   *
+   * **App-wide, deliberately, and off by default.** A payload written by one half of an app and
+   * read by the other has to agree on the format, which a per-page or per-Comet flag could not
+   * guarantee. With it off, nothing changes at all: no envelope, no markers, not one extra byte,
+   * and behaviour identical to before this option existed.
+   *
+   * Scoped to exactly those three types, and there is no extension point on purpose — a general
+   * richer-than-JSON wire format is explicitly not something this package builds (see this
+   * package's own architecture decision). `BigInt`, functions, class instances and circular
+   * references behave exactly as the contract already documents, enabled or not.
+   *
+   * @example
+   * ```ts
+   * defineSpaceApp({ name: 'storefront', serialization: { extendedTypes: true } })
+   * ```
+   */
+  serialization?: { extendedTypes?: boolean }
+  /**
    * PWA support — the Web App Manifest, icon routes, and (when `swPath` is set) a generated
    * service worker, all registered as part of this app's own `setup(ctx)`, same timing as
    * `loadRoutes()`. Unlike CSS's build-only config, this genuinely drives runtime behavior (the
@@ -97,7 +263,70 @@ export interface SpaceAppConfig {
    * that split isn't the same as CSS's. `false`/omit for no PWA at all.
    */
   pwa?: PwaConfig | false
+  /**
+   * `sitemap.xml`, registered as a real route (`GET /sitemap.xml`), not a build-time static file —
+   * a genuine departure from the legacy component this replaces (a Node CLI generator writing a
+   * static file to disk, see `modules/seo/sitemap.ts`'s own doc), chosen specifically so this stays
+   * SSR-native/edge-friendly, no build step required. A plain array is resolved once, at zero
+   * per-request cost; a function runs fresh on EVERY request instead, so it always reflects
+   * whatever's actually live (a product catalog, a CMS) — an app that wants its own caching owns
+   * that itself, this package doesn't impose one. **Omitted entirely by default — no route
+   * registered, at zero cost**, same convention as `assetsDir`/`messagesDir`. See
+   * `buildSitemapXml`'s own doc (`modules/seo/sitemap.ts`) for the exact XML contract and the real
+   * bugs this fixes over the legacy version (unescaped XML, non-standard tags mixed into the
+   * `urlset`, broken per-language cross-referencing).
+   */
+  sitemap?: SitemapSource
+  /**
+   * `robots.txt`, registered as a real route (`GET /robots.txt`) — genuinely new, not a port: the
+   * legacy component this replaces had no `robots.txt` mechanism at all (confirmed by reading its
+   * source; every "robots" hit there was its unrelated per-page `<meta name="robots">` tag
+   * convention). A raw `string` is served byte-for-byte, no processing; a structured
+   * `{ rules, includeSitemap? }` config auto-appends a `Sitemap:` line when `sitemap` (above) is
+   * also configured. **Omitted entirely by default — no route registered, at zero cost.** See
+   * `buildRobotsTxt`'s own doc (`modules/seo/robots.ts`).
+   */
+  robots?: SpaceRobotsConfig
   /** Escape hatch for registration that doesn't fit a declarative field yet — forwarded to
    * `defineZanixApp({ setup })`, run AFTER this app's routes have already loaded. */
   setup?: (ctx: AppSetupContext) => void | Promise<void>
+  /**
+   * Which renderer this app's pages/Comets are authored against. Defaults to `'react'` — omitting
+   * this field, or passing `'react'` explicitly, are identical in every respect to this package's
+   * behavior before this option existed.
+   *
+   * `'preact'` selects Preact **core** (never `preact/compat`) for the whole app, at both the
+   * runtime layer (this field) and the build layer (`spacePlugin({ renderer: 'preact' })`, set
+   * separately in `vite.config.ts` — same two-places-by-design split `globalCss`'s own doc already
+   * has for a build-vs-runtime concern). It is a deliberately smaller, specialized renderer, not a
+   * drop-in replacement for `'react'` — a page using `loading.tsx` or `useRequestCache` fails
+   * explicitly under it (at route-registration time for the former, at first call for the latter)
+   * rather than silently degrading; see this package's own decision spike for the full contract.
+   */
+  renderer?: 'react' | 'preact'
+  /**
+   * Document validation policy for this project — which rules participate, at what severity, and
+   * whether warnings block a build.
+   *
+   * Omitted runs the framework's own defaults. `false` disables document validation entirely, for a
+   * project that has decided this is not for them.
+   *
+   * The three axes are independent by design and it is worth knowing which one to reach for:
+   * `strict` is enforcement policy (no active warning stays a warning), `rules` handles activation
+   * and per-rule severity, and `exempt` excludes routes that are not documents. See
+   * `ValidationConfig`'s own doc for the exact precedence.
+   *
+   * @example
+   * ```ts
+   * export default defineSpaceApp({
+   *   name: 'storefront',
+   *   validation: {
+   *     strict: true,                          // CI: no active warning stays a warning
+   *     rules: { SEO002: true, A11Y007: 'info' }, // opt in, at catalog severity / explicitly
+   *     exempt: ['preview/**'],
+   *   },
+   * })
+   * ```
+   */
+  validation?: ValidationConfig | false
 }

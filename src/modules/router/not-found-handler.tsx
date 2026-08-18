@@ -1,13 +1,23 @@
 import { HttpError } from '@zanix/errors'
 import { getRequestFromError } from '@zanix/server'
-import { renderToResponse } from '../render/render-to-response.tsx'
-import { resolveCssHrefs } from '../render/css-manifest.ts'
-import { resolvePwaHead } from '../pwa/pwa-registry.ts'
-import { isDevClientEnabled } from '../dev/dev-client-registry.ts'
-import { applyDocumentShell } from './document-shell.tsx'
-import { getNotFoundComponent, getRootLayout } from './app-shell-registry.ts'
-import { DefaultNotFoundView } from './default-not-found-view.tsx'
-import { ORBIT_FRAGMENT_HEADER, ORBIT_OUTLET_ATTR } from './orbit-protocol.ts'
+import { getActiveRenderer } from './active-renderer.ts'
+import { getNotFoundComponent, getNotFoundHead, getRootLayout } from './app-shell-registry.ts'
+import { DEFAULT_NOT_FOUND_HEAD, getNotFoundRenderer } from './not-found-renderer-registry.ts'
+import { ORBIT_FRAGMENT_HEADER } from './orbit-protocol.ts'
+
+// Renderer-agnostic. This file used to import React's own `renderToResponse`/`applyDocumentShell`
+// directly and throw outright under `--renderer=preact`, which meant a Preact app had no not-found
+// page at all — it fell through to `@zanix/server`'s own JSON error response, and only discovered
+// that on the first real 404 in production. It now resolves the not-found component, the root
+// layout and the head, and hands all three to whichever `NotFoundRenderer` is registered
+// (`not-found-renderer-registry.ts`) — the same indirection `page-renderer-registry.ts` already
+// uses for pages, and the reason no renderer-specific type appears in this file any more.
+//
+// A 404 is an ordinary document, built from an ordinary `DocumentModel`. Nothing about its
+// `<title>` or its headings is special-cased here or anywhere else in this package: the head comes
+// from the app's own `not-found.tsx` `head` export when it declares one, and from
+// `DEFAULT_NOT_FOUND_HEAD` when it does not, resolved through the same `resolveHead` every page
+// uses.
 
 /** The exact shape Deno's own `Deno.serve()` expects for `ServeOptions.onError` — `@zanix/server`'s
  * `ServerOptions<K>['onError']` inherits this unchanged, so this is what `bootstrapServers`'s own
@@ -61,33 +71,47 @@ export type OnErrorHandler = NonNullable<Deno.ServeOptions['onError']>
  * ```
  */
 export function createNotFoundHandler(): OnErrorHandler {
-  const handleNotFound = async (error: unknown): Promise<Response | undefined> => {
-    if (!(error instanceof HttpError) || error.status.code !== 'NOT_FOUND') return undefined
+  const handleNotFound = async (
+    error: unknown,
+  ): Promise<Response | undefined> => {
+    if (!(error instanceof HttpError) || error.status.code !== 'NOT_FOUND') {
+      return undefined
+    }
 
-    const NotFound = getNotFoundComponent() ?? DefaultNotFoundView
     const request = getRequestFromError(error)
     const fragmentOnly = request?.headers.has(ORBIT_FRAGMENT_HEADER) ?? false
 
-    const outlet = (
-      <div style={{ display: 'contents' }} {...{ [ORBIT_OUTLET_ATTR]: '' }}>
-        <NotFound />
-      </div>
-    )
-    const element = fragmentOnly ? outlet : applyDocumentShell(getRootLayout(), outlet)
-    const response = await renderToResponse(
-      element,
-      fragmentOnly ? {} : {
-        cssHrefs: resolveCssHrefs(),
-        pwaHead: resolvePwaHead(),
-        // No specific page/route identity for a not-found response — `routeFilePath` omitted
-        // on purpose, so the dev client (when enabled) reloads on ANY SSR change, not just one
-        // matching a route that doesn't exist here in the first place. See
-        // `DevClientScriptOptions.routeFilePath`'s own doc.
-        devClient: isDevClientEnabled() ? {} : undefined,
-      },
-    )
+    // Resolved here, renderer-agnostically, and handed to whichever renderer is active. The
+    // built-in fallback view is selected per renderer for the same reason every other component in
+    // this package is: a React component and a Preact one are not interchangeable values.
+    let NotFound = getNotFoundComponent()
+    if (NotFound === undefined) {
+      NotFound = getActiveRenderer() === 'preact'
+        ? (await import('./default-not-found-view-preact.ts')).DefaultNotFoundView
+        : (await import('./default-not-found-view.tsx')).DefaultNotFoundView
+    }
 
-    return new Response(response.body, { status: 404, headers: response.headers })
+    const response = await getNotFoundRenderer()({
+      NotFound,
+      RootLayout: getRootLayout(),
+      // The app's own `not-found.tsx` `head` export when it declares one, this package's default
+      // otherwise — resolved through the same `resolveHead` a page's head goes through, with no
+      // not-found-specific mechanism anywhere.
+      head: getNotFoundHead() ?? DEFAULT_NOT_FOUND_HEAD,
+      fragmentOnly,
+    })
+
+    const headers = new Headers(response.headers)
+    // Same reasoning as `SpacePageController.handleGet`'s own unconditional `Vary` — this
+    // response's body shape depends on `ORBIT_FRAGMENT_HEADER` (full document vs. bare outlet
+    // fragment) whenever `attachRequestToErrors` is on, so a shared HTTP cache must be told, not
+    // just Orbit's own client runtime (which never relies on caching to get this right).
+    headers.set('vary', ORBIT_FRAGMENT_HEADER)
+
+    return new Response(response.body, {
+      status: 404,
+      headers,
+    })
   }
 
   return handleNotFound as OnErrorHandler

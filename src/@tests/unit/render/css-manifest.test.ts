@@ -1,11 +1,17 @@
-import { assertEquals } from '@std/assert'
+import { assertEquals, assertRejects } from '@std/assert'
+import { getTemporaryFolder } from '@zanix/helpers'
 import {
+  addGlobalCssPaths,
+  getCssManifest,
   getGlobalCssPaths,
+  loadCssManifest,
   resolveCssHrefs,
   setCssManifest,
   setGlobalCssPaths,
 } from 'modules/render/css-manifest.ts'
 import { setDevClientEnabled } from 'modules/dev/dev-client-registry.ts'
+
+const TMP_ROOT = getTemporaryFolder(import.meta.url)
 
 function reset() {
   setCssManifest(undefined)
@@ -17,7 +23,7 @@ Deno.test(
   'resolveCssHrefs: outside dev, returns the production manifest unchanged',
   () => {
     try {
-      setCssManifest(['/assets/app-abc123.css'])
+      setCssManifest({ global: ['/assets/app-abc123.css'] })
       assertEquals(resolveCssHrefs(), ['/assets/app-abc123.css'])
     } finally {
       reset()
@@ -29,7 +35,7 @@ Deno.test(
   'resolveCssHrefs: in dev, resolves globalCss paths instead of the production manifest',
   () => {
     try {
-      setCssManifest(['/assets/app-abc123.css']) // present but must be ignored in dev
+      setCssManifest({ global: ['/assets/app-abc123.css'] }) // present but must be ignored in dev
       setGlobalCssPaths(['./styles/app.css'])
       setDevClientEnabled(true)
       assertEquals(resolveCssHrefs(), ['/styles/app.css?direct'])
@@ -71,3 +77,131 @@ Deno.test('getGlobalCssPaths: reflects whatever setGlobalCssPaths last set', () 
     reset()
   }
 })
+
+Deno.test(
+  "addGlobalCssPaths: a base app's paths, contributed first, are preserved when a host app " +
+    "appends its own afterward — neither needs to know the other's paths",
+  () => {
+    try {
+      addGlobalCssPaths(['./base.css']) // the base app's own defineSpaceApp() call
+      addGlobalCssPaths(['./custom.css']) // the host's own defineSpaceApp() call, activated after
+      assertEquals(getGlobalCssPaths(), ['./base.css', './custom.css'])
+    } finally {
+      reset()
+    }
+  },
+)
+
+Deno.test('addGlobalCssPaths: a single call behaves exactly like setGlobalCssPaths would', () => {
+  try {
+    addGlobalCssPaths(['./only.css'])
+    assertEquals(getGlobalCssPaths(), ['./only.css'])
+  } finally {
+    reset()
+  }
+})
+
+Deno.test({
+  name: 'addGlobalCssPaths: an empty array contributes nothing, leaving prior paths untouched',
+  fn: () => {
+    try {
+      addGlobalCssPaths(['./base.css'])
+      addGlobalCssPaths([])
+      assertEquals(getGlobalCssPaths(), ['./base.css'])
+    } finally {
+      reset()
+    }
+  },
+})
+
+Deno.test(
+  "setGlobalCssPaths: still a hard replace/reset, unaffected by addGlobalCssPaths's own accumulation",
+  () => {
+    try {
+      addGlobalCssPaths(['./base.css'])
+      addGlobalCssPaths(['./custom.css'])
+      setGlobalCssPaths(['./only-this.css'])
+      assertEquals(getGlobalCssPaths(), ['./only-this.css'])
+      setGlobalCssPaths(undefined)
+      assertEquals(getGlobalCssPaths(), undefined)
+    } finally {
+      reset()
+    }
+  },
+)
+
+Deno.test(
+  'resolveCssHrefs: in dev, resolves the COMPOSED globalCss (base + host) in contribution order',
+  () => {
+    try {
+      addGlobalCssPaths(['./base.css'])
+      addGlobalCssPaths(['./custom.css'])
+      setDevClientEnabled(true)
+      assertEquals(resolveCssHrefs(), [
+        '/base.css?direct',
+        '/custom.css?direct',
+      ])
+    } finally {
+      reset()
+    }
+  },
+)
+
+Deno.test('getCssManifest: reflects whatever setCssManifest last set', () => {
+  try {
+    assertEquals(getCssManifest(), undefined)
+    setCssManifest({ global: ['/assets/app-abc123.css'] })
+    assertEquals(getCssManifest(), { global: ['/assets/app-abc123.css'] })
+  } finally {
+    reset()
+  }
+})
+
+Deno.test(
+  'loadCssManifest: a valid manifest file is read and parsed, reflected by getCssManifest',
+  async () => {
+    const dir = await Deno.makeTempDir({ dir: TMP_ROOT })
+    const path = `${dir}/css-manifest.json`
+    try {
+      const manifest = { global: ['/assets/app-abc123.css'], pages: { '/page.tsx': [] } }
+      await Deno.writeTextFile(path, JSON.stringify(manifest))
+      await loadCssManifest(path)
+      assertEquals(getCssManifest(), manifest)
+    } finally {
+      await Deno.remove(dir, { recursive: true })
+      reset()
+    }
+  },
+)
+
+Deno.test(
+  'loadCssManifest: a genuinely missing file resolves silently, without clobbering the ' +
+    'previously loaded manifest',
+  async () => {
+    const dir = await Deno.makeTempDir({ dir: TMP_ROOT })
+    const path = `${dir}/does-not-exist.json`
+    try {
+      setCssManifest({ global: ['/assets/already-loaded.css'] })
+      await loadCssManifest(path)
+      assertEquals(getCssManifest(), { global: ['/assets/already-loaded.css'] })
+    } finally {
+      await Deno.remove(dir, { recursive: true })
+      reset()
+    }
+  },
+)
+
+Deno.test(
+  'loadCssManifest: a file that exists but holds invalid JSON throws — not the NotFound branch',
+  async () => {
+    const dir = await Deno.makeTempDir({ dir: TMP_ROOT })
+    const path = `${dir}/css-manifest.json`
+    try {
+      await Deno.writeTextFile(path, '{ not valid json')
+      await assertRejects(() => loadCssManifest(path), SyntaxError)
+    } finally {
+      await Deno.remove(dir, { recursive: true })
+      reset()
+    }
+  },
+)

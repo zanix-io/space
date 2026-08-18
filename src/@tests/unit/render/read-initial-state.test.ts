@@ -10,6 +10,8 @@ Deno.test('readInitialState: returns undefined when nothing was set', () => {
 
 Deno.test('readInitialState: returns whatever value the global carries', () => {
   globalRecord.__ZANIX_SPACE_STATE__ = { user: { name: 'Ana' } }
-  assertEquals(readInitialState<{ user: { name: string } }>(), { user: { name: 'Ana' } })
+  assertEquals(readInitialState<{ user: { name: string } }>(), {
+    user: { name: 'Ana' },
+  })
   delete globalRecord.__ZANIX_SPACE_STATE__
 })

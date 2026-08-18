@@ -102,7 +102,10 @@ interface CjsBundle {
  * one synchronous CJS factory per file. Never recurses into a bare specifier's own subtree — that
  * stays external, resolved through Vite's real module graph instead (see this module's own doc).
  */
-async function buildCjsBundle(entryUrl: string, loader: Loader): Promise<CjsBundle> {
+async function buildCjsBundle(
+  entryUrl: string,
+  loader: Loader,
+): Promise<CjsBundle> {
   const factories = new Map<string, string>()
   const bareSpecifiers = new Set<string>()
   const visiting = new Set<string>()
@@ -125,7 +128,11 @@ async function buildCjsBundle(entryUrl: string, loader: Loader): Promise<CjsBund
     const resolvedIds: string[] = []
     for (const spec of specs) {
       if (spec.startsWith('.')) {
-        const resolved = loader.resolveSync(spec, fileUrl, ResolutionMode.Require)
+        const resolved = loader.resolveSync(
+          spec,
+          fileUrl,
+          ResolutionMode.Require,
+        )
         // subtree must finish loading before the next require's factory can safely reference it.
         // deno-lint-ignore no-await-in-loop -- a genuine recursive graph walk; each require's own
         await visit(resolved)
@@ -173,10 +180,15 @@ export async function wrapCjsIfNeeded(
 
   const fileUrl = id.startsWith('file://') ? id : new URL(id, 'file:///').href
   const loader = await getSharedLoader(root)
-  const { entryId, factories, bareSpecifiers } = await buildCjsBundle(fileUrl, loader)
+  const { entryId, factories, bareSpecifiers } = await buildCjsBundle(
+    fileUrl,
+    loader,
+  )
 
   const factoryEntries = [...factories.entries()].filter(([, body]) => body !== '')
-  const fnNames = new Map(factoryEntries.map(([fid], i) => [fid, `__cjsFactory_${i}__`]))
+  const fnNames = new Map(
+    factoryEntries.map(([fid], i) => [fid, `__cjsFactory_${i}__`]),
+  )
   const factoryDecls = factoryEntries
     .map(([fid, body]) => body.replace('function(', `function ${fnNames.get(fid)}(`))
     .join('\n\n')

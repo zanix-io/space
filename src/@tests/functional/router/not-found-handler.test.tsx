@@ -1,3 +1,6 @@
+// Installs a renderer, exactly as a real app does: `@zanix/space` itself ships none, so a
+// test that renders must import the entry point it is testing against.
+import '../../../../mod-react.ts'
 import { assert, assertEquals } from '@std/assert'
 import type { ReactNode } from 'react'
 import { HttpError } from '@zanix/errors'
@@ -26,7 +29,10 @@ Deno.test('createNotFoundHandler: returns undefined for a non-NOT_FOUND HttpErro
   const handler = createNotFoundHandler()
 
   const result = await handler(new HttpError('METHOD_NOT_ALLOWED', {}))
-  assert(result === undefined, 'a non-404 error must fall through to the default response')
+  assert(
+    result === undefined,
+    'a non-404 error must fall through to the default response',
+  )
 })
 
 Deno.test('createNotFoundHandler: returns undefined for a plain, non-HttpError error', async () => {
@@ -109,6 +115,7 @@ Deno.test(
     // display:contents so the outlet never breaks a root layout's own grid/flex layout.
     assert(html.includes('style="display:contents"'), html)
     assert(html.includes('404'), html)
+    assertEquals(response.headers.get('vary'), ORBIT_FRAGMENT_HEADER)
   },
 )
 
@@ -127,6 +134,7 @@ Deno.test(
     assert(response instanceof Response)
     const html = stripHydrationComments(await response.text())
     assert(html.startsWith('<!DOCTYPE html>'), html)
+    assertEquals(response.headers.get('vary'), ORBIT_FRAGMENT_HEADER)
   },
 )
 
@@ -136,19 +144,27 @@ Deno.test(
   async () => {
     setNotFoundComponent(undefined)
     setRootLayout(undefined)
-    setCssManifest(['/assets/app-hash123.css'])
+    setCssManifest({ global: ['/assets/app-hash123.css'] })
     try {
       const handler = createNotFoundHandler()
 
       const fullResponse = await handler(new HttpError('NOT_FOUND', {}))
       assert(fullResponse instanceof Response)
       const fullHtml = await fullResponse.text()
-      assert(fullHtml.includes('<link rel="stylesheet" href="/assets/app-hash123.css"'), fullHtml)
+      assert(
+        fullHtml.includes(
+          '<link rel="stylesheet" href="/assets/app-hash123.css"',
+        ),
+        fullHtml,
+      )
 
       const fragmentRequest = new Request('http://localhost/missing', {
         headers: { [ORBIT_FRAGMENT_HEADER]: '1' },
       })
-      const fragmentError = attachRequestToError(new HttpError('NOT_FOUND', {}), fragmentRequest)
+      const fragmentError = attachRequestToError(
+        new HttpError('NOT_FOUND', {}),
+        fragmentRequest,
+      )
       const fragmentResponse = await handler(fragmentError)
       assert(fragmentResponse instanceof Response)
       const fragmentHtml = await fragmentResponse.text()

@@ -1,8 +1,13 @@
+// Installs a renderer, exactly as a real app does: `@zanix/space` itself ships none, so a
+// test that renders must import the entry point it is testing against.
+import '../../../../mod-react.ts'
 import { assert, assertEquals, assertMatch, assertRejects } from '@std/assert'
 import { HttpError } from '@zanix/errors'
 import { SpacePageController } from 'modules/router/mod.ts'
 import { mockHandlerContext } from 'modules/testing/mod.ts'
 import { stripHydrationComments } from '../../support/strip-hydration-comments.ts'
+
+console.error = () => {}
 
 function Greeting({ name }: { name?: string }) {
   return <p>Hello, {name ?? 'stranger'}</p>
@@ -10,7 +15,9 @@ function Greeting({ name }: { name?: string }) {
 
 class GreetingPage extends SpacePageController<{ name: string }> {
   public override component = Greeting
-  public override loader = (ctx: { params: { name: string } }) => ({ name: ctx.params.name })
+  public override loader = (ctx: { params: { name: string } }) => ({
+    name: ctx.params.name,
+  })
 }
 
 class NoLoaderPage extends SpacePageController {
@@ -19,7 +26,9 @@ class NoLoaderPage extends SpacePageController {
 
 class ActionPage extends SpacePageController {
   public override component = Greeting
-  public override action = async (ctx: { formData: () => Promise<FormData> }) => {
+  public override action = async (
+    ctx: { formData: () => Promise<FormData> },
+  ) => {
     const formData = await ctx.formData()
     return new Response(`got ${formData.get('name')}`)
   }

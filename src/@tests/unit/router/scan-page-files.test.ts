@@ -1,11 +1,14 @@
 import { assert, assertEquals } from '@std/assert'
 import { dirname, join } from '@std/path'
+import { getTemporaryFolder } from '@zanix/helpers'
 import { scanPageFiles } from 'modules/router/mod.ts'
+
+const TMP_ROOT = getTemporaryFolder(import.meta.url)
 
 async function withTempRoutes(
   build: (routesDir: string) => Promise<void>,
 ): Promise<Awaited<ReturnType<typeof scanPageFiles>>> {
-  const routesDir = await Deno.makeTempDir()
+  const routesDir = await Deno.makeTempDir({ dir: TMP_ROOT })
   try {
     await build(routesDir)
     const pages = await scanPageFiles(routesDir)
@@ -17,7 +20,10 @@ async function withTempRoutes(
 
 async function touch(path: string): Promise<void> {
   await Deno.mkdir(dirname(path), { recursive: true })
-  await Deno.writeTextFile(path, 'export default function () { return null }\n')
+  await Deno.writeTextFile(
+    path,
+    'export default function () { return null }\n',
+  )
 }
 
 Deno.test('scanPageFiles: finds a root-level page.tsx with an empty route path', async () => {
@@ -69,7 +75,12 @@ Deno.test('scanPageFiles: finds every page across multiple independent branches'
     await touch(join(dir, 'about', 'page.tsx'))
   })
 
-  assertEquals(pages.map((p) => p.routePath), ['', 'about', 'products', 'products/:id'])
+  assertEquals(pages.map((p) => p.routePath), [
+    '',
+    'about',
+    'products',
+    'products/:id',
+  ])
 })
 
 Deno.test(
@@ -106,7 +117,9 @@ Deno.test(
     assertEquals(products.layoutFilePath, undefined)
     assert(products.errorFilePath?.endsWith(join('products', 'error.tsx')))
 
-    assert(id.loadingFilePath?.endsWith(join('products', '[id]', 'loading.tsx')))
+    assert(
+      id.loadingFilePath?.endsWith(join('products', '[id]', 'loading.tsx')),
+    )
     assertEquals(id.layoutFilePath, undefined)
     assertEquals(id.errorFilePath, undefined)
   },
@@ -131,5 +144,82 @@ Deno.test(
     // Two levels deep (routes root + its own 'about' directory), both empty — 'products' sibling's
     // layout.tsx must never show up here.
     assertEquals(about.segments, [emptySegment, emptySegment])
+  },
+)
+
+Deno.test(
+  "scanPageFiles(routesDir[]): a page overridden in the FIRST directory shadows the base app's " +
+    'same route entirely — the base copy is never even imported',
+  async () => {
+    const overrideDir = await Deno.makeTempDir({ dir: TMP_ROOT })
+    const baseDir = await Deno.makeTempDir({ dir: TMP_ROOT })
+    try {
+      await touch(join(overrideDir, 'products', 'page.tsx'))
+      await Deno.writeTextFile(
+        join(overrideDir, 'products', 'page.tsx'),
+        'export default function () { return "override" }\n',
+      )
+      await touch(join(baseDir, 'products', 'page.tsx'))
+      await touch(join(baseDir, 'about', 'page.tsx'))
+
+      const pages = await scanPageFiles([overrideDir, baseDir])
+      const products = pages.find((p) => p.routePath === 'products')
+      const about = pages.find((p) => p.routePath === 'about')
+
+      assert(products)
+      assert(
+        products.filePath.startsWith(overrideDir),
+        'the override directory must win',
+      )
+      // The base app's own pages the override doesn't touch still resolve, falling back cleanly.
+      assert(about)
+      assert(about.filePath.startsWith(baseDir))
+    } finally {
+      await Deno.remove(overrideDir, { recursive: true })
+      await Deno.remove(baseDir, { recursive: true })
+    }
+  },
+)
+
+Deno.test(
+  "scanPageFiles(routesDir[]): a page's nested layout/error/loading chain resolves entirely " +
+    'within the SAME directory that provided it, never completed from a sibling routesDir entry',
+  async () => {
+    const overrideDir = await Deno.makeTempDir({ dir: TMP_ROOT })
+    const baseDir = await Deno.makeTempDir({ dir: TMP_ROOT })
+    try {
+      // Base app declares a root layout AND a nested page with its own error boundary.
+      await touch(join(baseDir, 'layout.tsx'))
+      await touch(join(baseDir, 'products', 'error.tsx'))
+      await touch(join(baseDir, 'products', 'page.tsx'))
+      // Override directory replaces the SAME page, but declares no layout/error of its own.
+      await touch(join(overrideDir, 'products', 'page.tsx'))
+
+      const pages = await scanPageFiles([overrideDir, baseDir])
+      const products = pages.find((p) => p.routePath === 'products')
+      assert(products)
+      assert(products.filePath.startsWith(overrideDir))
+      // No "Frankenstein" completion: the override's own segment chain has NEITHER the base app's
+      // root layout NOR its products/error.tsx — both are absent, not silently borrowed.
+      for (const segment of products.segments) {
+        assertEquals(segment.layoutFilePath, undefined)
+        assertEquals(segment.errorFilePath, undefined)
+      }
+    } finally {
+      await Deno.remove(overrideDir, { recursive: true })
+      await Deno.remove(baseDir, { recursive: true })
+    }
+  },
+)
+
+Deno.test(
+  'scanPageFiles(a single string): behaves exactly as before array support existed',
+  async () => {
+    const pages = await withTempRoutes(async (dir) => {
+      await touch(join(dir, 'page.tsx'))
+      await touch(join(dir, 'about', 'page.tsx'))
+    })
+
+    assertEquals(pages.map((p) => p.routePath), ['', 'about'])
   },
 )

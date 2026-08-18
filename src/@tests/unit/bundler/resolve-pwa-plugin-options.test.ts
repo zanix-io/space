@@ -13,7 +13,10 @@ Deno.test('resolvePwaPluginOptions: maps iconSizes/offlineFallback, resolves ico
     '/project/root',
   )
   assertEquals(resolved, {
-    icons: { source: join('/project/root', 'icon-source.png'), sizes: [32, 180] },
+    icons: {
+      source: join('/project/root', 'icon-source.png'),
+      sizes: [32, 180],
+    },
     offlineFallback: '/offline',
   })
 })
@@ -24,7 +27,10 @@ Deno.test('resolvePwaPluginOptions: omitted iconSizes/offlineFallback stay undef
     '/project/root',
   )
   assertEquals(resolved, {
-    icons: { source: join('/project/root', 'icon-source.png'), sizes: undefined },
+    icons: {
+      source: join('/project/root', 'icon-source.png'),
+      sizes: undefined,
+    },
     offlineFallback: undefined,
   })
 })

@@ -38,7 +38,11 @@ export class SpaceErrorBoundary extends Component<Props, State> {
   }
 
   public override componentDidCatch(error: unknown, info: ErrorInfo): void {
-    logger.error('Uncaught error in a Space page segment', error, info.componentStack)
+    logger.error(
+      'Uncaught error in a Space page segment',
+      error,
+      info.componentStack,
+    )
   }
 
   private reset = (): void => this.setState({ hasError: false, error: undefined })

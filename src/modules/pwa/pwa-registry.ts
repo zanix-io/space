@@ -1,5 +1,5 @@
 import type { PwaConfig } from 'typings/pwa.ts'
-import type { RenderToResponseOptions } from '../render/render-to-response.tsx'
+import type { DocumentPwa } from '../render/document-model.ts'
 import { MANIFEST_ROUTE, SW_ROUTE } from './web-manifest.ts'
 
 let pwaConfig: PwaConfig | undefined
@@ -54,10 +54,16 @@ export function setPwaBuildOutput(dir: string | undefined): void {
   pwaBuildOutputDir = dir
 }
 
-/** Derives `renderToResponse`'s own `pwaHead` option from whatever's currently registered —
- * `undefined` when no PWA is configured, so a full-document response just omits the head elements
- * entirely rather than rendering an empty/meaningless manifest link. */
-export function resolvePwaHead(): RenderToResponseOptions['pwaHead'] {
+/** Derives this app's own {@linkcode DocumentPwa} contribution from whatever's currently
+ * registered — `undefined` when no PWA is configured, so a full-document response just omits the
+ * head elements entirely rather than rendering an empty/meaningless manifest link.
+ *
+ * Typed against `render/document-model.ts`'s own renderer-agnostic shape, deliberately, rather than
+ * against either renderer's serializer options: PWA is an orthogonal capability of the document, not
+ * a feature of React's or Preact's rendering, and this module previously referenced React's own
+ * `RenderToResponseOptions` — which meant the Preact render path reached a React type to describe
+ * something neither renderer owns. */
+export function resolvePwaHead(): DocumentPwa | undefined {
   if (!pwaConfig) return undefined
   return {
     manifestHref: MANIFEST_ROUTE,

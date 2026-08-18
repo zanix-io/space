@@ -1,4 +1,4 @@
-import type { ComponentType, ReactElement } from 'react'
+import type { ComponentType, ReactElement, ReactNode } from 'react'
 import type { LayoutProps } from 'typings/page.ts'
 
 /**
@@ -9,7 +9,9 @@ import type { LayoutProps } from 'typings/page.ts'
  * written literally inside it), so this is the one place that needs to exist at all — everything
  * else about document-level metadata already works through ordinary JSX.
  */
-function DefaultDocumentShell({ children }: { children: ReactElement }): ReactElement {
+function DefaultDocumentShell(
+  { children }: { children: ReactElement },
+): ReactElement {
   return (
     <html lang='en'>
       <head>
@@ -33,7 +35,12 @@ function DefaultDocumentShell({ children }: { children: ReactElement }): ReactEl
  * the default shell, which never reads route params.
  */
 export function applyDocumentShell(
-  RootLayout: ComponentType<LayoutProps> | undefined,
+  // `LayoutProps<ReactNode>`, spelled out: `LayoutProps`' own default is renderer-neutral
+  // (`SpaceChildren`), and this function is React's document-shell boundary — the layout it
+  // receives is a React component, and saying so here is what keeps the renderer's name at the
+  // boundary instead of in the shared type. Its Preact counterpart
+  // (`document-shell-preact.ts`) has always spelled its own out the same way.
+  RootLayout: ComponentType<LayoutProps<ReactNode>> | undefined,
   content: ReactElement,
   params: Record<string, string> = {},
 ): ReactElement {

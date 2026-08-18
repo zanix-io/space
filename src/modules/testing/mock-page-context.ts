@@ -24,5 +24,6 @@ export function mockPageContext<Params = Record<string, string>>(
     url,
     params: (overrides.params ?? {}) as Params,
     csrfToken: overrides.csrfToken,
+    population: overrides.population,
   }
 }

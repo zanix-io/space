@@ -56,6 +56,12 @@ function generateNonce(): string {
  * There is no default policy in either form: an empty/omitted `directives` object would produce an
  * empty header, which is almost certainly not what's intended — declare the actual policy explicitly.
  *
+ * **Acts as the app-wide base/default, not an override**: a page's own `Page({ headers: { csp } })`
+ * (including `csp: false`) always wins over this when configured, and — when NEITHER this page NOR
+ * this guard configured anything for a given page — that page's own zero-config nonce-based default
+ * applies instead. See `PageOptions.headers`'s own doc (`page-decorator.ts`) for the full
+ * three-tier precedence rule.
+ *
  * @example
  * ```ts
  * import { cspGuard, defineMiddleware } from '@zanix/space'
@@ -82,6 +88,10 @@ export function cspGuard(
   return (ctx: GuardContext) => {
     const nonce = generateNonce()
     ctx.locals[CSP_NONCE_LOCALS_KEY] = nonce
-    return { headers: { 'Content-Security-Policy': serializeCsp(buildDirectives(nonce)) } }
+    return {
+      headers: {
+        'Content-Security-Policy': serializeCsp(buildDirectives(nonce)),
+      },
+    }
   }
 }

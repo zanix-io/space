@@ -3,7 +3,7 @@
  * })`. Unlike CSS's build-only toggles, this genuinely drives runtime behavior (the
  * `manifest.webmanifest`/icon routes `registerPwa` registers, and the `<link rel="manifest">`/
  * theme-color `<meta>` every full-document response gets) — see this package's own design doc
- * (Etapa 7bis's PWA continuation) for why that split isn't the same as CSS's.
+ * for why that split isn't the same as CSS's.
  *
  * @module
  */

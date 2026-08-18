@@ -1,13 +1,20 @@
+// Installs a renderer, exactly as a real app does: `@zanix/space` itself ships none, so a
+// test that renders must import the entry point it is testing against.
+import '../../../../mod-react.ts'
 import { assert, assertEquals } from '@std/assert'
-import { bootstrapServers, webServerManager } from '@zanix/server'
+import { bootstrapServers, ProgramModule, webServerManager } from '@zanix/server'
 import { loadRoutes } from 'modules/router/mod.ts'
 import {
   broadcastClientCssChanged,
+  broadcastClientModuleChanged,
   broadcastSsrModuleChanged,
   SPACE_DEV_SOCKET_ROUTE,
 } from 'modules/dev/mod.ts'
 
-const wsOptions = { headers: { Origin: '*' } }
+// `CONNECTIONS_REGISTRY_KEY` in `space-dev-socket.ts` is a private, unexported constant — its
+// literal value is reproduced here, the only way to reach the same shared connections registry
+// directly from outside that module.
+const CONNECTIONS_REGISTRY_KEY = 'zanix-space-dev-sockets'
 
 Deno.test(
   'SpaceDevSocket: shares a port with ssr and broadcasts a real message to a connected client',
@@ -25,9 +32,14 @@ Deno.test(
     // `docs/HANDLERS.md → Applications → Boot sessions` in `@zanix/server` for why this only
     // matters for a multi-call sequence, never a single standalone call.
     const port = 21001
-    const servers = await bootstrapServers({ ssr: { port }, socket: { port } }, { finalize: false })
+    const servers = await bootstrapServers(
+      { ssr: { port }, socket: { port } },
+      { finalize: false },
+    )
     try {
-      const ws = new WebSocket(`ws://localhost:${port}/socket/${SPACE_DEV_SOCKET_ROUTE}`, wsOptions)
+      const ws = new WebSocket(
+        `ws://localhost:${port}/socket/${SPACE_DEV_SOCKET_ROUTE}`,
+      )
       await new Promise((resolve) => (ws.onopen = resolve))
 
       const received = new Promise<string>((resolve) => {
@@ -77,9 +89,13 @@ Deno.test(
     // route-less socket listener never actually starts (confirmed the hard way: this test
     // originally used the default finalize, and it broke exactly that next test).
     const port = 21003
-    const servers = await bootstrapServers({ socket: { port } }, { finalize: false })
+    const servers = await bootstrapServers({ socket: { port } }, {
+      finalize: false,
+    })
     try {
-      const ws = new WebSocket(`ws://localhost:${port}/socket/${SPACE_DEV_SOCKET_ROUTE}`, wsOptions)
+      const ws = new WebSocket(
+        `ws://localhost:${port}/socket/${SPACE_DEV_SOCKET_ROUTE}`,
+      )
       await new Promise((resolve) => (ws.onopen = resolve))
 
       const received = new Promise<string>((resolve) => {
@@ -89,13 +105,89 @@ Deno.test(
       broadcastClientCssChanged(['/app.css?direct'])
 
       const message = JSON.parse(await received)
-      assertEquals(message, { kind: 'client-css-changed', urls: ['/app.css?direct'] })
+      assertEquals(message, {
+        kind: 'client-css-changed',
+        urls: ['/app.css?direct'],
+      })
 
       const closed = new Promise((resolve) => ws.addEventListener('close', resolve))
       ws.close()
       await closed
     } finally {
       await webServerManager.stop(servers)
+    }
+  },
+)
+
+Deno.test(
+  'SpaceDevSocket: broadcastClientModuleChanged delivers a client-module-changed message',
+  async () => {
+    // `finalize: false` — same reasoning as the two tests above: the `onclose` test right after
+    // this one still relies on `SpaceDevSocket`'s own decorator-time `@Socket` registration staying
+    // alive.
+    const port = 21004
+    const servers = await bootstrapServers({ socket: { port } }, {
+      finalize: false,
+    })
+    try {
+      const ws = new WebSocket(
+        `ws://localhost:${port}/socket/${SPACE_DEV_SOCKET_ROUTE}`,
+      )
+      await new Promise((resolve) => (ws.onopen = resolve))
+
+      const received = new Promise<string>((resolve) => {
+        ws.onmessage = (event) => resolve(event.data)
+      })
+
+      broadcastClientModuleChanged(['/comets/counter.tsx'])
+
+      const message = JSON.parse(await received)
+      assertEquals(message, {
+        kind: 'client-module-changed',
+        urls: ['/comets/counter.tsx'],
+      })
+
+      const closed = new Promise((resolve) => ws.addEventListener('close', resolve))
+      ws.close()
+      await closed
+    } finally {
+      await webServerManager.stop(servers)
+    }
+  },
+)
+
+Deno.test(
+  'broadcast*: a connection whose own push throws is skipped, without breaking delivery to the ' +
+    'others — real transport bypassed entirely, a manufactured registry entry stands in for a ' +
+    'connection whose underlying socket died without a clean close handshake ever reaching onclose',
+  () => {
+    const received: unknown[] = []
+    const deadConnection = {
+      push: () => {
+        throw new Error('simulated dead connection')
+      },
+    }
+    const goodConnection = {
+      push: (payload: unknown) => received.push(payload),
+    }
+    // deno-lint-ignore no-explicit-any -- a manufactured stand-in, never a real SpaceDevSocket
+    ProgramModule.registry.set(CONNECTIONS_REGISTRY_KEY, [deadConnection, goodConnection] as any)
+    try {
+      broadcastSsrModuleChanged({
+        file: '/routes/products/page.tsx',
+        changeType: 'update',
+        affectedRoutes: [],
+      })
+      broadcastClientCssChanged(['/app.css?direct'])
+      broadcastClientModuleChanged(['/comets/counter.tsx'])
+
+      assertEquals(received.length, 3)
+      assertEquals((received[0] as { kind: string }).kind, 'ssr-module-changed')
+      assertEquals((received[1] as { kind: string }).kind, 'client-css-changed')
+      assertEquals((received[2] as { kind: string }).kind, 'client-module-changed')
+    } finally {
+      // deno-lint-ignore no-explicit-any
+      ProgramModule.registry.set(CONNECTIONS_REGISTRY_KEY, [] as any)
     }
   },
 )
@@ -117,7 +209,9 @@ Deno.test({
     const port = 21002
     const servers = await bootstrapServers({ socket: { port } })
     try {
-      const ws = new WebSocket(`ws://localhost:${port}/socket/${SPACE_DEV_SOCKET_ROUTE}`, wsOptions)
+      const ws = new WebSocket(
+        `ws://localhost:${port}/socket/${SPACE_DEV_SOCKET_ROUTE}`,
+      )
       await new Promise((resolve) => (ws.onopen = resolve))
 
       const closed = new Promise((resolve) => ws.addEventListener('close', resolve))

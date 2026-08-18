@@ -46,7 +46,10 @@ export class RealImportEvaluator implements ModuleEvaluator {
     this.#dir = dir
   }
 
-  public async runInlinedModule(context: ModuleRunnerContext, code: string): Promise<void> {
+  public async runInlinedModule(
+    context: ModuleRunnerContext,
+    code: string,
+  ): Promise<void> {
     const ssrModuleExportsKey = '__vite_ssr_exports__'
     const ssrImportMetaKey = '__vite_ssr_import_meta__'
     const ssrImportKey = '__vite_ssr_import__'

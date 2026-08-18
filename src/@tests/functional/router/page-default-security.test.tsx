@@ -1,6 +1,10 @@
+// Installs a renderer, exactly as a real app does: `@zanix/space` itself ships none, so a
+// test that renders must import the entry point it is testing against.
+import '../../../../mod-react.ts'
 import { assert, assertEquals, assertMatch } from '@std/assert'
 import { SpacePageController } from 'modules/router/mod.ts'
 import { mockHandlerContext } from 'modules/testing/mod.ts'
+import { setCssManifest } from 'modules/render/css-manifest.ts'
 
 function View() {
   return <p>ok</p>
@@ -15,10 +19,15 @@ Deno.test(
       public override loader = () => ({})
     }
 
-    const response = await new DefaultCspPage(mockHandlerContext()).handleGet(mockHandlerContext())
+    const response = await new DefaultCspPage(mockHandlerContext()).handleGet(
+      mockHandlerContext(),
+    )
     const csp = response.headers.get('Content-Security-Policy')
     assert(csp, 'expected a Content-Security-Policy header')
-    assertMatch(csp, /^default-src 'self'; script-src 'self' 'nonce-[^']+'$/)
+    assertMatch(
+      csp,
+      /^default-src 'self'; script-src 'self' 'nonce-([^']+)'; style-src 'self' 'nonce-\1'$/,
+    )
 
     const nonce = csp.match(/'nonce-([^']+)'/)?.[1]
     assert(nonce, 'expected to extract a nonce from the CSP header')
@@ -30,14 +39,53 @@ Deno.test(
 )
 
 Deno.test(
+  "SpacePageController.handleGet: a globalCss entry's own `media` never changes the CSP header " +
+    '— byte-identical (nonce aside) to the same stylesheet with no `media` at all, since `media` ' +
+    "is orthogonal to style-src's own origin/nonce model (P2-12a)",
+  async () => {
+    class DefaultCspPage extends SpacePageController {
+      public override component = View
+    }
+    const normalizeNonce = (csp: string) => csp.replace(/nonce-[^']+/g, 'nonce-X')
+    try {
+      setCssManifest({ global: ['/assets/app-hash.css'] })
+      const withoutMedia = await new DefaultCspPage(mockHandlerContext()).handleGet(
+        mockHandlerContext(),
+      )
+      const cspWithoutMedia = withoutMedia.headers.get('Content-Security-Policy')
+      await withoutMedia.body?.cancel()
+      assert(cspWithoutMedia, 'expected a Content-Security-Policy header')
+
+      setCssManifest({
+        global: [{ href: '/assets/app-hash.css', media: '(max-width: 599px)' }],
+      })
+      const withMedia = await new DefaultCspPage(mockHandlerContext()).handleGet(
+        mockHandlerContext(),
+      )
+      const cspWithMedia = withMedia.headers.get('Content-Security-Policy')
+      await withMedia.body?.cancel()
+      assert(cspWithMedia, 'expected a Content-Security-Policy header')
+
+      assertEquals(normalizeNonce(cspWithMedia), normalizeNonce(cspWithoutMedia))
+    } finally {
+      setCssManifest(undefined)
+    }
+  },
+)
+
+Deno.test(
   'SpacePageController.handleGet: two requests to the same page get two different nonces',
   async () => {
     class DefaultCspPage extends SpacePageController {
       public override component = View
     }
 
-    const first = await new DefaultCspPage(mockHandlerContext()).handleGet(mockHandlerContext())
-    const second = await new DefaultCspPage(mockHandlerContext()).handleGet(mockHandlerContext())
+    const first = await new DefaultCspPage(mockHandlerContext()).handleGet(
+      mockHandlerContext(),
+    )
+    const second = await new DefaultCspPage(mockHandlerContext()).handleGet(
+      mockHandlerContext(),
+    )
     await first.body?.cancel()
     await second.body?.cancel()
 
@@ -56,7 +104,9 @@ Deno.test(
       public override component = View
     }
 
-    const response = await new NoCspPage(mockHandlerContext()).handleGet(mockHandlerContext())
+    const response = await new NoCspPage(mockHandlerContext()).handleGet(
+      mockHandlerContext(),
+    )
     assertEquals(response.headers.get('Content-Security-Policy'), null)
     // csp is one field among others in `headers` — disabling it doesn't disable the rest.
     assertEquals(response.headers.get('X-Frame-Options'), 'SAMEORIGIN')
@@ -74,7 +124,9 @@ Deno.test(
       public override component = View
     }
 
-    const response = await new CustomCspPage(mockHandlerContext()).handleGet(mockHandlerContext())
+    const response = await new CustomCspPage(mockHandlerContext()).handleGet(
+      mockHandlerContext(),
+    )
     assertEquals(
       response.headers.get('Content-Security-Policy'),
       "default-src 'none'; img-src 'self'",
@@ -90,11 +142,15 @@ Deno.test(
       public override component = View
     }
 
-    const response = await new DefaultHeadersPage(mockHandlerContext()).handleGet(
-      mockHandlerContext(),
-    )
+    const response = await new DefaultHeadersPage(mockHandlerContext())
+      .handleGet(
+        mockHandlerContext(),
+      )
     assertEquals(response.headers.get('X-Frame-Options'), 'SAMEORIGIN')
-    assertEquals(response.headers.get('Referrer-Policy'), 'strict-origin-when-cross-origin')
+    assertEquals(
+      response.headers.get('Referrer-Policy'),
+      'strict-origin-when-cross-origin',
+    )
     assertEquals(response.headers.get('X-Content-Type-Options'), 'nosniff')
     await response.body?.cancel()
   },
@@ -108,9 +164,10 @@ Deno.test(
       public override component = View
     }
 
-    const response = await new NoSecurityHeadersPage(mockHandlerContext()).handleGet(
-      mockHandlerContext(),
-    )
+    const response = await new NoSecurityHeadersPage(mockHandlerContext())
+      .handleGet(
+        mockHandlerContext(),
+      )
     assertEquals(response.headers.get('Content-Security-Policy'), null)
     assertEquals(response.headers.get('X-Frame-Options'), null)
     assertEquals(response.headers.get('Referrer-Policy'), null)
@@ -127,12 +184,16 @@ Deno.test(
       public override component = View
     }
 
-    const response = await new CustomHeadersPage(mockHandlerContext()).handleGet(
-      mockHandlerContext(),
-    )
+    const response = await new CustomHeadersPage(mockHandlerContext())
+      .handleGet(
+        mockHandlerContext(),
+      )
     assertEquals(response.headers.get('X-Frame-Options'), 'DENY')
     // Untouched fields still get their own defaults, same as securityHeadersGuard's own doc.
-    assertEquals(response.headers.get('Referrer-Policy'), 'strict-origin-when-cross-origin')
+    assertEquals(
+      response.headers.get('Referrer-Policy'),
+      'strict-origin-when-cross-origin',
+    )
     await response.body?.cancel()
   },
 )

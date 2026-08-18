@@ -1,0 +1,151 @@
+# .github/workflows/benchmarks.yml
+
+name: Benchmarks
+
+on:
+  # Reported on every PR to master, weekly, and on demand. Deliberately NOT on `push`: a number is
+  # only meaningful next to the change that produced it, and every push already reaches a PR.
+  pull_request:
+    branches:
+      - master
+  schedule:
+    # Mondays, 04:17 UTC. An odd minute on purpose — GitHub queues scheduled runs and delays the
+    # ones landing on the hour, which is when everyone else's crons fire. Scheduled runs only ever
+    # execute on the repository's DEFAULT branch, whatever this file's `pull_request` filter says.
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+jobs:
+  renderer:
+    name: Renderer benchmarks (React vs Preact SSR)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      # `deno.jsonc`'s own `bench.include` scopes this to `src/@tests/benchmarks/renderer/` — pure
+      # `Deno.bench` SSR microbenchmarks, no browser and no build. This step fails only if a
+      # benchmark itself breaks (a real error worth catching); it never fails on a slower number,
+      # because a shared CI runner cannot measure a timing regression reliably enough to gate on.
+      - name: Run renderer benchmarks
+        # `shell: bash` for `-o pipefail`: GitHub's implicit default shell does NOT set it, so the
+        # pipe below would report `tee`'s exit code and a broken benchmark would pass silently.
+        # `NO_COLOR` because Deno emits ANSI escapes through the pipe, and they render as garbage
+        # inside the summary's code block. Both confirmed by running these exact two steps locally.
+        shell: bash
+        env:
+          NO_COLOR: '1'
+        run: deno task bench:renderer | tee bench-output.txt
+
+      # The numbers land in the run's own summary, so a reviewer reads them next to the diff instead
+      # of digging through logs. Reporting, not gating: there is no committed baseline to compare
+      # against, and inventing a threshold here would produce noise, not signal.
+      - name: Publish results to the job summary
+        if: always()
+        run: |
+          {
+            echo '## Renderer benchmarks'
+            echo
+            echo 'React vs Preact SSR, `src/@tests/benchmarks/renderer/`. Two caveats when reading'
+            echo 'these, both of which make the absolute numbers unusable as a target:'
+            echo
+            echo '- **Shared runner.** Timings move with whatever else the machine is doing. Read the'
+            echo '  trend across runs, never a single figure.'
+            echo '- **One process.** `deno bench` runs every case in the same process, so both'
+            echo '  renderers share a JIT and a heap: warm-up and GC from one case land on the next,'
+            echo '  and the cross-renderer ratio is inflated by that, not only by the renderers.'
+            echo '  Comparing a case against ITSELF across commits is the only sound reading.'
+            echo
+            echo '```'
+            cat bench-output.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ------------------------------------------------------------------------------------------------
+  # `bench:space` — MANUAL ONLY, and not really here for the timings.
+  #
+  # It builds four real Vite client bundles, serves them, and drives Chromium through Playwright, so
+  # it costs minutes and carries its own flake surface (a Playwright timeout is a failure mode of
+  # the harness, not of the code under test). On a shared runner its latency figures — FCP, LCP,
+  # long tasks, interaction latency — are noise, and gating a PR on them would be dishonest.
+  #
+  # What it IS worth running for, and why this job exists at all:
+  #
+  #   1. It is the ONLY place in this repo where a Comet is verified to hydrate in a real browser.
+  #      Nothing in `deno test` covers that. When the entry-point split broke the Comet element
+  #      factory, this harness is what caught it — variant B timed out waiting for its like button,
+  #      because every boundary had silently rendered empty.
+  #   2. Its byte-level numbers ARE deterministic: `jsTransferredBytes`, `jsRequestCount`,
+  #      `htmlTransferredBytes` and `hydratedBoundaryCount` do not move with machine load. A jump
+  #      there is a real change in what ships to the browser — React leaking into the Preact bundle,
+  #      say — which is exactly the property the renderer split exists to protect.
+  #   3. It is the practical way to confirm the harness runs on Linux at all, which is a one-off
+  #      answer that does not need paying for on every PR.
+  # ------------------------------------------------------------------------------------------------
+  space:
+    name: Space architecture benchmark (manual)
+    # Everything EXCEPT pull requests — i.e. the weekly schedule and manual dispatch. Written as a
+    # negation rather than a list of the two allowed events on purpose: the reason this job is
+    # gated at all is that it is too slow and too flake-prone to sit on a PR, so the condition says
+    # exactly that, and a future trigger added above is included by default rather than silently
+    # skipped (which is what an `== 'workflow_dispatch'` check did to this very schedule).
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      # `playwright-core` (what the harness imports) never downloads a browser — that is the whole
+      # difference from `playwright`. The CLI is pinned to the SAME version the harness imports
+      # (`npm:playwright-core@1.62.1`), so the downloaded build is the one that client expects
+      # rather than whatever Chrome the runner image happens to ship. `--with-deps` pulls the system
+      # libraries headless Chromium needs on a bare runner.
+      - name: Install Chromium for Playwright
+        run: npx --yes playwright@1.62.1 install --with-deps chromium
+
+      # No `SPACE_BENCH_CHROMIUM`: with the browser installed above, `playwright-core` resolves it
+      # from its own registry, which is the same path this harness takes on any developer machine.
+      # The override exists for a browser living somewhere non-standard, which is not this case.
+      - name: Run the space benchmark
+        shell: bash
+        env:
+          NO_COLOR: '1'
+        run: deno task bench:space | tee space-output.txt
+
+      - name: Publish results to the job summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## Space architecture benchmark'
+            echo
+            echo 'Four variants: React full hydration, React + Comets, React + Compiler + Comets,'
+            echo 'and Preact + Comets.'
+            echo
+            echo '**Read the bytes, not the milliseconds.** `jsTransferredBytes`, `jsRequestCount`'
+            echo 'and `hydratedBoundaryCount` are deterministic and worth comparing across runs.'
+            echo 'FCP/LCP/long-task/interaction figures come from a shared virtualised runner and'
+            echo 'say more about the runner than about this framework.'
+            echo
+            echo '```'
+            cat space-output.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

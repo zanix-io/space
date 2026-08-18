@@ -19,7 +19,9 @@ export interface ServiceWorkerSourceOptions {
  * A pure function — no filesystem/network access of its own. `pwaPlugin` is the only caller,
  * writing the returned string as this app's real `sw.js` build output.
  */
-export function buildServiceWorkerSource(options: ServiceWorkerSourceOptions): string {
+export function buildServiceWorkerSource(
+  options: ServiceWorkerSourceOptions,
+): string {
   const { precacheUrls, offlineFallback } = options
 
   return `

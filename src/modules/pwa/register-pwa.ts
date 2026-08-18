@@ -30,13 +30,19 @@ function registerFixedRoute(
 
 /** Serves `filePath`'s bytes with `contentType`, once per request (no in-memory cache — see
  * `registerPwa`'s own doc for why). A missing file degrades to a `404`, never a crash. */
-function registerFileRoute(path: string, filePath: string, contentType: string): void {
+function registerFileRoute(
+  path: string,
+  filePath: string,
+  contentType: string,
+): void {
   registerFixedRoute(path, async () => {
     try {
       const bytes = await Deno.readFile(filePath)
       return new Response(bytes, { headers: { 'content-type': contentType } })
     } catch (error) {
-      if (error instanceof Deno.errors.NotFound) return new Response('Not Found', { status: 404 })
+      if (error instanceof Deno.errors.NotFound) {
+        return new Response('Not Found', { status: 404 })
+      }
       throw error
     }
   })
@@ -67,7 +73,10 @@ export function registerPwa(config: PwaConfig): void {
   const manifestBody = JSON.stringify(buildWebManifest(config))
   registerFixedRoute(
     MANIFEST_ROUTE,
-    () => new Response(manifestBody, { headers: { 'content-type': 'application/manifest+json' } }),
+    () =>
+      new Response(manifestBody, {
+        headers: { 'content-type': 'application/manifest+json' },
+      }),
   )
 
   const buildOutput = getPwaBuildOutput()
@@ -75,8 +84,16 @@ export function registerPwa(config: PwaConfig): void {
 
   const sizes = config.iconSizes ?? DEFAULT_ICON_SIZES
   for (const size of sizes) {
-    registerFileRoute(iconRoute(size), `${buildOutput}/icons/${iconFileName(size)}`, 'image/png')
+    registerFileRoute(
+      iconRoute(size),
+      `${buildOutput}/icons/${iconFileName(size)}`,
+      'image/png',
+    )
   }
 
-  registerFileRoute(SW_ROUTE, `${buildOutput}/${SW_FILE_NAME}`, 'application/javascript')
+  registerFileRoute(
+    SW_ROUTE,
+    `${buildOutput}/${SW_FILE_NAME}`,
+    'application/javascript',
+  )
 }

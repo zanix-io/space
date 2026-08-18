@@ -1,3 +1,6 @@
+// Installs a renderer, exactly as a real app does: `@zanix/space` itself ships none, so a
+// test that renders must import the entry point it is testing against.
+import '../../../../mod-react.ts'
 import { assertEquals } from '@std/assert'
 import { SpacePageController } from 'modules/router/mod.ts'
 import {
@@ -17,17 +20,24 @@ function View() {
 Deno.test(
   'setDefaultPageHeaders: an app-wide default applies to a page that never sets its own headers',
   async () => {
-    setDefaultPageHeaders({ frameOptions: 'DENY', csp: { 'default-src': ["'none'"] } })
+    setDefaultPageHeaders({
+      frameOptions: 'DENY',
+      csp: { 'default-src': ["'none'"] },
+    })
     try {
       class NoOwnHeadersPage extends SpacePageController {
         public override component = View
       }
 
-      const response = await new NoOwnHeadersPage(mockHandlerContext()).handleGet(
-        mockHandlerContext(),
-      )
+      const response = await new NoOwnHeadersPage(mockHandlerContext())
+        .handleGet(
+          mockHandlerContext(),
+        )
       assertEquals(response.headers.get('X-Frame-Options'), 'DENY')
-      assertEquals(response.headers.get('Content-Security-Policy'), "default-src 'none'")
+      assertEquals(
+        response.headers.get('Content-Security-Policy'),
+        "default-src 'none'",
+      )
       await response.body?.cancel()
     } finally {
       resetDefaultPageHeaders()
@@ -41,7 +51,9 @@ Deno.test(
     setDefaultPageHeaders({ frameOptions: 'DENY' })
     try {
       class OwnHeadersPage extends SpacePageController {
-        public static override headers = { frameOptions: 'SAMEORIGIN' as const }
+        public static override headers = {
+          frameOptions: 'SAMEORIGIN' as const,
+        }
         public override component = View
       }
 
@@ -66,9 +78,10 @@ Deno.test(
         public override component = View
       }
 
-      const response = await new NoHeadersAtAllPage(mockHandlerContext()).handleGet(
-        mockHandlerContext(),
-      )
+      const response = await new NoHeadersAtAllPage(mockHandlerContext())
+        .handleGet(
+          mockHandlerContext(),
+        )
       assertEquals(response.headers.get('X-Frame-Options'), null)
       assertEquals(response.headers.get('Content-Security-Policy'), null)
       await response.body?.cancel()
@@ -87,9 +100,10 @@ Deno.test(
         public override component = View
       }
 
-      const response = await new NoOwnHeadersPage(mockHandlerContext()).handleGet(
-        mockHandlerContext(),
-      )
+      const response = await new NoOwnHeadersPage(mockHandlerContext())
+        .handleGet(
+          mockHandlerContext(),
+        )
       assertEquals(response.headers.get('X-Frame-Options'), null)
       assertEquals(response.headers.get('Content-Security-Policy'), null)
       await response.body?.cancel()
@@ -108,22 +122,29 @@ Deno.test(
   'a page overriding just ONE field keeps every OTHER field from the app-wide default — ' +
     'merged field by field, not replaced as a whole object',
   async () => {
-    setDefaultPageHeaders({ frameOptions: 'DENY', csp: { 'default-src': ["'none'"] } })
+    setDefaultPageHeaders({
+      frameOptions: 'DENY',
+      csp: { 'default-src': ["'none'"] },
+    })
     try {
       class PartialOverridePage extends SpacePageController {
         public static override headers = { noSniff: false }
         public override component = View
       }
 
-      const response = await new PartialOverridePage(mockHandlerContext()).handleGet(
-        mockHandlerContext(),
-      )
+      const response = await new PartialOverridePage(mockHandlerContext())
+        .handleGet(
+          mockHandlerContext(),
+        )
       // The field the page actually touched:
       assertEquals(response.headers.get('X-Content-Type-Options'), null)
       // Fields the page never mentioned — must survive from the app-wide default, not silently
       // fall back to the framework's own built-in defaults.
       assertEquals(response.headers.get('X-Frame-Options'), 'DENY')
-      assertEquals(response.headers.get('Content-Security-Policy'), "default-src 'none'")
+      assertEquals(
+        response.headers.get('Content-Security-Policy'),
+        "default-src 'none'",
+      )
       await response.body?.cancel()
     } finally {
       resetDefaultPageHeaders()
@@ -145,8 +166,13 @@ Deno.test(
         public override component = View
       }
 
-      const response = await new OwnCspPage(mockHandlerContext()).handleGet(mockHandlerContext())
-      assertEquals(response.headers.get('Content-Security-Policy'), "default-src 'self'")
+      const response = await new OwnCspPage(mockHandlerContext()).handleGet(
+        mockHandlerContext(),
+      )
+      assertEquals(
+        response.headers.get('Content-Security-Policy'),
+        "default-src 'self'",
+      )
       // frameOptions was never touched by this page — still comes from the app-wide default.
       assertEquals(response.headers.get('X-Frame-Options'), 'DENY')
       await response.body?.cancel()

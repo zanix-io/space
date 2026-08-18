@@ -1,8 +1,12 @@
 import { assert, assertEquals } from '@std/assert'
 import { fromFileUrl } from '@std/path'
 
-const DEV_MOD_PATH = fromFileUrl(import.meta.resolve('../../../modules/dev/mod.ts'))
-const BUNDLER_MOD_PATH = fromFileUrl(import.meta.resolve('../../../modules/bundler/mod.ts'))
+const DEV_MOD_PATH = fromFileUrl(
+  import.meta.resolve('../../../modules/dev/mod.ts'),
+)
+const BUNDLER_MOD_PATH = fromFileUrl(
+  import.meta.resolve('../../../modules/bundler/mod.ts'),
+)
 
 /** The exact npm specifiers whose eager top-level evaluation crashes under Deno (Lightning CSS's
  * native binding fails to resolve — see `dev-engine.ts`'s own `css: { transformer: 'postcss' }`

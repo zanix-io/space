@@ -118,7 +118,10 @@ export async function resolveBareSpecifierCanonically(
   // Only a genuinely bare specifier — relative, absolute, Vite/Rollup virtual ids (`\0...`), and
   // scheme-prefixed specifiers (`npm:`, `jsr:`, `http(s):`) are left entirely to the existing
   // pipeline; this function only ever narrows what it's confirmed safe to canonicalize.
-  if (id.startsWith('.') || id.startsWith('/') || id.startsWith('\0') || SCHEME_RE.test(id)) {
+  if (
+    id.startsWith('.') || id.startsWith('/') || id.startsWith('\0') ||
+    SCHEME_RE.test(id)
+  ) {
     return null
   }
   const loader = await getSharedLoader(root)

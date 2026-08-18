@@ -1,6 +1,7 @@
 import { createContext, use, useContext } from 'react'
 import type { ReactNode } from 'react'
 import { InternalError } from '@zanix/errors'
+import { getActiveRenderer } from '../router/active-renderer.ts'
 
 /** One request's promise cache — a plain `Map` keyed by whatever key a `useRequestCache()` call
  * picks, scoped to a single {@linkcode renderToResponse} call and discarded once it resolves. */
@@ -16,7 +17,11 @@ const RequestCacheContext = createContext<RequestCache | null>(null)
 export function RequestCacheProvider(
   { cache, children }: { cache: RequestCache; children: ReactNode },
 ): ReactNode {
-  return <RequestCacheContext.Provider value={cache}>{children}</RequestCacheContext.Provider>
+  return (
+    <RequestCacheContext.Provider value={cache}>
+      {children}
+    </RequestCacheContext.Provider>
+  )
 }
 
 /**
@@ -30,13 +35,31 @@ export function RequestCacheProvider(
  * same `key` always returns the exact same promise within that request, however many times a
  * component up the tree happens to re-render around it.
  *
+ * **Deliberately React-only, evaluated and closed, not a pending Preact feature.** This function
+ * exists to solve one specific problem: several components, anywhere in the tree, independently
+ * wanting the same in-flight request without re-triggering it — a problem `use()`/`Suspense`
+ * creates by letting a component suspend mid-render in the first place. Preact core has no
+ * `use()`/`Suspense` (this package's own decision spike, confirmed independently by
+ * `load-routes.ts`'s own `loading.tsx` rejection under `--renderer=preact`), so no Preact
+ * component can ever suspend — or do ANY async work — mid-render; every prop it receives must
+ * already be a resolved, synchronous value by the time `preact-render-to-string` reaches it. That
+ * removes the precondition for this problem to occur at all under Preact, not just the mechanism
+ * to solve it: the one place a Preact page's data flows through is its own `loader` (invoked once,
+ * before render ever starts — `SpacePageController`'s own `handleGet`), so combining or
+ * deduplicating several data sources for a Preact page is ordinary application code the author
+ * writes inside that `loader`, not something a Preact counterpart to this function could do any
+ * better.
+ *
  * @param key - Cache key, unique within this request (e.g. a loader's own name plus its params).
  * @param fetcher - Invoked at most once per request for a given `key`, only if nothing is cached
  * yet under it.
  * @returns The resolved value — never the promise itself; suspends the component until it settles.
  * @throws {InternalError} If called outside a tree rendered by `renderToResponse` (no
  * `RequestCacheProvider` ancestor) — this is a framework-usage bug, not a runtime condition an app
- * should handle.
+ * should handle. Also thrown, with a different message, when the active renderer is Preact (see
+ * below) — Preact core has no `Suspense`/`use()` at all (confirmed by this package's own decision
+ * spike), so there is no mechanism for this function to suspend the calling component with in the
+ * first place.
  *
  * @example
  * ```tsx
@@ -47,6 +70,25 @@ export function RequestCacheProvider(
  * ```
  */
 export function useRequestCache<T>(key: string, fetcher: () => Promise<T>): T {
+  // Checked BEFORE `useContext` below, not after — `useContext` is a real React hook; calling it
+  // during a Preact render (no React render in progress at all) doesn't fail with a message this
+  // package controls, it fails with React's own generic "Invalid hook call" (confirmed via a real,
+  // disposable spike: `TypeError: Cannot read properties of null (reading 'useContext')`, pointing
+  // at React's own troubleshooting docs, not this framework's). This is the one deliberate,
+  // isolated exception to keeping renderer checks out of shared code — `useRequestCache` is
+  // inherently React-only by contract (this package's own decision spike, §8.1), not a capability
+  // that could work for Preact with more effort, so this is a boundary check on that contract, not
+  // a behavior branch inside otherwise-shared rendering logic (nothing else in this file, or
+  // called from it, is renderer-aware).
+  if (getActiveRenderer() === 'preact') {
+    throw new InternalError(
+      'useRequestCache() is not available under --renderer=preact: Preact core has no ' +
+        'Suspense/use(), so there is no way to suspend this render for the requested data. ' +
+        "Resolve it inside this page's loader and pass it down as a prop instead.",
+      { meta: { key } },
+    )
+  }
+
   const cache = useContext(RequestCacheContext)
   if (!cache) {
     throw new InternalError(

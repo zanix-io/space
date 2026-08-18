@@ -1,7 +1,10 @@
-import { assert, assertEquals, assertMatch } from '@std/assert'
+import { assert, assertEquals, assertMatch, assertThrows } from '@std/assert'
 import { renderToReadableStream } from 'react-dom/server'
-import { renderToResponse, useRequestCache } from 'modules/render/mod.ts'
+import { renderToResponse, useRequestCache } from '../../../../mod-react.ts'
+import { setActiveRenderer } from 'modules/router/active-renderer.ts'
 import { stripHydrationComments } from '../../support/strip-hydration-comments.ts'
+
+console.error = () => {}
 
 Deno.test(
   'useRequestCache: same key across components resolves via a single fetcher call',
@@ -29,7 +32,11 @@ Deno.test(
     )
     const html = stripHydrationComments(await response.text())
 
-    assertEquals(calls, 1, 'the fetcher must run once for the whole request, not once per reader')
+    assertEquals(
+      calls,
+      1,
+      'the fetcher must run once for the whole request, not once per reader',
+    )
     assert(html.includes('a:value'))
     assert(html.includes('b:value'))
   },
@@ -78,6 +85,62 @@ Deno.test(
     }
 
     assert(reported instanceof Error)
-    assertMatch((reported as Error).message, /useRequestCache.*renderToResponse/)
+    assertMatch(
+      (reported as Error).message,
+      /useRequestCache.*renderToResponse/,
+    )
+  },
+)
+
+Deno.test(
+  'useRequestCache: renderer=preact fails synchronously, before the fetcher or the cache are ever touched',
+  () => {
+    setActiveRenderer('preact')
+    let fetcherCalled = false
+    // A plain, direct call (not through any renderer) — this guard has to fire before React's own
+    // `useContext` is ever reached (see `request-cache.tsx`'s own doc for why: calling it during a
+    // Preact render throws React's own confusing "Invalid hook call" instead), so it must behave
+    // identically whether or not a real component is involved.
+    function Reader() {
+      return useRequestCache('key', () => {
+        fetcherCalled = true
+        return Promise.resolve('value')
+      })
+    }
+    try {
+      const thrown = assertThrows(() => Reader(), Error)
+      assertMatch(thrown.message, /--renderer=preact/)
+      assertMatch(thrown.message, /Suspense/)
+      assertEquals(
+        fetcherCalled,
+        false,
+        'the fetcher must never run once the guard rejects the call',
+      )
+    } finally {
+      // Real singleton, shared with every other test in this suite — never leave it on 'preact'.
+      setActiveRenderer('react')
+    }
+  },
+)
+
+Deno.test(
+  'useRequestCache: renderer=react (default) is unaffected by the preact guard — zero regression',
+  async () => {
+    // No `setActiveRenderer` call here at all — this is the framework's own default, unchanged,
+    // exercised the same way the very first test in this file already does.
+    let calls = 0
+    function Reader() {
+      const value = useRequestCache('regression-key', () => {
+        calls++
+        return Promise.resolve('still-works')
+      })
+      return <span>{value}</span>
+    }
+
+    const html = stripHydrationComments(
+      await (await renderToResponse(<Reader />)).text(),
+    )
+    assertEquals(calls, 1)
+    assert(html.includes('still-works'))
   },
 )

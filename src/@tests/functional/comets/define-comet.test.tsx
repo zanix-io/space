@@ -1,9 +1,11 @@
 import { assert, assertEquals, assertFalse, assertThrows } from '@std/assert'
 import { InternalError } from '@zanix/errors'
-import { renderToResponse } from 'modules/render/mod.ts'
-import { defineComet } from 'modules/comets/define-comet.tsx'
+import { renderToResponse } from '../../../../mod-react.ts'
+import { defineComet } from 'modules/comets/define-comet.ts'
 import { setCometManifest } from 'modules/comets/comet-manifest.ts'
 import { stripHydrationComments } from '../../support/strip-hydration-comments.ts'
+
+console.error = () => {}
 
 function Counter({ initial }: { initial: number }) {
   return <button type='button'>{initial}</button>
@@ -14,15 +16,22 @@ const FIXTURE_SOURCE_URL = `file://${Deno.cwd()}/comets/counter.tsx`
 Deno.test(
   'defineComet: renders the real component, wrapped in a marker carrying its metadata',
   async () => {
-    setCometManifest({ [`${Deno.cwd()}/comets/counter.tsx`]: '/assets/counter-hash.js' })
+    setCometManifest({
+      [`${Deno.cwd()}/comets/counter.tsx`]: '/assets/counter-hash.js',
+    })
     try {
       const Comet = defineComet(Counter, FIXTURE_SOURCE_URL)
 
-      const response = await renderToResponse(<Comet initial={3} comet='visible' />)
+      const response = await renderToResponse(
+        <Comet initial={3} comet='visible' />,
+      )
       const html = stripHydrationComments(await response.text())
 
       assert(html.includes('data-comet-strategy="visible"'), html)
-      assert(html.includes('data-comet-module="/assets/counter-hash.js"'), html)
+      assert(
+        html.includes('data-comet-module="/assets/counter-hash.js"'),
+        html,
+      )
       assert(html.includes('data-comet-export="Counter"'), html)
       assert(html.includes('data-comet-props="{&quot;initial&quot;:3}"'), html)
       assert(html.includes('<button type="button">3</button>'), html)
@@ -113,7 +122,9 @@ Deno.test(
   async () => {
     const Comet = defineComet(Counter, FIXTURE_SOURCE_URL)
 
-    const response = await renderToResponse(<Comet initial={0} comet='visible' />)
+    const response = await renderToResponse(
+      <Comet initial={0} comet='visible' />,
+    )
     const html = await response.text()
 
     assert(html.includes('style="display:contents"'), html)
@@ -127,3 +138,36 @@ Deno.test('defineComet: throws for an anonymous component', () => {
     'defineComet() requires a named component',
   )
 })
+
+Deno.test(
+  'defineComet: unserializable props (a circular reference) fail with a clear, Space-authored ' +
+    'InternalError naming the Comet — not a raw JSON.stringify TypeError escaping the render ' +
+    "(initial-state-global.ts's own serialization contract)",
+  async () => {
+    const Comet = defineComet(Counter, FIXTURE_SOURCE_URL)
+    // deno-lint-ignore no-explicit-any
+    const circularProps: any = { initial: 0 }
+    circularProps.self = circularProps
+
+    let reported: unknown
+    const response = await renderToResponse(
+      <Comet {...circularProps} comet='visible' />,
+      { onError: (error) => (reported = error) },
+    )
+
+    // Same shape as any other render error reaching this function (see
+    // 'a shell render error yields status 500 and calls onError', above) — a Comet's own props
+    // are evaluated as part of a normal render pass, so an uncaught throw here already propagates
+    // through the exact same machinery, it's just a clear InternalError instead of a raw one.
+    assertEquals(response.status, 500)
+    assert(reported instanceof InternalError, String(reported))
+    assert(
+      (reported as InternalError).message.includes('Counter'),
+      (reported as InternalError).message,
+    )
+    assert(
+      (reported as InternalError).message.includes('not JSON-serializable'),
+      (reported as InternalError).message,
+    )
+  },
+)

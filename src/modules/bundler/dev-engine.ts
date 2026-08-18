@@ -1,4 +1,4 @@
-import type { HotUpdateOptions, Plugin, ViteDevServer } from 'vite'
+import type { HotUpdateOptions, Plugin, PluginOption, ViteDevServer } from 'vite'
 import { createServer, createServerModuleRunner } from 'vite'
 import deno from '@deno/vite-plugin'
 import { computeAffectedRoutes } from './affected-routes.ts'
@@ -6,10 +6,11 @@ import { RealImportEvaluator } from './ssr-module-evaluator.ts'
 import { cjsInteropFallbackPlugin, denoOnLoadCjsInterop } from './cjs-interop.ts'
 import { canonicalBareSpecifierResolvePlugin } from './bare-specifier-resolve.ts'
 
-// `HotUpdateOptions`/`Plugin` are intentionally NOT re-exported here, same reasoning as
-// `space-plugin.ts`'s own `Plugin` doc comment: both are deeply recursive Vite/Rolldown vendor
-// types this package doesn't own. `changeType`/`plugins` referencing them is an accepted,
-// structural `deno doc --lint` finding, not a gap in this package's own documentation.
+// `HotUpdateOptions`/`Plugin`/`PluginOption` are intentionally NOT re-exported here, same
+// reasoning as `space-plugin.ts`'s own `Plugin` doc comment: all are deeply recursive
+// Vite/Rolldown vendor types this package doesn't own. `changeType`/`plugins` referencing them is
+// an accepted, structural `deno doc --lint` finding, not a gap in this package's own
+// documentation.
 
 /**
  * Reported once per file change that affects the `ssr` environment's module graph — never for
@@ -31,8 +32,12 @@ export interface SpaceDevEngineOptions {
   /**
    * Extra Vite plugins to compose alongside the engine's own internal hot-update plugin — e.g.
    * `spacePlugin()` for the `client`/`ssr` Environment API config this engine relies on.
+   * `PluginOption[]`, not `Plugin[]` — `spacePlugin({ renderer: 'react' })`'s own return type
+   * includes a `Promise<Plugin>` entry (React Compiler's plugin, resolved lazily — see
+   * `space-plugin.ts`'s own doc), which this option must be able to carry through unchanged into
+   * `createServer()`'s own `plugins` array below, itself already `PluginOption[]`-typed by Vite.
    */
-  plugins?: Plugin[]
+  plugins?: PluginOption[]
   /**
    * Called once per edited `globalCss` file (`SpaceAppConfig.globalCss`, served as a real
    * `<link rel="stylesheet" href="...?direct">` — see `dev-css-hrefs.ts`'s own doc), with the
@@ -42,6 +47,31 @@ export interface SpaceDevEngineOptions {
    * itself needs), not a plain `<link>` swap; it rides that mechanism once wired, not this one.
    */
   onClientCssChanged?: (urls: string[]) => void
+  /**
+   * Called once per edited `client`-environment script module (a Comet's own `.tsx`/`.ts`/`.jsx`/
+   * `.js`) — the transport this package's own decision spike documented as "not yet
+   * wired": until this option is set, such a change is silently dropped (see
+   * {@linkcode ssrHotUpdatePlugin}'s own doc for exactly where). `urls` are Vite's own module graph
+   * urls (e.g. `/comets/counter.tsx`), the same identifiers `createHotContext(id)` receives on the
+   * browser side (`dev-vite-hot-client.ts`'s own doc) — a caller re-broadcasts them verbatim over
+   * `SpaceDevSocket` (`broadcastClientModuleChanged`), it never needs to resolve or transform them
+   * further itself.
+   *
+   * Genuinely renderer-agnostic, not just deliberately worded that way — this engine has no notion
+   * of which renderer produced a given Comet, and a real transform spike confirmed BOTH renderers'
+   * own transforms need this delivered the same way (React's `oxc.jsx`-based refresh transform and
+   * Preact's `@prefresh/vite` transform both register through `import.meta.hot`/`createHotContext`
+   * identically — see `dev-vite-hot-client.ts`'s own doc for the actual transform output). What
+   * determines whether a connected browser acts on this at all is whether its own dev-server
+   * orchestrator ALSO served `dev-vite-hot-client.ts`'s own `/@vite/client` replacement — see
+   * `dev-client-script.ts`'s own `handleClientModuleChanged` doc for that guard, which applies
+   * identically to either renderer.
+   *
+   * Never fired for a `.css` file (own dedicated {@linkcode onClientCssChanged} above) — a Comet's
+   * own local `import './x.css'` stays out of scope for this option (see
+   * `ssrHotUpdatePlugin`'s own doc for why that boundary is deliberate, not an oversight).
+   */
+  onClientModuleChanged?: (urls: string[]) => void
   /**
    * Identifies whether a module id is a route-boundary file (e.g. a `routes/**\/page.tsx`
    * convention) — passed through to {@linkcode computeAffectedRoutes} unchanged.
@@ -149,9 +179,7 @@ function ssrHotUpdatePlugin(options: SpaceDevEngineOptions): Plugin {
         // `SpaceDevSocket` channel `onSsrModuleChanged` already uses — no browser is ever
         // connected to Vite's own client HMR channel (this engine never binds a real HTTP
         // listener for it, see this function's own doc), so leaving a CSS change to Vite's
-        // default handling would silently do nothing. Any other `client`-environment change
-        // (a Comet's own `.tsx`/local CSS import) is still left untouched (falls through,
-        // `return`s `undefined`) until Fast Refresh's own transport is wired.
+        // default handling would silently do nothing.
         const directCssUrls = ctx.modules
           .filter((mod) => mod.file?.endsWith('.css') && mod.url.includes('?direct'))
           .map((mod) => mod.url)
@@ -159,11 +187,31 @@ function ssrHotUpdatePlugin(options: SpaceDevEngineOptions): Plugin {
           options.onClientCssChanged?.(directCssUrls)
           return []
         }
+
+        // Any other `client`-environment change (a Comet's own `.tsx`/`.ts`/`.jsx`/`.js`, never a
+        // local CSS import — see `onClientModuleChanged`'s own doc for why that stays excluded) is
+        // reported here, previously left untouched/falling through. A caller
+        // that never sets `onClientModuleChanged` (any existing caller, unmodified) sees IDENTICAL
+        // behavior to before this was added: falls through below, `return`s `undefined`.
+        const clientModuleUrls = ctx.modules
+          .filter((mod) => !mod.file?.endsWith('.css'))
+          .map((mod) => mod.url)
+        if (clientModuleUrls.length > 0 && options.onClientModuleChanged) {
+          options.onClientModuleChanged(clientModuleUrls)
+          return []
+        }
         return
       }
 
-      const affectedRoutes = computeAffectedRoutes(ctx.modules, options.isRouteEntry)
-      options.onSsrModuleChanged?.({ file: ctx.file, changeType: ctx.type, affectedRoutes })
+      const affectedRoutes = computeAffectedRoutes(
+        ctx.modules,
+        options.isRouteEntry,
+      )
+      options.onSsrModuleChanged?.({
+        file: ctx.file,
+        changeType: ctx.type,
+        affectedRoutes,
+      })
 
       // An empty array tells Vite "this update was fully handled" — nothing further to
       // propagate over the `ssr` environment's own HMR channel, which no browser is ever
@@ -321,7 +369,9 @@ export async function createSpaceDevEngine(
       // exactly the same class of request this whole function exists to fix.
       const unwrappedUrl = unwrapViteId(url)
 
-      let result: Awaited<ReturnType<typeof clientEnvironment.transformRequest>>
+      let result: Awaited<
+        ReturnType<typeof clientEnvironment.transformRequest>
+      >
       try {
         result = await clientEnvironment.transformRequest(unwrappedUrl)
       } catch (error) {
@@ -335,8 +385,14 @@ export async function createSpaceDevEngine(
       }
       if (!result) return null
 
-      const mod = await clientEnvironment.moduleGraph.getModuleByUrl(unwrappedUrl)
-      return { code: result.code, contentType: contentTypeFor(mod?.type), etag: result.etag }
+      const mod = await clientEnvironment.moduleGraph.getModuleByUrl(
+        unwrappedUrl,
+      )
+      return {
+        code: result.code,
+        contentType: contentTypeFor(mod?.type),
+        etag: result.etag,
+      }
     },
     close: async () => {
       await server.close()

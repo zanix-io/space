@@ -34,6 +34,18 @@ Deno.test("scheduleCometHydration: 'idle' defers to the injected requestIdleCall
 })
 
 Deno.test(
+  "scheduleCometHydration: 'idle' with no injected requestIdleCallback falls back to a deferred " +
+    'setTimeout (this test env has no real requestIdleCallback either)',
+  async () => {
+    let ran = false
+    scheduleCometHydration('idle', fakeElement, undefined, () => (ran = true))
+    assertFalse(ran, 'must not run synchronously')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    assertEquals(ran, true)
+  },
+)
+
+Deno.test(
   "scheduleCometHydration: 'visible' runs once the injected IntersectionObserver reports an intersecting entry",
   () => {
     let ran = false
@@ -50,10 +62,16 @@ Deno.test(
       }
     }
 
-    scheduleCometHydration('visible', fakeElement, undefined, () => (ran = true), {
-      // deno-lint-ignore no-explicit-any
-      IntersectionObserverCtor: FakeIntersectionObserver as any,
-    })
+    scheduleCometHydration(
+      'visible',
+      fakeElement,
+      undefined,
+      () => (ran = true),
+      {
+        // deno-lint-ignore no-explicit-any
+        IntersectionObserverCtor: FakeIntersectionObserver as any,
+      },
+    )
 
     observedCallback([{ isIntersecting: false }])
     assertFalse(ran, 'a non-intersecting entry must not trigger hydration')
@@ -68,9 +86,15 @@ Deno.test(
   "scheduleCometHydration: 'media' runs immediately when the injected matchMedia already matches",
   () => {
     let ran = false
-    scheduleCometHydration('media', fakeElement, '(max-width: 768px)', () => (ran = true), {
-      matchMedia: () => ({ matches: true }) as MediaQueryList,
-    })
+    scheduleCometHydration(
+      'media',
+      fakeElement,
+      '(max-width: 768px)',
+      () => (ran = true),
+      {
+        matchMedia: () => ({ matches: true }) as MediaQueryList,
+      },
+    )
     assertEquals(ran, true)
   },
 )
@@ -88,14 +112,23 @@ Deno.test(
       // deno-lint-ignore no-explicit-any
     } as any
 
-    scheduleCometHydration('media', fakeElement, '(max-width: 768px)', () => (ran = true), {
-      matchMedia: () => mql,
-    })
+    scheduleCometHydration(
+      'media',
+      fakeElement,
+      '(max-width: 768px)',
+      () => (ran = true),
+      {
+        matchMedia: () => mql,
+      },
+    )
     assertFalse(ran)
 
     mql.matches = false
     listener?.()
-    assertFalse(ran, 'a change event while still not matching must not trigger hydration')
+    assertFalse(
+      ran,
+      'a change event while still not matching must not trigger hydration',
+    )
 
     mql.matches = true
     listener?.()

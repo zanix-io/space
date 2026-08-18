@@ -1,7 +1,10 @@
 import { assert, assertEquals } from '@std/assert'
 import { build } from 'vite'
 import type { Rollup } from 'vite'
+import { getTemporaryFolder } from '@zanix/helpers'
 import { cometPlugin } from 'modules/bundler/comet-plugin.ts'
+
+const TMP_ROOT = getTemporaryFolder(import.meta.url)
 
 /**
  * Real `vite build()` runs, not mocks — this is the one place in this package's suite that
@@ -13,7 +16,7 @@ import { cometPlugin } from 'modules/bundler/comet-plugin.ts'
 Deno.test(
   "cometPlugin: forces a 'use comet' file into its own chunk, not inlined into its importer",
   async () => {
-    const root = await Deno.makeTempDir()
+    const root = await Deno.makeTempDir({ dir: TMP_ROOT })
     try {
       await Deno.mkdir(`${root}/comets`, { recursive: true })
       const counterPath = `${root}/comets/counter.tsx`
@@ -29,7 +32,11 @@ Deno.test(
       const result = await build({
         root,
         logLevel: 'silent',
-        build: { write: false, minify: false, rollupOptions: { input: `${root}/main.ts` } },
+        build: {
+          write: false,
+          minify: false,
+          rollupOptions: { input: `${root}/main.ts` },
+        },
         plugins: [cometPlugin()],
       })
 
@@ -47,7 +54,11 @@ Deno.test(
 
       assert(cometChunk, 'expected a dedicated chunk for the "use comet" file')
       assert(mainChunk, 'expected a chunk for the main entry')
-      assertEquals(chunks.length, 2, 'the comet must not be inlined into any other chunk')
+      assertEquals(
+        chunks.length,
+        2,
+        'the comet must not be inlined into any other chunk',
+      )
       assert(cometChunk.code.includes('function Counter'), cometChunk.code)
       assert(
         !mainChunk.code.includes('function Counter'),
@@ -65,7 +76,7 @@ Deno.test(
 )
 
 Deno.test('cometPlugin: a file with no "use comet" directive is left alone entirely', async () => {
-  const root = await Deno.makeTempDir()
+  const root = await Deno.makeTempDir({ dir: TMP_ROOT })
   try {
     await Deno.mkdir(`${root}/comets`, { recursive: true })
     await Deno.writeTextFile(
@@ -88,8 +99,15 @@ Deno.test('cometPlugin: a file with no "use comet" directive is left alone entir
     const chunks = output.filter((entry): entry is Rollup.OutputChunk => entry.type === 'chunk')
     const assets = output.filter((entry) => entry.type === 'asset')
 
-    assertEquals(chunks.length, 1, 'no directive, no split — inlined into the single entry chunk')
-    assertEquals(assets.find((a) => a.fileName === 'comets-manifest.json'), undefined)
+    assertEquals(
+      chunks.length,
+      1,
+      'no directive, no split — inlined into the single entry chunk',
+    )
+    assertEquals(
+      assets.find((a) => a.fileName === 'comets-manifest.json'),
+      undefined,
+    )
   } finally {
     await Deno.remove(root, { recursive: true })
   }

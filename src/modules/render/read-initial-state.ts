@@ -1,4 +1,5 @@
 import { INITIAL_STATE_GLOBAL } from './initial-state-global.ts'
+import { decodeFromWire } from './serialization-codec.ts'
 
 /**
  * Reads back, on the client, the state a server render handed off via
@@ -15,5 +16,11 @@ import { INITIAL_STATE_GLOBAL } from './initial-state-global.ts'
  * ```
  */
 export function readInitialState<T>(): T | undefined {
-  return (globalThis as Record<string, unknown>)[INITIAL_STATE_GLOBAL] as T | undefined
+  // Decoded on read rather than in the injected script: the script stays a bare assignment (no
+  // codec code shipped inline, in either renderer), and an app that never calls this pays nothing.
+  // `decodeFromWire` returns a plain payload untouched, so a page rendered with the codec off
+  // behaves exactly as it always has.
+  return decodeFromWire(
+    (globalThis as Record<string, unknown>)[INITIAL_STATE_GLOBAL],
+  ) as T | undefined
 }

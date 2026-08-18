@@ -30,7 +30,9 @@ let defaultHeaders: PageHeaderOptions | false | undefined = undefined
  * // every page now gets this policy unless it sets its own `headers`
  * ```
  */
-export function setDefaultPageHeaders(options: PageHeaderOptions | false): void {
+export function setDefaultPageHeaders(
+  options: PageHeaderOptions | false,
+): void {
   defaultHeaders = options
 }
 

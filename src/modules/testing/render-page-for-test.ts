@@ -27,8 +27,20 @@ export type RenderPageForTestResult = { response: Response; html: string }
  * const { html } = await renderPageForTest(ProductPage, { id: '1' })
  * ```
  */
-export async function renderPageForTest<Params = Record<string, string>>(
-  Controller: ClassConstructor<SpacePageController<Params>>,
+export async function renderPageForTest<
+  Params = Record<string, string>,
+  // Defaulted, and inferred from `Controller` in practice — a React page (this package's default
+  // renderer) never has to know this parameter exists, exactly like `SpacePageController`'s own
+  // `TComponent`. It exists because pinning it to that class's own DEFAULT (React's
+  // `ComponentType<any> | null`) made this helper reject a `--renderer=preact` page outright: a
+  // Preact page names Preact's own `ComponentType` in its `extends` clause, and the two renderers'
+  // component types are nominally incompatible (confirmed empirically — the rejection reached down
+  // to `React.Context`'s own `$$typeof`), so the ONE public API for testing a page could not test
+  // half of the pages this framework renders. This function never reads `component` itself.
+  // deno-lint-ignore no-explicit-any
+  TComponent = any,
+>(
+  Controller: ClassConstructor<SpacePageController<Params, never, TComponent>>,
   params: Params = {} as Params,
   ctxOverrides: Partial<HandlerContext> = {},
 ): Promise<RenderPageForTestResult> {

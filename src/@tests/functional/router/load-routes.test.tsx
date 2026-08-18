@@ -1,6 +1,10 @@
+// Installs a renderer, exactly as a real app does: `@zanix/space` itself ships none, so a
+// test that renders must import the entry point it is testing against.
+import '../../../../mod-react.ts'
 import { assert, assertEquals } from '@std/assert'
 import { join } from '@std/path'
 import { bootstrapServers, webServerManager } from '@zanix/server'
+import { getTemporaryFolder } from '@zanix/helpers'
 import { loadRoutes, Page, SpacePageController } from 'modules/router/mod.ts'
 
 Deno.test(
@@ -23,11 +27,14 @@ Deno.test(
 Deno.test(
   'loadRoutes: a second call for the same file deregisters the previous page class first',
   async () => {
-    const routesDir = await Deno.makeTempDir()
+    const routesDir = await Deno.makeTempDir({ dir: getTemporaryFolder(import.meta.url) })
     try {
       // Content is irrelevant — `scanPageFiles` only needs the file to exist to discover it;
       // `importModule` below is what actually decides what "imports" as this page.
-      await Deno.writeTextFile(join(routesDir, 'page.tsx'), 'export default null\n')
+      await Deno.writeTextFile(
+        join(routesDir, 'page.tsx'),
+        'export default null\n',
+      )
 
       let generation = 0
       const importModule = () => {

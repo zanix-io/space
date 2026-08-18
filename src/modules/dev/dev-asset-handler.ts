@@ -4,7 +4,15 @@ import type { SpaceDevEngine } from 'modules/bundler/dev-engine.ts'
  * "anything with a dot"), so a request for something else entirely (a real page route with a
  * literal `.` in it, an unrelated static file a different handler owns) never gets misrouted
  * here. */
-const ASSET_EXTENSIONS = ['.css', '.ts', '.tsx', '.js', '.jsx', '.mjs', '.json']
+const ASSET_EXTENSIONS = [
+  '.css',
+  '.ts',
+  '.tsx',
+  '.js',
+  '.jsx',
+  '.mjs',
+  '.json',
+]
 
 /** Vite's own special request paths — none of them carry a recognizable file extension
  * (`/@vite/client`), or live outside the project root entirely (`/@fs/...`, for Vite's own
@@ -31,7 +39,9 @@ const VITE_EXACT_VIRTUAL_MODULES = ['/@react-refresh']
  */
 export function looksLikeDevAssetRequest(pathname: string): boolean {
   if (VITE_EXACT_VIRTUAL_MODULES.includes(pathname)) return true
-  if (VITE_SPECIAL_PREFIXES.some((prefix) => pathname.startsWith(prefix))) return true
+  if (VITE_SPECIAL_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
+    return true
+  }
   return ASSET_EXTENSIONS.some((ext) => pathname.endsWith(ext))
 }
 
@@ -64,12 +74,17 @@ export function createDevAssetHandler(
       asset = await engine.transformClientAsset(url.pathname + url.search)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      return new Response(message, { status: 500, headers: { 'content-type': 'text/plain' } })
+      return new Response(message, {
+        status: 500,
+        headers: { 'content-type': 'text/plain' },
+      })
     }
 
     if (!asset) return new Response('Not found', { status: 404 })
 
-    const headers: Record<string, string> = { 'content-type': asset.contentType }
+    const headers: Record<string, string> = {
+      'content-type': asset.contentType,
+    }
     if (asset.etag) headers.etag = asset.etag
     return new Response(asset.code, { status: 200, headers })
   }

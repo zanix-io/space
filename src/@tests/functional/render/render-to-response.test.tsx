@@ -1,7 +1,7 @@
 import { Suspense } from 'react'
 import { preconnect, preload } from 'react-dom'
 import { assert, assertEquals, assertMatch } from '@std/assert'
-import { renderToResponse } from 'modules/render/mod.ts'
+import { renderToResponse } from '../../../../mod-react.ts'
 import { stripHydrationComments } from '../../support/strip-hydration-comments.ts'
 
 function Greeting({ name }: { name: string }) {
@@ -12,7 +12,10 @@ Deno.test('renderToResponse: renders the given element to a 200 text/html Respon
   const response = await renderToResponse(<Greeting name='Ana' />)
 
   assertEquals(response.status, 200)
-  assertEquals(response.headers.get('content-type'), 'text/html; charset=utf-8')
+  assertEquals(
+    response.headers.get('content-type'),
+    'text/html; charset=utf-8',
+  )
   const html = await response.text()
   assertMatch(stripHydrationComments(html), /Hello, Ana/)
 })
@@ -24,7 +27,11 @@ Deno.test('renderToResponse: injects initialState as a single inline script, onc
 
   const html = await response.text()
   const matches = [...html.matchAll(/__ZANIX_SPACE_STATE__/g)]
-  assertEquals(matches.length, 1, 'the state global must appear exactly once in the document')
+  assertEquals(
+    matches.length,
+    1,
+    'the state global must appear exactly once in the document',
+  )
   assertMatch(html, /__ZANIX_SPACE_STATE__=\{"user":\{"name":"Ana"\}\}/)
 })
 
@@ -52,15 +59,55 @@ Deno.test(
     )
 
     const html = await response.text()
+    const headContent = html.slice(
+      html.indexOf('<head'),
+      html.indexOf('</head>'),
+    )
+    assert(
+      headContent.includes(
+        '<link rel="stylesheet" href="/assets/app-abc123.css"',
+      ),
+      headContent,
+    )
+    assert(
+      headContent.includes(
+        '<link rel="stylesheet" href="/assets/vendor-def456.css"',
+      ),
+      headContent,
+    )
+  },
+)
+
+Deno.test(
+  'renderToResponse: a {href, media} cssHrefs entry renders its media attribute; a plain string ' +
+    'entry renders none at all (P2-12a)',
+  async () => {
+    const response = await renderToResponse(
+      <html lang='en'>
+        <head />
+        <body>
+          <Greeting name='Ana' />
+        </body>
+      </html>,
+      {
+        cssHrefs: [
+          { href: '/assets/mobile-abc123.css', media: '(max-width: 599px)' },
+          '/assets/app-abc123.css',
+        ],
+      },
+    )
+
+    const html = await response.text()
     const headContent = html.slice(html.indexOf('<head'), html.indexOf('</head>'))
     assert(
-      headContent.includes('<link rel="stylesheet" href="/assets/app-abc123.css"'),
+      headContent.includes(
+        '<link rel="stylesheet" href="/assets/mobile-abc123.css" media="(max-width: 599px)"',
+      ),
       headContent,
     )
-    assert(
-      headContent.includes('<link rel="stylesheet" href="/assets/vendor-def456.css"'),
-      headContent,
-    )
+    const appLinkMatch = headContent.match(/<link[^>]*href="\/assets\/app-abc123\.css"[^>]*>/)
+    assert(appLinkMatch, headContent)
+    assert(!appLinkMatch[0].includes('media='), appLinkMatch[0])
   },
 )
 
@@ -74,13 +121,27 @@ Deno.test(
           <Greeting name='Ana' />
         </body>
       </html>,
-      { pwaHead: { manifestHref: '/manifest.webmanifest', themeColor: '#2563eb' } },
+      {
+        pwaHead: {
+          manifestHref: '/manifest.webmanifest',
+          themeColor: '#2563eb',
+        },
+      },
     )
 
     const html = await response.text()
-    const headContent = html.slice(html.indexOf('<head'), html.indexOf('</head>'))
-    assert(headContent.includes('<link rel="manifest" href="/manifest.webmanifest"'), headContent)
-    assert(headContent.includes('<meta name="theme-color" content="#2563eb"'), headContent)
+    const headContent = html.slice(
+      html.indexOf('<head'),
+      html.indexOf('</head>'),
+    )
+    assert(
+      headContent.includes('<link rel="manifest" href="/manifest.webmanifest"'),
+      headContent,
+    )
+    assert(
+      headContent.includes('<meta name="theme-color" content="#2563eb"'),
+      headContent,
+    )
   },
 )
 
@@ -112,7 +173,10 @@ Deno.test(
       </html>,
       {
         nonce: 'test-nonce-123',
-        pwaHead: { manifestHref: '/manifest.webmanifest', serviceWorkerHref: '/sw.js' },
+        pwaHead: {
+          manifestHref: '/manifest.webmanifest',
+          serviceWorkerHref: '/sw.js',
+        },
       },
     )
 
@@ -165,7 +229,10 @@ Deno.test(
 
     const response = await renderToResponse(<FontPreloadPage />)
     const html = await response.text()
-    const headContent = html.slice(html.indexOf('<head'), html.indexOf('</head>'))
+    const headContent = html.slice(
+      html.indexOf('<head'),
+      html.indexOf('</head>'),
+    )
 
     assert(
       headContent.includes(
@@ -173,7 +240,11 @@ Deno.test(
       ),
       headContent,
     )
-    assert(headContent.includes('<link rel="preconnect" href="https://fonts.example.com"'))
+    assert(
+      headContent.includes(
+        '<link rel="preconnect" href="https://fonts.example.com"',
+      ),
+    )
   },
 )
 
@@ -193,6 +264,78 @@ Deno.test(
 
     assertEquals(response.status, 500)
     assert(reported instanceof Error && reported.message === 'boom')
+  },
+)
+
+Deno.test(
+  'renderToResponse: a circular initialState resolves 500 and calls onError — the documented ' +
+    'serialization-failure path (initial-state-global.ts), never an uncaught throw',
+  async () => {
+    // deno-lint-ignore no-explicit-any
+    const circular: any = { a: 1 }
+    circular.self = circular
+
+    let reported: unknown
+    const response = await renderToResponse(<Greeting name='Ana' />, {
+      initialState: circular,
+      onError: (error) => {
+        reported = error
+      },
+    })
+
+    assertEquals(response.status, 500)
+    assertEquals(await response.text(), '')
+    assert(reported instanceof Error, String(reported))
+    assertMatch((reported as Error).message, /circular/i)
+  },
+)
+
+Deno.test(
+  'renderToResponse: a BigInt anywhere inside initialState also resolves 500 — handled ' +
+    'identically to a circular reference, neither is special-cased (initial-state-global.ts)',
+  async () => {
+    let reported: unknown
+    const response = await renderToResponse(<Greeting name='Ana' />, {
+      initialState: { big: 1n },
+      onError: (error) => {
+        reported = error
+      },
+    })
+
+    assertEquals(response.status, 500)
+    assert(reported instanceof Error, String(reported))
+  },
+)
+
+Deno.test(
+  'renderToResponse: initialState degrades undefined/functions/Date/Map/Set exactly as ' +
+    'documented (initial-state-global.ts), never throws',
+  async () => {
+    const fixedDate = new Date('2024-01-01T00:00:00.000Z')
+    const response = await renderToResponse(<Greeting name='Ana' />, {
+      initialState: {
+        omittedUndefined: undefined,
+        omittedFunction: () => {},
+        arrayWithUndefined: [1, undefined, 3],
+        arrayWithFunction: [1, () => {}, 3],
+        when: fixedDate,
+        aMap: new Map([['a', 1]]),
+        aSet: new Set([1, 2, 3]),
+      },
+    })
+
+    const html = await response.text()
+    const marker = 'self.__ZANIX_SPACE_STATE__='
+    const start = html.indexOf(marker)
+    assert(start !== -1, html)
+    const end = html.indexOf('</script>', start)
+    const serialized = html.slice(start + marker.length, end)
+
+    assertEquals(
+      serialized,
+      '{"arrayWithUndefined":[1,null,3],"arrayWithFunction":[1,null,3],' +
+        `"when":"${fixedDate.toISOString()}","aMap":{},"aSet":{}}`,
+    )
   },
 )
 

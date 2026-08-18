@@ -48,7 +48,8 @@ function getBrowserLoader(root: string): Promise<Loader> {
   const key = configPath ?? ''
   let loaderPromise = browserLoadersByConfigPath.get(key)
   if (!loaderPromise) {
-    loaderPromise = new Workspace({ platform: 'browser', configPath }).createLoader()
+    loaderPromise = new Workspace({ platform: 'browser', configPath })
+      .createLoader()
     browserLoadersByConfigPath.set(key, loaderPromise)
   }
   return loaderPromise
@@ -59,11 +60,15 @@ function getBrowserLoader(root: string): Promise<Loader> {
  * (`@vitejs/plugin-react`'s own React-detection heuristic is one real source; there may be
  * others, present or future, for a different renderer or a different plugin entirely) — this
  * function never assumes WHY a specifier ended up there, only that it did. */
-function collectOptimizeDepsIncludeSpecifiers(config: ResolvedConfig): string[] {
+function collectOptimizeDepsIncludeSpecifiers(
+  config: ResolvedConfig,
+): string[] {
   const specifiers = new Set<string>()
   for (const spec of config.optimizeDeps?.include ?? []) specifiers.add(spec)
   for (const environment of Object.values(config.environments ?? {})) {
-    for (const spec of environment.optimizeDeps?.include ?? []) specifiers.add(spec)
+    for (const spec of environment.optimizeDeps?.include ?? []) {
+      specifiers.add(spec)
+    }
   }
   return [...specifiers]
 }
@@ -136,7 +141,13 @@ async function collectBareSpecifiersFromFile(
     extractImportSpecifiers(source).map(async (specifier) => {
       if (specifier.startsWith('.')) {
         const resolved = await resolveRelativeImportPath(filePath, specifier)
-        if (resolved) await collectBareSpecifiersFromFile(resolved, visited, bareSpecifiers)
+        if (resolved) {
+          await collectBareSpecifiersFromFile(
+            resolved,
+            visited,
+            bareSpecifiers,
+          )
+        }
         return
       }
       if (specifier.startsWith('/')) return // an absolute project path — not a package, skip
@@ -156,7 +167,9 @@ async function collectBareSpecifiersFromFile(
  * actually triggers Vite's own pre-bundling/CJS-interop pass in the first place; an alias with no
  * corresponding `include` entry just remaps a path Vite never decided to optimize.
  */
-async function discoverBareSpecifiersFromComets(cometFiles: string[]): Promise<string[]> {
+async function discoverBareSpecifiersFromComets(
+  cometFiles: string[],
+): Promise<string[]> {
   if (cometFiles.length === 0) return []
 
   const visited = new Set<string>()
@@ -244,7 +257,9 @@ export function denoOptimizeDepsAliasPlugin(): Plugin {
   return {
     name: 'zanix-deno-optimize-deps-alias',
     async configResolved(config) {
-      const alreadyIncluded = new Set(collectOptimizeDepsIncludeSpecifiers(config))
+      const alreadyIncluded = new Set(
+        collectOptimizeDepsIncludeSpecifiers(config),
+      )
       const cometFiles = await discoverComets(config.root)
       const discovered = await discoverBareSpecifiersFromComets(cometFiles)
       const newlyDiscovered = discovered.filter((spec) => !alreadyIncluded.has(spec))
@@ -277,9 +292,11 @@ export function denoOptimizeDepsAliasPlugin(): Plugin {
         // explicitly intersects in `{ alias: Alias[] }`; the per-environment one doesn't, even
         // though the same field exists there too (same "Environment API is still a release
         // candidate" gap `space-plugin.ts`'s own doc already calls out for a different symbol).
-        const environmentResolve = environment.resolve as typeof environment.resolve & {
-          alias: typeof aliasEntries
-        }
+        const environmentResolve = environment.resolve as
+          & typeof environment.resolve
+          & {
+            alias: typeof aliasEntries
+          }
         environmentResolve.alias.push(...aliasEntries)
       }
 

@@ -27,22 +27,20 @@ function toRouteSegment(folderName: string): string {
 }
 
 /**
- * Walks `routesDir` looking for files literally named `page.tsx`, deriving each one's route path
- * from its folder structure — the folder tree itself is the route composition, exactly as file-based
- * routing conventions across the ecosystem (Fresh, Next.js, Astro) already establish. A `[id]`
- * folder segment becomes the dynamic segment `:id`. Along the way, also records each directory
- * level's own `layout.tsx`/`loading.tsx`/`error.tsx` (if present) as that page's composition chain —
- * `loadRoutes()` uses this to wrap the page in its layouts/Suspense-fallback/error-boundary, from
- * the routes root down to the page's own directory. Read-only: never registers or imports anything
- * itself — see `loadRoutes()` for the step that actually does.
+ * Walks a SINGLE directory looking for files literally named `page.tsx`, deriving each one's route
+ * path from its folder structure — the folder tree itself is the route composition, exactly as
+ * file-based routing conventions across the ecosystem (Fresh, Next.js, Astro) already establish. A
+ * `[id]` folder segment becomes the dynamic segment `:id`. Along the way, also records each
+ * directory level's own `layout.tsx`/`loading.tsx`/`error.tsx` (if present) as that page's
+ * composition chain — `loadRoutes()` uses this to wrap the page in its layouts/Suspense-fallback/
+ * error-boundary, from THIS directory's own root down to the page's own directory. Deliberately
+ * never looks outside `dir` for a missing ancestor file: a page's composition chain is always
+ * resolved entirely within the one directory that provided it (see {@linkcode scanPageFiles}'s own
+ * doc for why, when `routesDir` is an array).
  *
- * A `routesDir` that doesn't exist yet is treated as zero pages, not an error — a brand new app
- * with no `routes/` folder must still start.
- *
- * @param routesDir - The routes directory root, relative to the current working directory.
- * @returns The discovered pages, in the order they were found (not otherwise significant).
+ * A `dir` that doesn't exist yet is treated as zero pages, not an error.
  */
-export async function scanPageFiles(routesDir: string): Promise<DiscoveredPage[]> {
+async function walkOneDir(dir: string): Promise<DiscoveredPage[]> {
   async function walk(
     dir: string,
     segments: string[],
@@ -69,7 +67,11 @@ export async function scanPageFiles(routesDir: string): Promise<DiscoveredPage[]
     const found = await Promise.all(entries.map((entry) => {
       const entryPath = join(dir, entry.name)
       if (entry.isDirectory) {
-        return walk(entryPath, [...segments, toRouteSegment(entry.name)], chain)
+        return walk(
+          entryPath,
+          [...segments, toRouteSegment(entry.name)],
+          chain,
+        )
       }
       if (entry.isFile && entry.name === 'page.tsx') {
         return Promise.resolve<DiscoveredPage[]>([{
@@ -84,5 +86,41 @@ export async function scanPageFiles(routesDir: string): Promise<DiscoveredPage[]
     return found.flat()
   }
 
-  return await walk(routesDir, [], [])
+  return await walk(dir, [], [])
+}
+
+/**
+ * Discovers every page across one or more routes directories — `routesDir: string[]` (`@zanix/core`'s
+ * own `rootDir: string[]` precedent) lets a host compose a base app's pages with its own overrides
+ * without forking either tree. Each directory is scanned independently via {@linkcode walkOneDir}
+ * (never merged file-by-file), then results are combined by FIRST MATCH: for a `routePath` found in
+ * more than one directory, only the entry from the EARLIEST directory (array order) is kept — that
+ * directory's own full composition chain (root layout down to the page, from that same walk) is used
+ * as-is, never patched with segments from a later directory. This is deliberate: assembling a page's
+ * `layout.tsx`/`error.tsx`/`loading.tsx` chain from two different directories would produce a
+ * "Frankenstein page" whose ancestors were never actually designed to compose together. A single
+ * `string` (the common case) behaves exactly as before this array support existed.
+ *
+ * @param routesDir - The routes directory root(s), relative to the current working directory. A
+ * directory that doesn't exist yet is treated as zero pages, not an error — a brand new app with no
+ * `routes/` folder must still start.
+ * @returns The discovered pages, first-match-wins across `routesDir`'s own order, otherwise in the
+ * order they were found (not otherwise significant).
+ */
+export async function scanPageFiles(
+  routesDir: string | string[],
+): Promise<DiscoveredPage[]> {
+  const dirs = Array.isArray(routesDir) ? routesDir : [routesDir]
+  const perDir = await Promise.all(dirs.map(walkOneDir))
+
+  const seenRoutePaths = new Set<string>()
+  const pages: DiscoveredPage[] = []
+  for (const found of perDir) {
+    for (const page of found) {
+      if (seenRoutePaths.has(page.routePath)) continue
+      seenRoutePaths.add(page.routePath)
+      pages.push(page)
+    }
+  }
+  return pages
 }

@@ -1,30 +1,23 @@
-import type { ComponentType, ReactElement } from 'react'
-import { Suspense } from 'react'
-import type {
-  ClassConstructor,
-  GuardContext,
-  HandlerContext,
-  ZanixInteractorGeneric,
-} from '@zanix/server'
-import type { PageActionContext, PageContext, RedirectConfig } from 'typings/page.ts'
-
+import type { ClassConstructor, HandlerContext, ZanixInteractorGeneric } from '@zanix/server'
 import { ZanixSsrController } from '@zanix/server'
+import type { PageActionContext, PageContext, RedirectConfig } from 'typings/page.ts'
+import type { SpaceComponent } from 'typings/renderable.ts'
+import type { HeadDescriptor } from './head-descriptor.ts'
+import type { StylesheetRef } from '../render/css-manifest.ts'
+
 import { HttpError } from '@zanix/errors'
-import { renderToResponse } from '../render/render-to-response.tsx'
-import { resolveCssHrefs } from '../render/css-manifest.ts'
-import { resolvePwaHead } from '../pwa/pwa-registry.ts'
-import { isDevClientEnabled } from '../dev/dev-client-registry.ts'
+import type { RtoTypes } from '@zanix/types'
+import type { PageFieldErrors } from 'typings/page.ts'
+import { validateActionBody } from './action-validation.ts'
+import { renderPageResponse, resolvePageChrome } from './render-page-response.ts'
 import { computeEtag } from './etag.ts'
-import { SpaceErrorBoundary } from './error-boundary.tsx'
-import { getPageTree } from './page-tree-registry.ts'
-import { applyDocumentShell } from './document-shell.tsx'
-import { ORBIT_FRAGMENT_HEADER, ORBIT_OUTLET_ATTR } from './orbit-protocol.ts'
+import { ORBIT_FRAGMENT_HEADER } from './orbit-protocol.ts'
+import { getPageRenderer } from './page-renderer-registry.ts'
 import type { CspDirectives } from '../middleware/csp-guard.ts'
-import { CSP_NONCE_LOCALS_KEY, cspGuard } from '../middleware/csp-guard.ts'
 import type { SecurityHeadersOptions } from '../middleware/security-headers-guard.ts'
-import { securityHeadersGuard } from '../middleware/security-headers-guard.ts'
 import { CSRF_TOKEN_LOCALS_KEY } from '../middleware/csrf-guard.ts'
-import { resolvePageHeaders } from './default-page-headers.ts'
+import { POPULATION_LOCALS_KEY } from '../middleware/population-guard.ts'
+import { getThemeResolver } from '../theme/theme-registry.ts'
 
 /** `Page()`'s combined header options — `SecurityHeadersOptions`'s own flat fields (`frameOptions`,
  * `referrerPolicy`, ...) plus `csp`, all under one `headers` option. `csp` is kept as its own field
@@ -42,53 +35,6 @@ export type PageHeaderOptions = SecurityHeadersOptions & {
    * disables CSP for this page while leaving the rest of `headers` in effect.
    */
   csp?: CspDirectives | ((nonce: string) => CspDirectives) | false
-}
-
-/** `Page()`'s own default CSP, applied whenever `headers.csp` is left unset — nonce-based (not
- * `'unsafe-inline'`) specifically so it doesn't conflict with `renderToResponse`'s own inline
- * initial-state script; see `cspGuard`'s nonce-generating form for how the two stay in sync. */
-const DEFAULT_CSP_DIRECTIVES = (nonce: string): CspDirectives => ({
-  'default-src': ["'self'"],
-  'script-src': ["'self'", `'nonce-${nonce}'`],
-})
-
-/**
- * Applies this page's `headers` choice to `ctx`/the eventual response — calls
- * `cspGuard`/`securityHeadersGuard` as plain functions, deliberately NOT via `@Guard`/
- * `registerGlobalGuard`: those require a real TC39 decorator `context` to know they're registering
- * a class-level guard, which `Page()` (an imperative call, not `@Guard` class-decorator syntax)
- * never has — see `registerPage`'s own doc in `page-decorator.ts` for the full explanation. A guard
- * is, at the end of the day, just a plain function; nothing about calling it directly is unusual.
- *
- * Returns the headers to merge into the response, and the nonce (if any) to forward to
- * `renderToResponse`. `headers: false` skips everything (CSP included) for this page.
- */
-async function applySecurityGuards(
-  ctx: HandlerContext,
-  headers: PageHeaderOptions | false | undefined,
-): Promise<{ headers: Record<string, string>; nonce: string | undefined }> {
-  if (headers === false) return { headers: {}, nonce: undefined }
-
-  const { csp, ...securityHeaderOptions } = headers ?? {}
-  const merged: Record<string, string> = {}
-
-  if (csp !== false) {
-    // `cspGuard` only ever reads `ctx.locals` — a plain `HandlerContext` already satisfies that,
-    // the extra `GuardContext` fields (interactors/providers/connectors) are never touched. Both
-    // guards below are actually synchronous, but `MiddlewareGuard`'s own type allows an async
-    // implementation too, so this awaits rather than assuming.
-    const { headers: cspHeaders } = await cspGuard(csp ?? DEFAULT_CSP_DIRECTIVES)(
-      ctx as GuardContext,
-    )
-    Object.assign(merged, cspHeaders)
-  }
-
-  const { headers: securityHeaders } = await securityHeadersGuard(securityHeaderOptions)(
-    ctx as GuardContext,
-  )
-  Object.assign(merged, securityHeaders)
-
-  return { headers: merged, nonce: ctx.locals[CSP_NONCE_LOCALS_KEY] as string | undefined }
 }
 
 // Re-exported (not just imported) because this class's own public signature references both:
@@ -112,113 +58,19 @@ function toPageContext<Params>(ctx: HandlerContext): PageContext<Params> {
     params: ctx.payload.params as Params,
     url: ctx.url,
     csrfToken: ctx.locals[CSRF_TOKEN_LOCALS_KEY] as string | undefined,
+    population: ctx.locals[POPULATION_LOCALS_KEY] as string | undefined,
   }
 }
 
-function buildRedirectResponse(redirect: RedirectConfig, requestUrl: URL): Response {
+function buildRedirectResponse(
+  redirect: RedirectConfig,
+  requestUrl: URL,
+): Response {
   const location = new URL(redirect.to, requestUrl).href
-  return new Response(null, { status: redirect.code ?? 301, headers: { location } })
-}
-
-/**
- * Wraps `element` in its page's composition chain (root directory first) — each segment's own
- * `error.tsx` boundary around its own `loading.tsx` Suspense fallback around its own `layout.tsx`,
- * built from the leaf directory outward so the root layout ends up outermost.
- *
- * A segment with an `error.tsx` but no `loading.tsx` still gets wrapped in a `Suspense` (with a
- * `null` fallback) — not for a loading state, but because React's server renderer only recovers a
- * thrown error into an already-mounted error boundary for content that lives *inside* a `Suspense`
- * boundary; a synchronous throw in the plain, un-suspended "shell" is always fatal to the whole
- * response, no matter how many error boundaries sit above it. See `SpaceErrorBoundary`'s own doc
- * for what actually happens once that boundary IS reachable (it isn't a same-request fallback).
- *
- * **The root layout owns the document, same contract as Next.js's own App Router**: the outermost
- * segment's `layout.tsx` (root `routesDir`, or a page never routed through `loadRoutes()` at all,
- * which has no segments to speak of) is applied by `applyDocumentShell` below, not by this loop —
- * shared with `createNotFoundHandler`'s own not-found page, which has no segment loop of its own
- * but still needs the exact same root-layout-or-default-shell decision.
- *
- * Everything below the root layout is wrapped in a marker (`ORBIT_OUTLET_ATTR`) Orbit's client
- * runtime uses as its navigation swap target — a header/footer/nav living in the root layout
- * itself stays outside that marker, so Orbit never re-fetches or re-renders it.
- *
- * @param fragmentOnly - `true` for an Orbit navigation request (see `ORBIT_FRAGMENT_HEADER`):
- * returns just the outlet's own content, skipping the root layout and document shell entirely,
- * since Orbit only ever swaps what's already inside them on the client.
- */
-function composeSegments<Params>(
-  Target: ClassConstructor<SpacePageController>,
-  element: ReactElement,
-  params: Params,
-  fragmentOnly: boolean,
-): ReactElement {
-  const segments = getPageTree(Target)?.segments ?? []
-
-  let node = element
-  for (let i = segments.length - 1; i >= 0; i--) {
-    const { layout: Layout, loading: Loading, error: ErrorFallback } = segments[i]
-    if (Loading) {
-      node = <Suspense fallback={<Loading />}>{node}</Suspense>
-    } else if (ErrorFallback) {
-      node = <Suspense fallback={null}>{node}</Suspense>
-    }
-    if (ErrorFallback) {
-      node = <SpaceErrorBoundary fallback={ErrorFallback}>{node}</SpaceErrorBoundary>
-    }
-    if (Layout && i !== 0) {
-      node = <Layout params={params as unknown as Record<string, string>}>{node}</Layout>
-    }
-  }
-
-  // `display: contents` so this outlet never breaks a root layout's own `display: grid`/`flex`
-  // layout by inserting an extra box between it and its real children.
-  const outlet = <div style={{ display: 'contents' }} {...{ [ORBIT_OUTLET_ATTR]: '' }}>{node}</div>
-  if (fragmentOnly) return outlet
-
-  return applyDocumentShell(
-    segments[0]?.layout,
-    outlet,
-    params as unknown as Record<string, string>,
-  )
-}
-
-/**
- * Builds and renders a page's full element tree — a plain function, never a class member (`private`
- * doesn't exempt a method from `HandlerBaseClass`'s instance-member index signature; only moving it
- * off the class entirely does).
- */
-function renderPageResponse<Params>(
-  Target: ClassConstructor<SpacePageController>,
-  // deno-lint-ignore no-explicit-any
-  Component: ComponentType<any>,
-  pageCtx: PageContext<Params>,
-  data: unknown,
-  fragmentOnly: boolean,
-  nonce: string | undefined,
-): Promise<Response> {
-  const element = composeSegments(
-    Target,
-    <Component {...(data as Record<string, unknown>)} />,
-    pageCtx.params,
-    fragmentOnly,
-  )
-  // A fragment is only ever inserted into an already-hydrated (or about to be) page by Orbit's own
-  // client runtime — it never needs the initial-state script a full document's own hydration reads,
-  // nor therefore the nonce that script would otherwise need, nor a stylesheet link, PWA head, or
-  // dev client script: all page-independent (or, for the dev client, already connected from the
-  // full document it's swapping into), already in effect on the page it's swapping into.
-  return renderToResponse(
-    element,
-    fragmentOnly ? {} : {
-      initialState: data,
-      nonce,
-      cssHrefs: resolveCssHrefs(),
-      pwaHead: resolvePwaHead(),
-      devClient: isDevClientEnabled()
-        ? { routeFilePath: getPageTree(Target)?.filePath }
-        : undefined,
-    },
-  )
+  return new Response(null, {
+    status: redirect.code ?? 301,
+    headers: { location },
+  })
 }
 
 /**
@@ -230,13 +82,23 @@ function renderPageResponse<Params>(
  * including `undefined`, since `loader`/`action` are optional members. `redirect`/`cacheControl`
  * (below) don't need a place here: they're declared `static`, and `HandlerBaseClass`'s index
  * signature only constrains instance members, never a class's own static properties.
+ *
+ * `TComponent` (not a fixed `SpaceComponent`/`unknown`) is what makes `component` itself a
+ * real, checked member of this union instead of an unconstrained escape hatch — see
+ * {@linkcode SpacePageController}'s own `TComponent` template param for why leaving this generic,
+ * resolved per concrete subclass, is what actually gives `component` real type-checking at the
+ * point an author assigns it (a fixed `unknown` here would have meant `X | unknown` — which
+ * TypeScript treats as just `unknown` for every purpose that matters, silently accepting literally
+ * any value assigned to `component`, not only a real component).
  */
-export type SpacePageExtensions<Params> =
+export type SpacePageExtensions<
+  Params,
+  TComponent = SpaceComponent,
+> =
   | undefined
   | ((ctx: PageContext<Params>) => unknown | Promise<unknown>)
   | ((ctx: PageActionContext<Params>) => Promise<Response>)
-  // deno-lint-ignore no-explicit-any
-  | ComponentType<any>
+  | TComponent
 
 /**
  * Base class for a file-based page — the shape a `routes/**\/page.tsx` file's default export
@@ -272,11 +134,36 @@ export type SpacePageExtensions<Params> =
  * resolve Providers/Connectors directly — same layering every other Zanix handler already
  * follows). Defaults to `never` (no interactor), same as a bare `ZanixSsrController`. Pass one via
  * `@Page({ Interactor })` — see that decorator's own doc.
+ * @template TComponent - The real component type `component` (below) must satisfy — defaults to
+ * {@linkcode SpaceComponent}, the renderer-neutral component shape BOTH React's and Preact's own
+ * components satisfy (and which is assignable back to either, so nothing downstream needs a cast).
+ * Neither renderer has to know this parameter exists: `class ProductPage extends
+ * SpacePageController<Params>` gets checked assignment on `component = ProductView` whether
+ * `ProductView` is a React component or a Preact one. It used to default to React's own
+ * `ComponentType<any>`, which meant a Preact page — and ONLY a Preact page — had to name the
+ * parameter to be accepted at all.
+ *
+ * Deliberately not `unknown`/`any`: `SpaceComponent` still rejects a non-component outright, and
+ * still checks props when they are named. What it cannot check is that the component's return value
+ * is renderable, which is irreducibly renderer-specific (see {@linkcode SpaceComponent}'s own doc
+ * for the evidence). A page that wants that check names its own renderer's type explicitly — `class
+ * ProductPage extends SpacePageController<Params, never, import('preact').ComponentType<Props>>`,
+ * or the React equivalent — an option that is now symmetric between the two renderers instead of
+ * being one renderer's default.
+ *
+ * This class itself never reads `component` as this type (only `render-page-react.tsx`/
+ * `render-page-preact.ts` do, each already knowing which renderer is active — see `handleGet`'s own
+ * doc) — `TComponent` exists purely so *authors* get checked assignment, not because this class
+ * needs to call `component` itself.
  */
 export abstract class SpacePageController<
   Params = Record<string, string>,
   Interactor extends ZanixInteractorGeneric = never,
-> extends ZanixSsrController<Interactor, SpacePageExtensions<Params>> {
+  TComponent = SpaceComponent | null,
+> extends ZanixSsrController<
+  Interactor,
+  SpacePageExtensions<Params, TComponent>
+> {
   /**
    * Redirects the request before `loader`/`component` ever run — declared once per page, evaluated
    * on every `GET`. Omit for a page that never redirects.
@@ -296,17 +183,93 @@ export abstract class SpacePageController<
    * `Referrer-Policy`, `X-Content-Type-Options`, ...), defaulting to `securityHeadersGuard`'s own
    * defaults. Set `false` to disable every one of these for this page (CSP included); set
    * `{ csp: false, ... }` to disable just CSP while keeping the rest. Set via `Page({ headers })`,
-   * not assigned by hand.
+   * not assigned by hand. See `PageOptions.headers`'s own doc (`page-decorator.ts`) for `csp`'s own
+   * full three-tier precedence: this page's own explicit `csp` (including `false`) > a `cspGuard()`
+   * registered via `defineMiddleware`/`@Guard` > this page's own zero-config nonce-based default.
    */
+  /**
+   * The RTO validating this page's `action` payload, as declared by
+   * `@Page({ action: { Body } })` — stashed here by `registerPage`, the same way `headers` is, and
+   * read per request by {@linkcode SpacePageController.handlePost}.
+   *
+   * Set by the decorator, never by hand: writing it directly would skip the route registration
+   * `@Page` performs around it. `undefined` for a page whose action needs no validation, which is
+   * the unchanged default.
+   */
+  public static actionRto?: { Body?: RtoTypes['Body'] }
+
   public static headers?: PageHeaderOptions | false
+  /**
+   * This page's own `<title>`/`<meta>`/`<link>` declaration — a plain {@linkcode HeadDescriptor},
+   * or a function receiving `loader`'s resolved data (whatever `component` itself also receives as
+   * props) when the head depends on it (e.g. `title: data.product.name`). Merged with every layout
+   * in this page's own composition chain that declares its own `head` export — this page's own
+   * declaration always wins field-by-field/key-by-key over any layout's (see
+   * `resolveHead`'s own doc, `head-descriptor.ts`, for the full precedence/dedup contract). Omit
+   * for a page with nothing of its own to declare — it simply falls through to whatever its layout
+   * chain already provides.
+   *
+   * **Coexists with a manually-authored JSX `<title>`/`<meta>`/`<link>` inside `component` —
+   * neither is ever suppressed.** This declaration's resolved output is always rendered BEFORE
+   * `component`'s own tree. Under React, that ordering is what makes it document's FIRST `<title>`
+   * (React 19 hoists both into `<head>` in encounter order, and the HTML Living Standard defines
+   * `document.title` as the first `<title>` element) — confirmed with a dedicated test
+   * (`render-page-react-head.test.tsx`, the "COEXISTENCE" case) that asserts this exact ordering,
+   * not just presence. Under Preact (no hoisting at all), the effect is even more direct: this
+   * declaration's output is the only content ever placed inside the real `<head>` element; a
+   * hand-authored `<title>` inside `component` simply renders wherever it is in `<body>` and never
+   * becomes `document.title`. See `head-descriptor.ts`'s own module doc for the full investigation.
+   */
+  // `(data: any)`, not `(data: unknown)` — a deliberate, narrow escape, for the same category of
+  // reason `component` above is `SpaceComponent` rather than a fixed type. A page declares this
+  // as a function of its OWN loader's resolved shape (`static head = (data: LoaderData) => ...`),
+  // which is exactly what this field's own doc, this package's README and both SEO helpers
+  // (`buildCanonicalLink`/`buildHreflangLinks`, whose entire documented usage is "return it from
+  // `loader`, read it in `head`") all instruct. Under `unknown`, none of that ever type-checked: a
+  // subclass narrowing the parameter makes the static side fail to extend the base's, since function
+  // parameters are checked contravariantly — so the documented pattern produced a real TS2417 on
+  // every page that used it. Confirmed as a genuine API defect, not a test artifact: the failure was
+  // found in this package's own `hreflang-canonical` test, which had been written exactly as the
+  // README says to write it. `any` restores the bivariance that makes a narrowed parameter legal,
+  // at the cost of not checking that the declared shape matches what `loader` actually returns — a
+  // trade this class already makes for `component`, whose props have the identical relationship to
+  // the same `loader`.
+  // deno-lint-ignore no-explicit-any
+  public static head?: HeadDescriptor | ((data: any) => HeadDescriptor)
+  /**
+   * This page's own stylesheet(s) (P2-12b) — e.g. `['./product.css', {href:
+   * './product-mobile.css', media: '(max-width: 599px)'}]`, resolved relative to THIS page's OWN
+   * file (co-located, the same convention a Comet's real `import './x.module.css'` already
+   * resolves by — deliberately different from `defineSpaceApp({ globalCss })`'s own root-relative
+   * resolution, since these are declared inside the page's own file, not centrally). Genuinely
+   * scoped: linked ONLY on a response for THIS page, after `global` and before any Comet's own CSS
+   * (cascade order — global → page → comet) — a stylesheet declared here is never linked when
+   * rendering a different page. Order matters, same as `globalCss`'s own "order matters, later
+   * entries can override earlier ones" contract, preserved through the build the same way.
+   *
+   * Discovered at build time by importing this page's own module (the same mechanism
+   * `loadRoutes()` already uses at server startup — see `discoverPageStyles`'s own doc,
+   * `modules/bundler/discover-page-styles.ts`, for the full build-time story) — an author never
+   * registers this by hand beyond declaring the field itself. Omit for a page with nothing of its
+   * own beyond `global` — the overwhelming majority — at zero behavior change from before this
+   * field existed.
+   *
+   * Not yet composed with a layout's own styles (page → layout → root inheritance) — only a page's
+   * own, direct declaration is resolved in this first version; see this field's own design doc for
+   * why that's a deliberate scope limit, not an oversight.
+   */
+  public static styles?: StylesheetRef[]
 
   /** Fetches this page's data. Runs before `component` renders — never touches React itself. */
   public loader?: (ctx: PageContext<Params>) => unknown | Promise<unknown>
   /** Handles a `POST` to this route (typically a `<form>` submission). Real HTTP, not an RPC. */
   public action?: (ctx: PageActionContext<Params>) => Promise<Response>
-  /** The page's UI — receives `loader`'s return value (or `undefined`, if there's no loader) as props. */
-  // deno-lint-ignore no-explicit-any
-  public abstract component: ComponentType<any>
+  /** The page's UI — receives `loader`'s return value (or `undefined`, if there's no loader) as
+   * props. Typed `TComponent` (see this class's own `@template TComponent`), not a fixed
+   * `SpaceComponent`/`unknown` — a page on EITHER renderer gets checked assignment from the
+   * default, and either one can narrow to its own renderer's real `ComponentType` by naming it in
+   * its own `extends` clause. */
+  public abstract component: TComponent
 
   /**
    * Wired to `GET` by `Page()` — evaluates `redirect`, then runs `loader` (if declared), then
@@ -314,28 +277,23 @@ export abstract class SpacePageController<
    * When `cacheControl` is set, a matching `If-None-Match` short-circuits to `304` before any
    * rendering happens. A request carrying `ORBIT_FRAGMENT_HEADER` (Orbit's own client-side
    * navigation, never something an app sends by hand) gets just the outlet fragment instead of a
-   * full document — see `composeSegments`'s own doc. Not meant to be called or overridden directly.
+   * full document — see `render-page-react.ts`'s own `composeSegments` doc (or `render-page-preact.ts`'s,
+   * under `--renderer=preact`) for the composition itself; this method only ever calls whichever one
+   * `getPageRenderer()` currently returns. Not meant to be called or overridden directly.
    */
   public async handleGet(ctx: HandlerContext): Promise<Response> {
     const Ctor = this.constructor as typeof SpacePageController
     const pageCtx = toPageContext<Params>(ctx)
     const fragmentOnly = ctx.req.headers.has(ORBIT_FRAGMENT_HEADER)
-    // Precedence: this page's own `headers` field by field > the app-wide default (set via
-    // `defineSpaceApp({ headers })`) field by field > `applySecurityGuards`'s own built-in default
-    // — see `resolvePageHeaders`'s own doc for why this has to be a field-by-field merge, not a
-    // whole-object fallback (a page overriding one field would otherwise silently lose every other
-    // field the app configured).
-    const headers = resolvePageHeaders(Ctor.headers)
-    // `nonce` is `undefined` when CSP is disabled for this page, or a custom static policy (no
-    // nonce coordination) is set — see `SpacePageController.headers`'s own doc.
-    const { headers: securityHeaders, nonce } = await applySecurityGuards(ctx, headers)
-    const applySecurity = (response: Response): Response => {
-      for (const [key, value] of Object.entries(securityHeaders)) response.headers.set(key, value)
-      return response
-    }
+    // Security headers, CSP nonce and theme overrides, resolved in one place shared with the
+    // failed-action re-render so the two can never drift — see `resolvePageChrome`'s own doc.
+    const { applySecurity, nonce, themeStyle } = await resolvePageChrome(ctx, Ctor.headers, pageCtx)
 
     const { redirect } = Ctor
-    if (redirect && (redirect.condition?.(pageCtx as PageContext<unknown>) ?? true)) {
+    if (
+      redirect &&
+      (redirect.condition?.(pageCtx as PageContext<unknown>) ?? true)
+    ) {
       return applySecurity(buildRedirectResponse(redirect, pageCtx.url))
     }
 
@@ -345,28 +303,48 @@ export abstract class SpacePageController<
 
     const { cacheControl } = Ctor
     if (cacheControl) {
-      const etag = await computeEtag(data)
+      // `population` folded in ONLY when a theme resolver is configured — see `computeEtag`'s own
+      // `extra` param doc for exactly what this does and does not fix (a same-origin ETag/304
+      // collision between two populations sharing the same loader data but a different resolved
+      // theme; explicitly NOT a fix for a shared/CDN cache's own partitioning, which stays the
+      // already-documented responsibility this package has never claimed to handle — see
+      // `populationGuard`'s own doc).
+      const etag = await computeEtag(data, getThemeResolver() ? pageCtx.population : undefined)
       // A full document and an Orbit fragment share the same ETag (both derive it from the same
       // loader data) but never the same body — `Vary` is what keeps a cache (browser or otherwise)
       // from serving one shape to a request that asked for the other.
-      const headers = { etag, 'cache-control': cacheControl, vary: ORBIT_FRAGMENT_HEADER }
+      const headers = {
+        etag,
+        'cache-control': cacheControl,
+        vary: ORBIT_FRAGMENT_HEADER,
+      }
       if (ctx.req.headers.get('if-none-match') === etag) {
         return applySecurity(new Response(null, { status: 304, headers }))
       }
-      const response = await renderPageResponse(
+      const response = await getPageRenderer()(
         Target,
         this.component,
         pageCtx,
         data,
         fragmentOnly,
         nonce,
+        themeStyle,
       )
-      for (const [key, value] of Object.entries(headers)) response.headers.set(key, value)
+      for (const [key, value] of Object.entries(headers)) {
+        response.headers.set(key, value)
+      }
       return applySecurity(response)
     }
 
-    return applySecurity(
-      await renderPageResponse(Target, this.component, pageCtx, data, fragmentOnly, nonce),
+    return await renderPageResponse(
+      Target,
+      this.component,
+      pageCtx,
+      data,
+      fragmentOnly,
+      nonce,
+      themeStyle,
+      applySecurity,
     )
   }
 
@@ -385,10 +363,78 @@ export abstract class SpacePageController<
         meta: { target: this.constructor.name },
       })
     }
+    const Ctor = this.constructor as typeof SpacePageController
     const pageCtx: PageActionContext<Params> = {
       ...toPageContext<Params>(ctx),
-      formData: () => ctx.req.formData(),
+      // `@zanix/server` already consumed the request body while parsing it, so calling
+      // `ctx.req.formData()` again throws — the request stream is spent. For the two content types
+      // it parses (`x-www-form-urlencoded`, JSON) the result is right there on `ctx.payload.body`,
+      // and for `x-www-form-urlencoded` it is already a real `FormData`. Anything else (notably
+      // `multipart/form-data`, which the server does not parse at all) still reads from the request,
+      // which is untouched in that case.
+      formData: () =>
+        ctx.payload.body instanceof FormData
+          ? Promise.resolve(ctx.payload.body)
+          : ctx.req.formData(),
     }
-    return await action(pageCtx)
+
+    const Body = Ctor.actionRto?.Body
+    if (!Body) return await action(pageCtx)
+
+    // Validation itself lives in `action-validation.ts` — including WHY it runs here rather than
+    // as a `Post(path, rto)` pipe (a pipe's throw answers with JSON, which is the outcome the 422
+    // re-render exists to avoid).
+    const { validated, fieldErrors, submitted } = await validateActionBody(
+      Body,
+      ctx.payload.body,
+      ctx,
+    )
+
+    if (!fieldErrors) {
+      // Mirrors what `requestValidationPipe` itself does, so an action reading `ctx.payload.body`
+      // directly sees the same validated instance the typed `ctx.body` carries.
+      ctx.payload.body = validated
+      return await action({ ...pageCtx, body: validated })
+    }
+
+    return await this.renderInvalidAction(ctx, pageCtx, fieldErrors, submitted)
+  }
+
+  /**
+   * Re-renders this page as the response to a POST whose payload failed validation — status `422`,
+   * carrying the field errors and the submitted values on the page context.
+   *
+   * No redirect, no flash and no session, deliberately: the response to the failed POST *is* the
+   * form again, which is what keeps a plain `<form>` working with scripting disabled. The page's
+   * own `loader` receives `fieldErrors`/`submitted` and surfaces them exactly the way it already
+   * forwards `csrfToken` — an established path, not a second mechanism.
+   */
+  private async renderInvalidAction(
+    ctx: HandlerContext,
+    actionCtx: PageActionContext<Params>,
+    fieldErrors: PageFieldErrors,
+    submitted: Record<string, string>,
+  ): Promise<Response> {
+    const Ctor = this.constructor as typeof SpacePageController
+
+    const pageCtx: PageContext<Params> = { ...actionCtx, fieldErrors, submitted }
+
+    const { applySecurity, nonce, themeStyle } = await resolvePageChrome(ctx, Ctor.headers, pageCtx)
+
+    // `loader` runs exactly as it does for a GET — the page renders with its real data, plus the
+    // errors. A form that needs its own options/lists back is therefore whole again, not empty.
+    const data = await this.loader?.(pageCtx)
+
+    return await renderPageResponse(
+      this.constructor as unknown as ClassConstructor<SpacePageController>,
+      this.component,
+      pageCtx,
+      data,
+      false,
+      nonce,
+      themeStyle,
+      applySecurity,
+      422,
+    )
   }
 }

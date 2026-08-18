@@ -16,7 +16,9 @@ import type { HandlerContext } from '@zanix/server'
  * const response = await new ProductPage().handleGet(ctx)
  * ```
  */
-export function mockHandlerContext(overrides: Partial<HandlerContext> = {}): HandlerContext {
+export function mockHandlerContext(
+  overrides: Partial<HandlerContext> = {},
+): HandlerContext {
   const req = overrides.req ?? new Request('http://localhost/')
   const url = overrides.url ?? new URL(req.url)
 

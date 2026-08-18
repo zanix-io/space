@@ -1,7 +1,13 @@
 import { join } from '@std/path'
 import { USE_COMET_DIRECTIVE } from './comet-directive.ts'
 
-const IGNORED_DIR_NAMES = new Set(['node_modules', 'dist', '.dist', '.vite', 'coverage'])
+const IGNORED_DIR_NAMES = new Set([
+  'node_modules',
+  'dist',
+  '.dist',
+  '.vite',
+  'coverage',
+])
 const SOURCE_EXTENSIONS = ['.tsx', '.jsx', '.ts', '.js']
 
 /**
@@ -42,15 +48,22 @@ export async function discoverComets(root: string): Promise<string[]> {
       const entryPath = join(dir, entry.name)
 
       if (entry.isDirectory) {
-        if (entry.name.startsWith('.') || IGNORED_DIR_NAMES.has(entry.name)) return
+        if (entry.name.startsWith('.') || IGNORED_DIR_NAMES.has(entry.name)) {
+          return
+        }
         await visit(entryPath)
         return
       }
 
-      if (!entry.isFile || !SOURCE_EXTENSIONS.some((ext) => entry.name.endsWith(ext))) return
+      if (
+        !entry.isFile ||
+        !SOURCE_EXTENSIONS.some((ext) => entry.name.endsWith(ext))
+      ) return
 
       const content = await Deno.readTextFile(entryPath)
-      if (USE_COMET_DIRECTIVE.test(content)) found.push(await Deno.realPath(entryPath))
+      if (USE_COMET_DIRECTIVE.test(content)) {
+        found.push(await Deno.realPath(entryPath))
+      }
     }))
   }
 

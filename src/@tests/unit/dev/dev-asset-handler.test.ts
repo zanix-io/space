@@ -10,7 +10,11 @@ Deno.test('looksLikeDevAssetRequest: recognizes real source-file extensions', ()
 
 Deno.test("looksLikeDevAssetRequest: recognizes Vite's own special request paths", () => {
   assert(looksLikeDevAssetRequest('/@vite/client'))
-  assert(looksLikeDevAssetRequest('/@fs/Users/someone/.cache/deno/npm/vite/dist/client/env.mjs'))
+  assert(
+    looksLikeDevAssetRequest(
+      '/@fs/Users/someone/.cache/deno/npm/vite/dist/client/env.mjs',
+    ),
+  )
   assert(looksLikeDevAssetRequest('/.vite/deps/react.js'))
   assert(looksLikeDevAssetRequest('/@id/virtual:something'))
 })

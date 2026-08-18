@@ -1,7 +1,9 @@
 // deno-coverage-ignore-file
 
 import { Page, SpacePageController } from 'modules/router/mod.ts'
-import { useRequestCache } from 'modules/render/mod.ts'
+// `useRequestCache` is React-only by contract and lives on the React entry point since the
+// entry-point split — exactly where a real React page imports it from.
+import { useRequestCache } from '../../../../../mod-react.ts'
 
 function DelayedView() {
   const value = useRequestCache(

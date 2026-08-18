@@ -1,3 +1,6 @@
+// Installs a renderer, exactly as a real app does: `@zanix/space` itself ships none, so a
+// test that renders must import the entry point it is testing against.
+import '../../../../mod-react.ts'
 import { assert, assertEquals } from '@std/assert'
 import { activateApps, deactivateApps } from '@zanix/app/runtime'
 import { bootstrapServers, webServerManager } from '@zanix/server'
@@ -13,7 +16,9 @@ Deno.test(
     })
 
     const activated = await activateApps([app])
-    const servers = await bootstrapServers({ ssr: { application: 'fixture-app', port: 20501 } })
+    const servers = await bootstrapServers({
+      ssr: { application: 'fixture-app', port: 20501 },
+    })
 
     try {
       // If `setup(ctx)` (and therefore `loadRoutes`) had run outside this app's own

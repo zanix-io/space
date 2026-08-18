@@ -1,8 +1,13 @@
+// Installs a renderer, exactly as a real app does: `@zanix/space` itself ships none, so a
+// test that renders must import the entry point it is testing against.
+import '../../../../mod-react.ts'
 import { assert, assertEquals } from '@std/assert'
 import { bootstrapServers, webServerManager } from '@zanix/server'
 import { createNotFoundHandler, loadRoutes } from 'modules/router/mod.ts'
 import { ORBIT_FRAGMENT_HEADER, ORBIT_OUTLET_ATTR } from 'modules/router/orbit-protocol.ts'
 import { stripHydrationComments } from '../../support/strip-hydration-comments.ts'
+
+console.error = () => {}
 
 Deno.test(
   'not-found end to end: a matched route renders normally, an unmatched one renders the ' +
@@ -27,11 +32,16 @@ Deno.test(
       assert(okHtml.includes('data-testid="app-shell"'), okHtml)
       assert(okHtml.includes('home'), okHtml)
 
-      const missingRes = await fetch('http://localhost:20701/this-route-does-not-exist')
+      const missingRes = await fetch(
+        'http://localhost:20701/this-route-does-not-exist',
+      )
       assertEquals(missingRes.status, 404)
       const missingHtml = stripHydrationComments(await missingRes.text())
       assert(missingHtml.includes('data-testid="app-shell"'), missingHtml)
-      assert(missingHtml.includes('data-testid="custom-not-found"'), missingHtml)
+      assert(
+        missingHtml.includes('data-testid="custom-not-found"'),
+        missingHtml,
+      )
       assert(missingHtml.includes('nothing here'), missingHtml)
     } finally {
       await webServerManager.stop(servers)
@@ -51,9 +61,12 @@ Deno.test(
     }, { finalize: false })
 
     try {
-      const res = await fetch('http://localhost:20703/this-route-does-not-exist', {
-        headers: { [ORBIT_FRAGMENT_HEADER]: '1' },
-      })
+      const res = await fetch(
+        'http://localhost:20703/this-route-does-not-exist',
+        {
+          headers: { [ORBIT_FRAGMENT_HEADER]: '1' },
+        },
+      )
       assertEquals(res.status, 404)
       const html = stripHydrationComments(await res.text())
       assert(html.startsWith('<!DOCTYPE html>'), html)
@@ -65,6 +78,15 @@ Deno.test(
   },
 )
 
+// The former "--renderer=preact rejects loudly" case lived here and has been REMOVED, not relaxed:
+// the guard it asserted no longer exists, because `createNotFoundHandler` is renderer-agnostic now
+// (see `not-found-renderer-registry.ts`). It could not simply be re-pointed at the new behavior
+// either — this file's fixture (`support/fixtures/not-found-routes`) is JSX compiled with React's
+// own factory, so rendering it under Preact would mix two renderers in one project, which is
+// precisely the invariant this package forbids. Preact's not-found path is covered properly in
+// `not-found-parity.test.tsx`, with components authored for each renderer and the two documents
+// compared semantically.
+
 Deno.test(
   'not-found end to end: an Orbit navigation to a missing route gets just the outlet fragment ' +
     'once attachRequestToErrors is enabled',
@@ -72,13 +94,20 @@ Deno.test(
     await loadRoutes('src/@tests/support/fixtures/not-found-routes')
 
     const servers = await bootstrapServers({
-      ssr: { port: 20704, onError: createNotFoundHandler(), attachRequestToErrors: true },
+      ssr: {
+        port: 20704,
+        onError: createNotFoundHandler(),
+        attachRequestToErrors: true,
+      },
     })
 
     try {
-      const res = await fetch('http://localhost:20704/this-route-does-not-exist', {
-        headers: { [ORBIT_FRAGMENT_HEADER]: '1' },
-      })
+      const res = await fetch(
+        'http://localhost:20704/this-route-does-not-exist',
+        {
+          headers: { [ORBIT_FRAGMENT_HEADER]: '1' },
+        },
+      )
       assertEquals(res.status, 404)
       const html = stripHydrationComments(await res.text())
       assert(!html.includes('<!DOCTYPE html>'), html)
@@ -89,7 +118,9 @@ Deno.test(
 
       // A plain, non-Orbit request still gets the full document even with the flag enabled — the
       // flag only makes the request *available* to `onError`, it never forces fragment rendering.
-      const fullRes = await fetch('http://localhost:20704/this-route-does-not-exist')
+      const fullRes = await fetch(
+        'http://localhost:20704/this-route-does-not-exist',
+      )
       const fullHtml = stripHydrationComments(await fullRes.text())
       assert(fullHtml.startsWith('<!DOCTYPE html>'), fullHtml)
     } finally {

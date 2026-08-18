@@ -1,3 +1,6 @@
+// Installs a renderer, exactly as a real app does: `@zanix/space` itself ships none, so a
+// test that renders must import the entry point it is testing against.
+import '../../../../mod-react.ts'
 import { assert, assertFalse } from '@std/assert'
 import { join } from '@std/path'
 import { bootstrapServers, webServerManager } from '@zanix/server'
@@ -21,7 +24,9 @@ Deno.test(
       // since its `@Page()` decorator only ran once (at import time), nothing would re-register
       // it for that later test. See `not-found-integration.test.tsx`'s own identical comment for
       // the full reasoning (same root cause, confirmed the same way).
-      const servers = await bootstrapServers({ ssr: { port: 21101 } }, { finalize: false })
+      const servers = await bootstrapServers({ ssr: { port: 21101 } }, {
+        finalize: false,
+      })
       try {
         const res = await fetch('http://localhost:21101/inferred')
         const html = await res.text()
@@ -57,7 +62,9 @@ Deno.test(
 
     // `finalize: false` — this file's LAST test still reuses this same fixture. Same reasoning
     // as this file's first test above.
-    const servers = await bootstrapServers({ ssr: { port: 21102 } }, { finalize: false })
+    const servers = await bootstrapServers({ ssr: { port: 21102 } }, {
+      finalize: false,
+    })
     try {
       const res = await fetch('http://localhost:21102/inferred')
       const html = await res.text()
@@ -78,7 +85,9 @@ Deno.test(
     setDevClientEnabled(true)
     try {
       // Same `finalize: false` reasoning as this file's first test above.
-      const servers = await bootstrapServers({ ssr: { port: 21103 } }, { finalize: false })
+      const servers = await bootstrapServers({ ssr: { port: 21103 } }, {
+        finalize: false,
+      })
       try {
         const res = await fetch('http://localhost:21103/inferred')
         const html = await res.text()

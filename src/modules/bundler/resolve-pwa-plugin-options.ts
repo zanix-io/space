@@ -19,7 +19,10 @@ import type { PwaPluginOptions } from './pwa-plugin.ts'
  * @param config - See {@linkcode PwaConfig}.
  * @param root - The same project root `buildSpaceClient` itself was given.
  */
-export function resolvePwaPluginOptions(config: PwaConfig, root: string): PwaPluginOptions {
+export function resolvePwaPluginOptions(
+  config: PwaConfig,
+  root: string,
+): PwaPluginOptions {
   return {
     icons: { source: resolve(root, config.icon), sizes: config.iconSizes },
     offlineFallback: config.offlineFallback,

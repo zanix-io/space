@@ -9,11 +9,17 @@ import { buildFastRefreshPreambleScript } from 'modules/dev/dev-fast-refresh-pre
 const REAL_PREAMBLE_CODE = (react as unknown as { preambleCode: string }).preambleCode
 
 Deno.test('buildFastRefreshPreambleScript: matches @vitejs/plugin-react preambleCode', () => {
-  assertEquals(buildFastRefreshPreambleScript('/'), REAL_PREAMBLE_CODE.replace('__BASE__', '/'))
+  assertEquals(
+    buildFastRefreshPreambleScript('/'),
+    REAL_PREAMBLE_CODE.replace('__BASE__', '/'),
+  )
 })
 
 Deno.test('buildFastRefreshPreambleScript: defaults to "/" when no base is given', () => {
-  assertEquals(buildFastRefreshPreambleScript(), buildFastRefreshPreambleScript('/'))
+  assertEquals(
+    buildFastRefreshPreambleScript(),
+    buildFastRefreshPreambleScript('/'),
+  )
 })
 
 Deno.test('buildFastRefreshPreambleScript: substitutes a custom base', () => {

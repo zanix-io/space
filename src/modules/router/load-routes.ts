@@ -1,18 +1,22 @@
 import { join, resolve, toFileUrl } from '@std/path'
 import type { ClassConstructor } from '@zanix/server'
-import type { ComponentType } from 'react'
-import type { LayoutProps } from 'typings/page.ts'
 import { fileExists } from '@zanix/helpers'
+import { InternalError } from '@zanix/errors'
 import { ProgramModule } from '@zanix/server'
 import { scanPageFiles } from './scan-page-files.ts'
 import { resolvePendingPage } from './page-decorator.ts'
 import { setPageTree } from './page-tree-registry.ts'
 import type { ResolvedSegment } from './page-tree-registry.ts'
 import type { SpacePageController } from './space-page-controller.tsx'
-import { setNotFoundComponent, setRootLayout } from './app-shell-registry.ts'
+import type { HeadDescriptor } from './head-descriptor.ts'
+import { setNotFoundComponent, setNotFoundHead, setRootLayout } from './app-shell-registry.ts'
+import { getActiveRenderer } from './active-renderer.ts'
 
-/** The shape any dynamic module import resolves to, as far as this module cares. */
-export type ImportedModule = { default?: unknown }
+/** The shape any dynamic module import resolves to, as far as this module cares. `head` is only
+ * ever meaningfully present on a `layout.tsx` module — its own named export, discovered alongside
+ * the default export below, same import call, no separate file scan (see this module's own segment
+ * resolution). */
+export type ImportedModule = { default?: unknown; head?: unknown }
 
 /** Options for {@linkcode loadRoutes}. */
 export interface LoadRoutesOptions {
@@ -34,17 +38,34 @@ export interface LoadRoutesOptions {
  * the full reasoning. Production only ever calls `loadRoutes()` once per process, so this never
  * grows beyond a single generation there.
  */
-const registeredPageTargets = new Map<string, ClassConstructor<SpacePageController>>()
+const registeredPageTargets = new Map<
+  string,
+  ClassConstructor<SpacePageController>
+>()
 
-/** Imports `filePath`'s default export, or `undefined` if the file doesn't exist — used for the
- * two whole-app files (`layout.tsx`/`not-found.tsx` directly under `routesDir`) that, unlike a
- * page's own composition chain, aren't tied to any specific route. */
-async function importDefaultIfExists(
-  filePath: string,
+/**
+ * Resolves a whole-app root singleton (`layout.tsx`/`not-found.tsx` directly under a `routesDir`
+ * entry) across one or more directories — the FIRST directory (array order) that declares
+ * `fileName` wins, app-wide; every later directory's own copy (if any) is never even imported. This
+ * mirrors {@linkcode scanPageFiles}'s own first-match-wins rule for pages, but resolved once for the
+ * whole app rather than per-route: `layout.tsx`/`not-found.tsx` at root have no "which page did this
+ * come from" question to answer, so there's nothing to keep separate per directory the way a page's
+ * own nested composition chain is.
+ */
+async function resolveRootSingleton(
+  dirs: string[],
+  fileName: string,
   importModule: (path: string) => Promise<ImportedModule>,
-): Promise<unknown> {
-  if (!fileExists(filePath)) return undefined
-  return (await importModule(filePath)).default
+): Promise<ImportedModule> {
+  for (const dir of dirs) {
+    const filePath = join(dir, fileName)
+    // Sequential on purpose, not parallelizable: this is a first-match-wins lookup, so a later
+    // directory's copy must never even be imported once an earlier one has answered — importing it
+    // would run its module side effects for a file this app has decided not to use.
+    // deno-lint-ignore no-await-in-loop
+    if (fileExists(filePath)) return await importModule(filePath)
+  }
+  return {}
 }
 
 /**
@@ -95,14 +116,24 @@ async function importDefaultIfExists(
  * mechanism otherwise avoids. Hot-reloading works reliably today only for the recommended,
  * pathless `@Page()` form, whose registration is deferred until after import.
  *
- * @param routesDir - The routes directory root, relative to the current working directory.
- * Defaults to `'./routes'`. A directory that doesn't exist yet is treated as zero pages.
+ * @param routesDir - The routes directory root(s), relative to the current working directory.
+ * Defaults to `'./routes'`. A directory that doesn't exist yet is treated as zero pages. An array
+ * lets a host compose a base app's pages with its own override directory (or several) without
+ * forking either tree — see {@linkcode scanPageFiles} for the per-page first-match-wins rule this
+ * applies, and `resolveRootSingleton` (this module) for the separate rule `layout.tsx`/
+ * `not-found.tsx` (whole-app singletons, not per-page) follow: first directory to declare either
+ * file wins, app-wide, regardless of which directory ends up serving any given page.
  * @param options - See {@linkcode LoadRoutesOptions}.
+ * @throws {InternalError} If the active renderer is Preact (`defineSpaceApp({ renderer: 'preact' })`)
+ * and any discovered route has a `loading.tsx` — rejected here, at registration time, rather than
+ * left to fail confusingly the first time that route is actually requested; see this package's own
+ * decision spike, §8.1.
  */
 export async function loadRoutes(
-  routesDir = './routes',
+  routesDir: string | string[] = './routes',
   options: LoadRoutesOptions = {},
 ): Promise<void> {
+  const dirs = Array.isArray(routesDir) ? routesDir : [routesDir]
   const moduleCache = new Map<string, Promise<ImportedModule>>()
   const importFile = options.importModule ??
     ((filePath: string) => import(toFileUrl(resolve(filePath)).href))
@@ -118,32 +149,72 @@ export async function loadRoutes(
 
   const [pages, rootLayout, notFound] = await Promise.all([
     scanPageFiles(routesDir),
-    importDefaultIfExists(join(routesDir, 'layout.tsx'), importModule),
-    importDefaultIfExists(join(routesDir, 'not-found.tsx'), importModule),
+    resolveRootSingleton(dirs, 'layout.tsx', importModule),
+    resolveRootSingleton(dirs, 'not-found.tsx', importModule),
   ])
 
-  setRootLayout(rootLayout as ComponentType<LayoutProps> | undefined)
-  setNotFoundComponent(notFound as ComponentType | undefined)
+  setRootLayout(rootLayout.default)
+  setNotFoundComponent(notFound.default)
+  // A `not-found.tsx` may export a named `head` exactly like a `layout.tsx` may — same discovery,
+  // same single import, no separate file scan. `createNotFoundHandler` falls back to this package's
+  // own default when it declares none.
+  setNotFoundHead(notFound.head as HeadDescriptor | undefined)
 
   await Promise.all(pages.map(async (page) => {
     const previousTarget = registeredPageTargets.get(page.filePath)
 
+    // Checked against `page.segments`' own RAW, pre-import shape (`scanPageFiles`'s own discovery
+    // result), and BEFORE any of this page's segment files are imported below — not after, the way
+    // an earlier version of this guard did. Rejected at registration time, before any request could
+    // ever reach it — not a runtime check inside the render path, and not a behavior this package
+    // tries to approximate for Preact (this package's own decision spike, §8.1): Preact core has no
+    // `Suspense` at all, so `loading.tsx`'s entire contract (a Suspense fallback shown while a
+    // segment suspends) has no renderer underneath it to run on. Checking BEFORE the import matters
+    // for real: a `loading.tsx` file is, by definition, never meant to run under `--renderer=preact`
+    // — if importing it also happened to throw its own unrelated error (a missing dependency, a
+    // typo), that raw import failure would reach the caller INSTEAD of this guard's own clear,
+    // actionable message, defeating the whole point of "before any request could reach it." Real bug
+    // found and fixed during this package's own Etapa 4 hardening pass — a rejected file's own code
+    // must never even run, let alone determine what error surfaces. `getActiveRenderer()` is read
+    // here, not passed as a parameter, because `loadRoutes()`'s own public signature (used directly
+    // by app code in some test setups, not only via `defineSpaceApp`) predates this option and
+    // adding a required parameter would be a breaking change for every existing caller.
+    if (getActiveRenderer() === 'preact') {
+      const offendingIndex = page.segments.findIndex((segment) => segment.loadingFilePath)
+      if (offendingIndex !== -1) {
+        const loadingFilePath = page.segments[offendingIndex].loadingFilePath
+        throw new InternalError(
+          `loading.tsx is not supported under --renderer=preact: it requires Suspense, which ` +
+            `Preact core does not have. "${loadingFilePath}" (route "${page.routePath}") must be ` +
+            `removed, or this app switched to --renderer=react.`,
+          { meta: { routePath: page.routePath, filePath: loadingFilePath } },
+        )
+      }
+    }
+
     const [pageModule, segments] = await Promise.all([
       importModule(page.filePath),
-      Promise.all(page.segments.map(async (segment): Promise<ResolvedSegment> => ({
-        layout: segment.layoutFilePath
-          // deno-lint-ignore no-explicit-any
-          ? (await importModule(segment.layoutFilePath)).default as any
-          : undefined,
-        loading: segment.loadingFilePath
-          // deno-lint-ignore no-explicit-any
-          ? (await importModule(segment.loadingFilePath)).default as any
-          : undefined,
-        error: segment.errorFilePath
-          // deno-lint-ignore no-explicit-any
-          ? (await importModule(segment.errorFilePath)).default as any
-          : undefined,
-      }))),
+      Promise.all(
+        page.segments.map(async (segment): Promise<ResolvedSegment> => {
+          // One import call for `layout.tsx`, not two — `head` (if declared) is its own named
+          // export on the SAME module `layout` (the default export) already comes from;
+          // `importModule`'s own cache (above) would make a second call cheap too, but reading
+          // both off one already-awaited result is simpler and avoids relying on that cache.
+          const layoutModule = segment.layoutFilePath
+            ? await importModule(segment.layoutFilePath)
+            : undefined
+          return {
+            layout: layoutModule?.default,
+            head: layoutModule?.head as ResolvedSegment['head'],
+            loading: segment.loadingFilePath
+              ? (await importModule(segment.loadingFilePath)).default
+              : undefined,
+            error: segment.errorFilePath
+              ? (await importModule(segment.errorFilePath)).default
+              : undefined,
+          }
+        }),
+      ),
     ])
 
     const Target = pageModule.default as ClassConstructor<SpacePageController>

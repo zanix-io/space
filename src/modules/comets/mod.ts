@@ -7,7 +7,12 @@
  *
  * @module
  */
-export { defineComet } from './define-comet.tsx'
-export type { CometProps, CometStrategy } from 'typings/comet.ts'
+export { defineComet } from './define-comet.ts'
+export type {
+  CometBoundaryComponent,
+  CometComponent,
+  CometProps,
+  CometStrategy,
+} from 'typings/comet.ts'
 export { loadCometManifest, resolveCometModuleUrl } from './comet-manifest.ts'
 export type { CometManifest } from './comet-manifest.ts'

@@ -1,3 +1,6 @@
+// Installs a renderer, exactly as a real app does: `@zanix/space` itself ships none, so a
+// test that renders must import the entry point it is testing against.
+import '../../../../mod-react.ts'
 import { assert, assertEquals } from '@std/assert'
 import { bootstrapServers, Guard, webServerManager } from '@zanix/server'
 import { Page, SpacePageController } from 'modules/router/mod.ts'
@@ -15,7 +18,9 @@ function CheckoutView({ csrfToken }: { csrfToken?: string }) {
 @Page({ path: 'csrf-guard/checkout', headers: false })
 @Guard(csrfGuard())
 class CheckoutPage extends SpacePageController {
-  public override loader = (ctx: { csrfToken?: string }) => ({ csrfToken: ctx.csrfToken })
+  public override loader = (ctx: { csrfToken?: string }) => ({
+    csrfToken: ctx.csrfToken,
+  })
   public override component = CheckoutView
   public override action = () => Promise.resolve(new Response('paid'))
 }
@@ -35,14 +40,20 @@ Deno.test(
 
       const html = await getRes.text()
       const renderedToken = html.match(/name="_csrf" value="([^"]+)"/)?.[1]
-      assert(renderedToken, 'expected to extract the rendered form field value')
+      assert(
+        renderedToken,
+        'expected to extract the rendered form field value',
+      )
       assertEquals(renderedToken, cookieToken)
 
       // No cookie, no field: rejected.
-      const withoutToken = await fetch('http://localhost:20501/csrf-guard/checkout', {
-        method: 'POST',
-        body: new FormData(),
-      })
+      const withoutToken = await fetch(
+        'http://localhost:20501/csrf-guard/checkout',
+        {
+          method: 'POST',
+          body: new FormData(),
+        },
+      )
       assertEquals(withoutToken.status, 403)
       await withoutToken.body?.cancel()
 
@@ -50,11 +61,14 @@ Deno.test(
       // exactly what a real, unmodified form submission produces.
       const formData = new FormData()
       formData.set('_csrf', renderedToken)
-      const withToken = await fetch('http://localhost:20501/csrf-guard/checkout', {
-        method: 'POST',
-        headers: { cookie: `X-Znx-Csrf=${cookieToken}` },
-        body: formData,
-      })
+      const withToken = await fetch(
+        'http://localhost:20501/csrf-guard/checkout',
+        {
+          method: 'POST',
+          headers: { cookie: `X-Znx-Csrf=${cookieToken}` },
+          body: formData,
+        },
+      )
       assertEquals(withToken.status, 200)
       assertEquals(await withToken.text(), 'paid')
     } finally {

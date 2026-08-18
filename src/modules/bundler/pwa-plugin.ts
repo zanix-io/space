@@ -76,7 +76,11 @@ export function pwaPlugin(options: PwaPluginOptions): Plugin {
       )
 
       for (const { size, png } of icons) {
-        this.emitFile({ type: 'asset', fileName: `icons/${iconFileName(size)}`, source: png })
+        this.emitFile({
+          type: 'asset',
+          fileName: `icons/${iconFileName(size)}`,
+          source: png,
+        })
       }
 
       // Scanned directly off `bundle` (never read from `cssPlugin`'s own manifest asset) — Rollup

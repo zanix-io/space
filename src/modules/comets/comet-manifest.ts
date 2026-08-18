@@ -7,8 +7,11 @@ let manifest: CometManifest | undefined
 
 /** Normalizes a `file://` URL (or an already-plain path) to a plain filesystem path — the shared
  * key format between what `cometPlugin` writes (from Rollup's own module `id`, already a plain
- * path) and what `defineComet` looks up (from `import.meta.url`, a `file://` URL under Deno). */
-function normalizeSourceKey(sourceUrl: string): string {
+ * path) and what `defineComet` looks up (from `import.meta.url`, a `file://` URL under Deno).
+ * Exported (not just used internally) because `css-manifest.ts`'s own `getCometCssHrefs` keys a
+ * comet's CSS scope by this EXACT same identity — reused rather than re-derived, so the two
+ * manifests can never silently drift into two different key formats for "the same comet". */
+export function normalizeSourceKey(sourceUrl: string): string {
   return sourceUrl.startsWith('file://') ? new URL(sourceUrl).pathname : sourceUrl
 }
 
@@ -55,7 +58,10 @@ export function setCometManifest(value: CometManifest | undefined): void {
  * the current working directory, which is correct whenever the SSR process itself runs from the
  * project root (the common case for this framework's own `main.ts` convention).
  */
-export function resolveCometModuleUrl(sourceUrl: string, devRoot: string = Deno.cwd()): string {
+export function resolveCometModuleUrl(
+  sourceUrl: string,
+  devRoot: string = Deno.cwd(),
+): string {
   const sourcePath = normalizeSourceKey(sourceUrl)
 
   if (manifest) return manifest[sourcePath] ?? sourceUrl

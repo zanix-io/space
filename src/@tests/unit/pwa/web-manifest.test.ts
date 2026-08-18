@@ -22,7 +22,11 @@ Deno.test('buildWebManifest: minimal config', () => {
 })
 
 Deno.test('buildWebManifest: shortName overrides the short_name fallback', () => {
-  const manifest = buildWebManifest({ name: 'Storefront', shortName: 'Store', icon: './icon.png' })
+  const manifest = buildWebManifest({
+    name: 'Storefront',
+    shortName: 'Store',
+    icon: './icon.png',
+  })
   assertEquals(manifest.short_name, 'Store')
 })
 
@@ -60,11 +64,19 @@ Deno.test('buildWebManifest: shortcuts map through, with and without their own i
   })
   assertEquals(manifest.shortcuts, [
     { name: 'Cart', url: '/cart' },
-    { name: 'Wishlist', url: '/wishlist', icons: [{ src: '/icons/wishlist.png', sizes: 'any' }] },
+    {
+      name: 'Wishlist',
+      url: '/wishlist',
+      icons: [{ src: '/icons/wishlist.png', sizes: 'any' }],
+    },
   ])
 })
 
 Deno.test('buildWebManifest: an empty shortcuts array omits the field entirely', () => {
-  const manifest = buildWebManifest({ name: 'Storefront', icon: './icon.png', shortcuts: [] })
+  const manifest = buildWebManifest({
+    name: 'Storefront',
+    icon: './icon.png',
+    shortcuts: [],
+  })
   assertEquals(manifest.shortcuts, undefined)
 })

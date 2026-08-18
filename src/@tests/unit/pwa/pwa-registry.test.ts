@@ -17,7 +17,11 @@ Deno.test('resolvePwaHead: undefined when no PWA is configured', () => {
 Deno.test(
   'resolvePwaHead: manifestHref + themeColor when configured, no serviceWorkerHref without a build output',
   () => {
-    setPwaConfig({ name: 'Storefront', themeColor: '#2563eb', icon: '/tmp/icon.png' })
+    setPwaConfig({
+      name: 'Storefront',
+      themeColor: '#2563eb',
+      icon: '/tmp/icon.png',
+    })
     try {
       assertEquals(resolvePwaHead(), {
         manifestHref: MANIFEST_ROUTE,

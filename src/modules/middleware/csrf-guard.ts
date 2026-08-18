@@ -89,11 +89,14 @@ export function csrfGuard(options: CsrfGuardOptions = {}): MiddlewareGuard {
       ctx.locals[CSRF_TOKEN_LOCALS_KEY] = token
       if (existingToken) return {}
       return {
-        headers: { 'Set-Cookie': `${cookieName}=${token}; Path=/; HttpOnly; SameSite=Strict` },
+        headers: {
+          'Set-Cookie': `${cookieName}=${token}; Path=/; HttpOnly; SameSite=Strict`,
+        },
       }
     }
 
-    const submitted = ctx.req.headers.get(headerName) ?? (await readFormField(ctx.req))
+    const submitted = ctx.req.headers.get(headerName) ??
+      (await readFormField(ctx.req))
     if (!existingToken || submitted !== existingToken) {
       throw new HttpError('FORBIDDEN', {
         id: ctx.id,

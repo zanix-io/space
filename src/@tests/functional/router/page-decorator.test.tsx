@@ -1,3 +1,6 @@
+// Installs a renderer, exactly as a real app does: `@zanix/space` itself ships none, so a
+// test that renders must import the entry point it is testing against.
+import '../../../../mod-react.ts'
 import { assertEquals, assertStringIncludes, assertThrows } from '@std/assert'
 import { InternalError } from '@zanix/errors'
 import {
@@ -12,6 +15,8 @@ import {
 } from '@zanix/server'
 import { Page, SpacePageController } from 'modules/router/mod.ts'
 
+console.error = () => {}
+
 function View() {
   return <div>ok</div>
 }
@@ -25,13 +30,18 @@ Deno.test('Page: a page with no action is reachable via GET but not POST', async
 
   const servers = await bootstrapServers({ ssr: { port: 20301 } })
   try {
-    const getRes = await fetch('http://localhost:20301/page-decorator/get-only')
+    const getRes = await fetch(
+      'http://localhost:20301/page-decorator/get-only',
+    )
     assertEquals(getRes.status, 200)
     await getRes.body?.cancel()
 
-    const postRes = await fetch('http://localhost:20301/page-decorator/get-only', {
-      method: 'POST',
-    })
+    const postRes = await fetch(
+      'http://localhost:20301/page-decorator/get-only',
+      {
+        method: 'POST',
+      },
+    )
     // The path IS registered (for GET) — a POST to it is a wrong method, not an unknown route.
     assertEquals(postRes.status, 405)
     await postRes.body?.cancel()
@@ -43,7 +53,10 @@ Deno.test('Page: a page with no action is reachable via GET but not POST', async
 Deno.test(
   'Page({headers: {csp: false}}): the options path disables CSP the same way as a static assignment',
   async () => {
-    @Page({ path: 'page-decorator/no-csp-via-options', headers: { csp: false } })
+    @Page({
+      path: 'page-decorator/no-csp-via-options',
+      headers: { csp: false },
+    })
     class NoCspViaOptions extends SpacePageController {
       public override component = View
     }
@@ -51,7 +64,9 @@ Deno.test(
 
     const servers = await bootstrapServers({ ssr: { port: 20304 } })
     try {
-      const res = await fetch('http://localhost:20304/page-decorator/no-csp-via-options')
+      const res = await fetch(
+        'http://localhost:20304/page-decorator/no-csp-via-options',
+      )
       assertEquals(res.headers.get('Content-Security-Policy'), null)
       await res.body?.cancel()
     } finally {
@@ -70,9 +85,12 @@ Deno.test('Page: a page with an action is also reachable via POST', async () => 
 
   const servers = await bootstrapServers({ ssr: { port: 20302 } })
   try {
-    const postRes = await fetch('http://localhost:20302/page-decorator/with-action', {
-      method: 'POST',
-    })
+    const postRes = await fetch(
+      'http://localhost:20302/page-decorator/with-action',
+      {
+        method: 'POST',
+      },
+    )
     assertEquals(await postRes.text(), 'action-ok')
   } finally {
     await webServerManager.stop(servers)
@@ -90,9 +108,11 @@ Deno.test(
       public override getCachedOrRevalidate<V>(
         _provider: 'redis',
         key: string,
-        options: { fetcher?: () => V | Promise<V> } = {},
+        options: { fetcher?: () => Promise<V> } = {},
       ): Promise<V> {
-        if (this.#store.has(key)) return Promise.resolve(this.#store.get(key) as V)
+        if (this.#store.has(key)) {
+          return Promise.resolve(this.#store.get(key) as V)
+        }
         return Promise.resolve(options.fetcher?.()).then((value) => {
           this.#store.set(key, value)
           return value as V
@@ -115,26 +135,37 @@ Deno.test(
       }
     }
 
-    function ProductView({ product }: { product: { id: string; name: string } }) {
+    function ProductView(
+      { product }: { product: { id: string; name: string } },
+    ) {
       return <p>{product.name}</p>
     }
 
-    @Page({ path: 'page-decorator/cache-fixture/:id', Interactor: ProductsInteractor })
+    @Page({
+      path: 'page-decorator/cache-fixture/:id',
+      Interactor: ProductsInteractor,
+    })
     class ProductPage extends SpacePageController<{ id: string }, ProductsInteractor> {
       public override loader = (ctx: { params: { id: string } }) =>
-        this.interactor.getProduct(ctx.params.id).then((product) => ({ product }))
+        this.interactor.getProduct(ctx.params.id).then((product) => ({
+          product,
+        }))
       public override component = ProductView
     }
     void ProductPage
 
     const servers = await bootstrapServers({ ssr: { port: 20303 } })
     try {
-      const first = await fetch('http://localhost:20303/page-decorator/cache-fixture/42')
+      const first = await fetch(
+        'http://localhost:20303/page-decorator/cache-fixture/42',
+      )
       assertStringIncludes(await first.text(), '<p>Product 42</p>')
       assertEquals(fetchCount, 1)
 
       // Second request, same id — served from TestCacheProvider's own store, fetcher not re-run.
-      const second = await fetch('http://localhost:20303/page-decorator/cache-fixture/42')
+      const second = await fetch(
+        'http://localhost:20303/page-decorator/cache-fixture/42',
+      )
       assertStringIncludes(await second.text(), '<p>Product 42</p>')
       assertEquals(fetchCount, 1)
     } finally {

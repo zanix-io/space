@@ -69,7 +69,9 @@ export class SpaceDevSocket extends ZanixWebSocket {
  * single stale entry must never turn one dev-server file change into a total notification outage.
  */
 export function broadcastSsrModuleChanged(event: SsrModuleChangedEvent): void {
-  const sockets = ProgramModule.registry.array<SpaceDevSocket>(CONNECTIONS_REGISTRY_KEY)
+  const sockets = ProgramModule.registry.array<SpaceDevSocket>(
+    CONNECTIONS_REGISTRY_KEY,
+  )
   const payload = { kind: 'ssr-module-changed', ...event }
   for (const socket of sockets) {
     try {
@@ -92,8 +94,42 @@ export function broadcastSsrModuleChanged(event: SsrModuleChangedEvent): void {
  * {@linkcode broadcastSsrModuleChanged} — see that function's own doc for why.
  */
 export function broadcastClientCssChanged(urls: string[]): void {
-  const sockets = ProgramModule.registry.array<SpaceDevSocket>(CONNECTIONS_REGISTRY_KEY)
+  const sockets = ProgramModule.registry.array<SpaceDevSocket>(
+    CONNECTIONS_REGISTRY_KEY,
+  )
   const payload = { kind: 'client-css-changed', urls }
+  for (const socket of sockets) {
+    try {
+      socket.push(payload)
+    } catch {
+      // Swallowed deliberately — see this function's own doc.
+    }
+  }
+}
+
+/**
+ * Sends a `client-module-changed` notification to every currently-connected
+ * {@linkcode SpaceDevSocket} — the real, browser-facing counterpart of `SpaceDevEngine`'s
+ * `onClientModuleChanged` callback (`@zanix/space`'s own bundler module, which only reports the
+ * event). `urls` are the same Vite module-graph urls `dev-vite-hot-client.ts`'s own
+ * `createHotContext(id)` registered an `accept()` callback under — `dev-client-script.ts`'s own
+ * `handleClientModuleChanged` matches against them directly, no separate id/manifest lookup needed.
+ * Genuinely renderer-agnostic, not just in name — React's own `oxc.jsx`-based refresh transform and
+ * Preact's own `@prefresh/vite` transform both register through the exact same `createHotContext`.
+ *
+ * Same as {@linkcode broadcastClientCssChanged} — a connected page whose dev-server orchestrator
+ * hasn't served `dev-vite-hot-client.ts`'s own `/@vite/client` replacement yet (for either renderer)
+ * simply has nothing registered to call and this message is a silent no-op there; see
+ * `dev-client-script.ts`'s own doc for that guard.
+ *
+ * Same no-op-when-nobody's-connected and skip-a-dead-socket behavior as
+ * {@linkcode broadcastSsrModuleChanged} — see that function's own doc for why.
+ */
+export function broadcastClientModuleChanged(urls: string[]): void {
+  const sockets = ProgramModule.registry.array<SpaceDevSocket>(
+    CONNECTIONS_REGISTRY_KEY,
+  )
+  const payload = { kind: 'client-module-changed', urls }
   for (const socket of sockets) {
     try {
       socket.push(payload)

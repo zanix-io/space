@@ -19,6 +19,11 @@ import { registerGlobalGuard } from '@zanix/server'
  * indistinguishable from "no guard" while giving a false sense of protection. Call this once per
  * guard set (e.g. from the same file as `defineSpaceApp`), not per request.
  *
+ * **A `cspGuard()` registered here acts as the app-wide base/default CSP — a page's own
+ * `Page({ headers: { csp } })` (including `csp: false`) always wins over it** when configured —
+ * see `PageOptions.headers`'s own doc (`page-decorator.ts`) for the full three-tier precedence
+ * rule (page's own explicit `csp` > this guard > a page's own zero-config default).
+ *
  * @example
  * ```ts
  * import { cspGuard, defineMiddleware } from '@zanix/space'

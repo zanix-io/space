@@ -68,7 +68,8 @@ export function getSharedLoader(root: string): Promise<Loader> {
   const key = configPath ?? ''
   let loaderPromise = sharedLoadersByConfigPath.get(key)
   if (!loaderPromise) {
-    loaderPromise = new Workspace({ platform: 'node', configPath }).createLoader()
+    loaderPromise = new Workspace({ platform: 'node', configPath })
+      .createLoader()
     sharedLoadersByConfigPath.set(key, loaderPromise)
   }
   return loaderPromise

@@ -43,7 +43,9 @@ export function getDevImportModule(): DevImportModule | undefined {
  * single, generic `await getDevRoutesReloader()?.()` — it never needs to know this app's own name
  * or `routesDir` itself; both stay entirely inside `defineSpaceApp`'s own closure.
  */
-export function setDevRoutesReloader(value: (() => Promise<void>) | undefined): void {
+export function setDevRoutesReloader(
+  value: (() => Promise<void>) | undefined,
+): void {
   routesReloader = value
 }
 

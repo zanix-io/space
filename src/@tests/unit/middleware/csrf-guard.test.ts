@@ -45,7 +45,10 @@ Deno.test('csrfGuard: a GET with an existing cookie reuses it, no Set-Cookie', a
 })
 
 Deno.test('csrfGuard: a POST with no token at all is rejected', async () => {
-  const ctx = mockGuardContext({ method: 'POST', cookies: { 'X-Znx-Csrf': 'the-token' } })
+  const ctx = mockGuardContext({
+    method: 'POST',
+    cookies: { 'X-Znx-Csrf': 'the-token' },
+  })
   await assertRejects(() => Promise.resolve(csrfGuard()(ctx)), HttpError)
 })
 
@@ -105,6 +108,9 @@ Deno.test('csrfGuard: a custom cookieName/headerName is respected', async () => 
     cookies: { 'my-csrf': 'the-real-token' },
     headers: { 'x-my-csrf': 'the-real-token' },
   })
-  const result = await csrfGuard({ cookieName: 'my-csrf', headerName: 'x-my-csrf' })(ctx)
+  const result = await csrfGuard({
+    cookieName: 'my-csrf',
+    headerName: 'x-my-csrf',
+  })(ctx)
   assertEquals(result, {})
 })

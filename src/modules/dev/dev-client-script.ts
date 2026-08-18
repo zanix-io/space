@@ -31,15 +31,29 @@ export interface DevClientScriptOptions {
  *   matches one of the changed `urls` to a fresh, cache-busted `href` — no reload, the same
  *   no-flash stylesheet swap a real Vite dev server does for CSS. Only covers `globalCss` links
  *   (see `dev-engine.ts`'s own `onClientCssChanged` doc for why a Comet's own local CSS import
- *   isn't included here); Fast Refresh for Comets themselves is a separate, not-yet-wired
- *   transport, untouched by this script.
+ *   isn't included here).
+ * - `client-module-changed`: forwards each changed url to `window.__spaceApplyClientUpdate`, IF a
+ *   page has one — that global only exists once `dev-vite-hot-client.ts`'s own `/@vite/client`
+ *   replacement has actually been loaded, which requires a dev-server orchestrator to (a) enable
+ *   `devClient` on the response (`render-page-react.tsx`/`render-page-preact.ts` both already do,
+ *   unconditionally, whenever `isDevClientEnabled()` — this was never renderer-specific) and (b)
+ *   serve `createViteHotClientHandler()`'s own response for `/@vite/client`, ahead of
+ *   `createDevAssetHandler`'s generic forwarding. A page whose orchestrator hasn't wired (b) yet has
+ *   no such global — this branch is then a deliberate no-op there (`typeof` guard, never a
+ *   `ReferenceError`), the exact same "does nothing" outcome a Comet-only edit already produced
+ *   before this message kind existed. See `dev-vite-hot-client.ts`'s own doc for what that function
+ *   actually does (a cache-busted re-import + whichever renderer's own real `accept()` callback was
+ *   registered for that module — React's own `RefreshRuntime`-driven one or Preact's own
+ *   `@prefresh/vite`-driven one, this script never distinguishes between them).
  *
  * A pure function — no I/O of its own, easy to unit-test (`new Function(source)` confirms valid
  * JS syntax, the same technique `buildServiceWorkerSource` already uses).
  *
  * @param options - See {@linkcode DevClientScriptOptions}.
  */
-export function buildDevClientScript(options: DevClientScriptOptions = {}): string {
+export function buildDevClientScript(
+  options: DevClientScriptOptions = {},
+): string {
   const { routeFilePath } = options
 
   return `
@@ -70,6 +84,20 @@ export function buildDevClientScript(options: DevClientScriptOptions = {}): stri
     }
   }
 
+  function handleClientModuleChanged(message) {
+    // Bare identifier, not window.__spaceApplyClientUpdate -- same reasoning as location/document/
+    // WebSocket above: resolves via the global scope chain in a real browser without ever throwing
+    // if it was never defined (only typeof is safe for that; a plain "if (__spaceApplyClientUpdate)"
+    // would throw a ReferenceError on a page whose dev-server orchestrator hasn't served
+    // dev-vite-hot-client.ts's own /@vite/client replacement yet -- true for either renderer until
+    // that's wired.
+    if (typeof __spaceApplyClientUpdate !== 'function') return
+    var urls = message.urls || []
+    for (var i = 0; i < urls.length; i++) {
+      __spaceApplyClientUpdate(urls[i])
+    }
+  }
+
   socket.onmessage = function (event) {
     var message
     try {
@@ -79,6 +107,7 @@ export function buildDevClientScript(options: DevClientScriptOptions = {}): stri
     }
     if (message.kind === 'ssr-module-changed') handleSsrModuleChanged(message)
     else if (message.kind === 'client-css-changed') handleClientCssChanged(message)
+    else if (message.kind === 'client-module-changed') handleClientModuleChanged(message)
   }
 })();
 `.trim()

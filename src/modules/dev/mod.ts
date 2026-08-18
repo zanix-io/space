@@ -11,6 +11,16 @@
  * `dev-engine-registry.ts`, `dev-fast-refresh-preamble.ts` — each confirmed to carry no
  * decorator/registration side effect of its own before being relied on there.
  *
+ * `dev-vite-hot-client.ts` joins the individually-audited, side-effect-free list above as of
+ * real Fast Refresh/Prefresh delivery: it's imported directly by
+ * `render-to-response-preact.ts` for its own exported string-builder, and is otherwise only ever
+ * reached by a dev-server orchestrator wanting `createViteHotClientHandler`'s own
+ * `(req) => Response | null` — same composition role as `createDevAssetHandler`, tried before it.
+ * Despite the earlier, renderer-specific name this module had before being corrected, it is NOT
+ * Preact-only — see that module's own doc for the real transform evidence that React's own
+ * `oxc.jsx`-based refresh transform needs `/@vite/client` exactly as much as Preact's `@prefresh/vite`
+ * does.
+ *
  * `createSpaceDevEngine`/`spacePlugin` are re-exported from their own individual files
  * (`../bundler/dev-engine.ts`/`../bundler/space-plugin.ts`), NEVER via `../bundler/mod.ts` (the
  * `./vite` entry point) — that barrel also re-exports `cssPlugin`, whose own top-level `import
@@ -31,6 +41,7 @@
  */
 export {
   broadcastClientCssChanged,
+  broadcastClientModuleChanged,
   broadcastSsrModuleChanged,
   SPACE_DEV_SOCKET_ROUTE,
   SpaceDevSocket,
@@ -40,6 +51,12 @@ export type { SocketPrototype } from '@zanix/server'
 export { buildDevClientScript } from './dev-client-script.ts'
 export type { DevClientScriptOptions } from './dev-client-script.ts'
 export { buildFastRefreshPreambleScript } from './dev-fast-refresh-preamble.ts'
+export {
+  buildViteHotClientScript,
+  createViteHotClientHandler,
+  looksLikeViteHotClientRequest,
+  VITE_CLIENT_REQUEST_PATH,
+} from './dev-vite-hot-client.ts'
 export { isDevClientEnabled, setDevClientEnabled } from './dev-client-registry.ts'
 export { createDevAssetHandler, looksLikeDevAssetRequest } from './dev-asset-handler.ts'
 export { resolveDevCssHrefs } from './dev-css-hrefs.ts'
@@ -59,3 +76,7 @@ export type {
 } from '../bundler/dev-engine.ts'
 export { spacePlugin } from '../bundler/space-plugin.ts'
 export type { SpacePluginOptions } from '../bundler/space-plugin.ts'
+export { getActiveRenderer } from '../router/active-renderer.ts'
+export type { RendererKind } from '../router/active-renderer.ts'
+// Re-exported for `zanix space dev`'s render probe, which reads the ACTIVE renderer here and hands
+// it to the probe. The probe deliberately does not import the registry itself: that edge made

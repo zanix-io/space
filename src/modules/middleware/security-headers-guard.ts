@@ -22,16 +22,47 @@ export type SecurityHeadersOptions = {
    * `window.opener` access from cross-origin popups (breaks some OAuth/payment popup flows unless
    * they're updated to `postMessage`-based communication). Needed, alongside
    * `crossOriginEmbedderPolicy`, for cross-origin isolation (`SharedArrayBuffer`, precise timers). */
-  crossOriginOpenerPolicy?: 'unsafe-none' | 'same-origin-allow-popups' | 'same-origin' | false
+  crossOriginOpenerPolicy?:
+    | 'unsafe-none'
+    | 'same-origin-allow-popups'
+    | 'same-origin'
+    | false
   /** `Cross-Origin-Embedder-Policy`. **Not enabled by default** — `'require-corp'`/`'credentialless'`
    * block loading any cross-origin resource (images, scripts, iframes) that doesn't itself send a
    * matching CORP/CORS header, which breaks plenty of ordinary third-party embeds. Needed, alongside
    * `crossOriginOpenerPolicy`, for cross-origin isolation. */
-  crossOriginEmbedderPolicy?: 'unsafe-none' | 'require-corp' | 'credentialless' | false
+  crossOriginEmbedderPolicy?:
+    | 'unsafe-none'
+    | 'require-corp'
+    | 'credentialless'
+    | false
   /** `Cross-Origin-Resource-Policy`. **Not enabled by default** — restricts which sites may load
    * this page's own resources cross-origin; `'same-origin'` breaks legitimate cross-origin embedding
    * of this app's own assets if that's ever needed. `'same-site'` is the safer opt-in starting point. */
-  crossOriginResourcePolicy?: 'same-site' | 'same-origin' | 'cross-origin' | false
+  crossOriginResourcePolicy?:
+    | 'same-site'
+    | 'same-origin'
+    | 'cross-origin'
+    | false
+}
+
+/**
+ * Maps each {@linkcode SecurityHeadersOptions} field to the real HTTP header name it controls —
+ * the single source of truth {@linkcode securityHeadersGuard} itself builds from below, and the
+ * same names `SpacePageController`'s own `applySecurityGuards` needs to check a guard's
+ * `Headers` for (see that function's own doc) when resolving `Page explicit > Guard > Space
+ * default` for each of these fields, not just CSP. Exported specifically so that cross-cutting
+ * logic never has to duplicate this mapping — there's exactly one place it's declared.
+ */
+export const SECURITY_HEADER_NAMES: Record<keyof SecurityHeadersOptions, string> = {
+  frameOptions: 'X-Frame-Options',
+  referrerPolicy: 'Referrer-Policy',
+  noSniff: 'X-Content-Type-Options',
+  permissionsPolicy: 'Permissions-Policy',
+  strictTransportSecurity: 'Strict-Transport-Security',
+  crossOriginOpenerPolicy: 'Cross-Origin-Opener-Policy',
+  crossOriginEmbedderPolicy: 'Cross-Origin-Embedder-Policy',
+  crossOriginResourcePolicy: 'Cross-Origin-Resource-Policy',
 }
 
 function serializePermissionsPolicy(policy: Record<string, string[]>): string {
@@ -57,7 +88,9 @@ function serializePermissionsPolicy(policy: Record<string, string[]>): string {
  * defineMiddleware([securityHeadersGuard({ frameOptions: 'DENY' })]) // override just one
  * ```
  */
-export function securityHeadersGuard(options: SecurityHeadersOptions = {}): MiddlewareGuard {
+export function securityHeadersGuard(
+  options: SecurityHeadersOptions = {},
+): MiddlewareGuard {
   const {
     frameOptions = 'SAMEORIGIN',
     referrerPolicy = 'strict-origin-when-cross-origin',
@@ -70,16 +103,26 @@ export function securityHeadersGuard(options: SecurityHeadersOptions = {}): Midd
   } = options
 
   const headers: Record<string, string> = {}
-  if (frameOptions) headers['X-Frame-Options'] = frameOptions
-  if (referrerPolicy) headers['Referrer-Policy'] = referrerPolicy
-  if (noSniff) headers['X-Content-Type-Options'] = 'nosniff'
+  if (frameOptions) headers[SECURITY_HEADER_NAMES.frameOptions] = frameOptions
+  if (referrerPolicy) headers[SECURITY_HEADER_NAMES.referrerPolicy] = referrerPolicy
+  if (noSniff) headers[SECURITY_HEADER_NAMES.noSniff] = 'nosniff'
   if (permissionsPolicy) {
-    headers['Permissions-Policy'] = serializePermissionsPolicy(permissionsPolicy)
+    headers[SECURITY_HEADER_NAMES.permissionsPolicy] = serializePermissionsPolicy(
+      permissionsPolicy,
+    )
   }
-  if (strictTransportSecurity) headers['Strict-Transport-Security'] = strictTransportSecurity
-  if (crossOriginOpenerPolicy) headers['Cross-Origin-Opener-Policy'] = crossOriginOpenerPolicy
-  if (crossOriginEmbedderPolicy) headers['Cross-Origin-Embedder-Policy'] = crossOriginEmbedderPolicy
-  if (crossOriginResourcePolicy) headers['Cross-Origin-Resource-Policy'] = crossOriginResourcePolicy
+  if (strictTransportSecurity) {
+    headers[SECURITY_HEADER_NAMES.strictTransportSecurity] = strictTransportSecurity
+  }
+  if (crossOriginOpenerPolicy) {
+    headers[SECURITY_HEADER_NAMES.crossOriginOpenerPolicy] = crossOriginOpenerPolicy
+  }
+  if (crossOriginEmbedderPolicy) {
+    headers[SECURITY_HEADER_NAMES.crossOriginEmbedderPolicy] = crossOriginEmbedderPolicy
+  }
+  if (crossOriginResourcePolicy) {
+    headers[SECURITY_HEADER_NAMES.crossOriginResourcePolicy] = crossOriginResourcePolicy
+  }
 
   return () => ({ headers })
 }

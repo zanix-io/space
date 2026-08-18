@@ -29,14 +29,20 @@ Deno.test(
 )
 
 Deno.test('buildServiceWorkerSource: null offline fallback is embedded as literal null', () => {
-  const source = buildServiceWorkerSource({ precacheUrls: [], offlineFallback: null })
+  const source = buildServiceWorkerSource({
+    precacheUrls: [],
+    offlineFallback: null,
+  })
 
   assertStringIncludes(source, 'const OFFLINE_FALLBACK = null')
   new Function(source)
 })
 
 Deno.test('buildServiceWorkerSource: registers install/activate/fetch listeners', () => {
-  const source = buildServiceWorkerSource({ precacheUrls: [], offlineFallback: null })
+  const source = buildServiceWorkerSource({
+    precacheUrls: [],
+    offlineFallback: null,
+  })
 
   assertStringIncludes(source, "self.addEventListener('install'")
   assertStringIncludes(source, "self.addEventListener('activate'")

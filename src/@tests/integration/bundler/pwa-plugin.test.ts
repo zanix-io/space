@@ -2,9 +2,12 @@ import { assert, assertEquals } from '@std/assert'
 import { build } from 'vite'
 import type { Rollup } from 'vite'
 import sharp from 'sharp'
+import { getTemporaryFolder } from '@zanix/helpers'
 import { pwaPlugin, SW_FILE_NAME } from 'modules/bundler/pwa-plugin.ts'
 import { cssPlugin } from 'modules/bundler/css-plugin.ts'
 import { iconFileName } from 'modules/pwa/icon-naming.ts'
+
+const TMP_ROOT = getTemporaryFolder(import.meta.url)
 
 /**
  * Real `vite build()` + real `sharp` resizing, not mocks — same reasoning as
@@ -14,7 +17,7 @@ import { iconFileName } from 'modules/pwa/icon-naming.ts'
 Deno.test(
   'pwaPlugin: generates real, correctly-sized PNG icons from a single source image',
   async () => {
-    const root = await Deno.makeTempDir({ dir: Deno.cwd() })
+    const root = await Deno.makeTempDir({ dir: TMP_ROOT })
     try {
       const sourcePath = `${root}/icon-source.png`
       const source = await sharp({
@@ -56,11 +59,16 @@ Deno.test(
 )
 
 Deno.test('pwaPlugin: a custom sizes list overrides the [192, 512] default', async () => {
-  const root = await Deno.makeTempDir({ dir: Deno.cwd() })
+  const root = await Deno.makeTempDir({ dir: TMP_ROOT })
   try {
     const sourcePath = `${root}/icon-source.png`
     const source = await sharp({
-      create: { width: 256, height: 256, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 1 } },
+      create: {
+        width: 256,
+        height: 256,
+        channels: 4,
+        background: { r: 0, g: 0, b: 0, alpha: 1 },
+      },
     }).png().toBuffer()
     await Deno.writeFile(sourcePath, source)
     await Deno.writeTextFile(`${root}/main.ts`, "console.log('entry')\n")
@@ -89,15 +97,23 @@ Deno.test('pwaPlugin: a custom sizes list overrides the [192, 512] default', asy
 Deno.test(
   'pwaPlugin: emits sw.js precaching the real built CSS URL(s), regardless of cssPlugin ordering',
   async () => {
-    const root = await Deno.makeTempDir({ dir: Deno.cwd() })
+    const root = await Deno.makeTempDir({ dir: TMP_ROOT })
     try {
       const sourcePath = `${root}/icon-source.png`
       const source = await sharp({
-        create: { width: 64, height: 64, channels: 4, background: { r: 1, g: 2, b: 3, alpha: 1 } },
+        create: {
+          width: 64,
+          height: 64,
+          channels: 4,
+          background: { r: 1, g: 2, b: 3, alpha: 1 },
+        },
       }).png().toBuffer()
       await Deno.writeFile(sourcePath, source)
       await Deno.writeTextFile(`${root}/app.css`, '.title { color: red; }\n')
-      await Deno.writeTextFile(`${root}/main.ts`, "import './app.css'\nconsole.log('entry')\n")
+      await Deno.writeTextFile(
+        `${root}/main.ts`,
+        "import './app.css'\nconsole.log('entry')\n",
+      )
 
       const result = await build({
         root,
@@ -105,7 +121,10 @@ Deno.test(
         build: { write: false, rollupOptions: { input: `${root}/main.ts` } },
         plugins: [
           cssPlugin({ tailwind: false }),
-          pwaPlugin({ icons: { source: sourcePath }, offlineFallback: '/offline' }),
+          pwaPlugin({
+            icons: { source: sourcePath },
+            offlineFallback: '/offline',
+          }),
         ],
       })
 
@@ -128,11 +147,16 @@ Deno.test(
 )
 
 Deno.test('pwaPlugin: with no offlineFallback given, sw.js embeds a literal null', async () => {
-  const root = await Deno.makeTempDir({ dir: Deno.cwd() })
+  const root = await Deno.makeTempDir({ dir: TMP_ROOT })
   try {
     const sourcePath = `${root}/icon-source.png`
     const source = await sharp({
-      create: { width: 64, height: 64, channels: 4, background: { r: 1, g: 2, b: 3, alpha: 1 } },
+      create: {
+        width: 64,
+        height: 64,
+        channels: 4,
+        background: { r: 1, g: 2, b: 3, alpha: 1 },
+      },
     }).png().toBuffer()
     await Deno.writeFile(sourcePath, source)
     await Deno.writeTextFile(`${root}/main.ts`, "console.log('entry')\n")

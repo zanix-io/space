@@ -1,8 +1,11 @@
 import { assert, assertEquals } from '@std/assert'
 import { bootstrapServers, webServerManager } from '@zanix/server'
+import { getTemporaryFolder } from '@zanix/helpers'
 import { registerPwa } from 'modules/pwa/register-pwa.ts'
 import { setPwaBuildOutput } from 'modules/pwa/pwa-registry.ts'
 import { iconRoute, MANIFEST_ROUTE, SW_ROUTE } from 'modules/pwa/web-manifest.ts'
+
+const TMP_ROOT = getTemporaryFolder(import.meta.url)
 
 /**
  * Real `bootstrapServers()` + real `fetch()`, not a direct `handleGet` call — this is the one
@@ -19,10 +22,13 @@ import { iconRoute, MANIFEST_ROUTE, SW_ROUTE } from 'modules/pwa/web-manifest.ts
 Deno.test(
   'registerPwa: serves a real manifest.webmanifest and a real icon file over HTTP',
   async () => {
-    const root = await Deno.makeTempDir({ dir: Deno.cwd() })
+    const root = await Deno.makeTempDir({ dir: TMP_ROOT })
     try {
       await Deno.mkdir(`${root}/icons`, { recursive: true })
-      await Deno.writeFile(`${root}/icons/icon-192.png`, new Uint8Array([1, 2, 3, 4]))
+      await Deno.writeFile(
+        `${root}/icons/icon-192.png`,
+        new Uint8Array([1, 2, 3, 4]),
+      )
       await Deno.writeTextFile(
         `${root}/sw.js`,
         "self.addEventListener('install', () => {})\n",
@@ -38,9 +44,14 @@ Deno.test(
 
       const servers = await bootstrapServers({ ssr: { port: 20901 } })
       try {
-        const manifestRes = await fetch(`http://localhost:20901${MANIFEST_ROUTE}`)
+        const manifestRes = await fetch(
+          `http://localhost:20901${MANIFEST_ROUTE}`,
+        )
         assertEquals(manifestRes.status, 200)
-        assertEquals(manifestRes.headers.get('content-type'), 'application/manifest+json')
+        assertEquals(
+          manifestRes.headers.get('content-type'),
+          'application/manifest+json',
+        )
         const manifest = await manifestRes.json()
         assertEquals(manifest.name, 'Storefront')
         assertEquals(manifest.theme_color, '#2563eb')
@@ -52,13 +63,21 @@ Deno.test(
         assertEquals(iconBytes, new Uint8Array([1, 2, 3, 4]))
 
         // 512 was declared in iconSizes but no file was written for it on disk.
-        const missingIconRes = await fetch(`http://localhost:20901${iconRoute(512)}`)
+        const missingIconRes = await fetch(
+          `http://localhost:20901${iconRoute(512)}`,
+        )
         assertEquals(missingIconRes.status, 404)
 
         const swRes = await fetch(`http://localhost:20901${SW_ROUTE}`)
         assertEquals(swRes.status, 200)
-        assertEquals(swRes.headers.get('content-type'), 'application/javascript')
-        assertEquals(await swRes.text(), "self.addEventListener('install', () => {})\n")
+        assertEquals(
+          swRes.headers.get('content-type'),
+          'application/javascript',
+        )
+        assertEquals(
+          await swRes.text(),
+          "self.addEventListener('install', () => {})\n",
+        )
       } finally {
         await webServerManager.stop(servers)
       }
@@ -72,10 +91,13 @@ Deno.test(
 Deno.test(
   'registerPwa: with no iconSizes given, defaults to [192, 512] for route registration too',
   async () => {
-    const root = await Deno.makeTempDir({ dir: Deno.cwd() })
+    const root = await Deno.makeTempDir({ dir: TMP_ROOT })
     try {
       await Deno.mkdir(`${root}/icons`, { recursive: true })
-      await Deno.writeFile(`${root}/icons/icon-512.png`, new Uint8Array([9, 9]))
+      await Deno.writeFile(
+        `${root}/icons/icon-512.png`,
+        new Uint8Array([9, 9]),
+      )
       setPwaBuildOutput(root)
 
       registerPwa({ name: 'Defaults App', icon: './icon-source.png' })
@@ -111,7 +133,9 @@ Deno.test(
       assertEquals(swRes.status, 404)
 
       // /manifest.webmanifest alone still works — it needs no built file at all.
-      const manifestRes = await fetch(`http://localhost:20903${MANIFEST_ROUTE}`)
+      const manifestRes = await fetch(
+        `http://localhost:20903${MANIFEST_ROUTE}`,
+      )
       assertEquals(manifestRes.status, 200)
     } finally {
       await webServerManager.stop(servers)

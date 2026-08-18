@@ -1,6 +1,7 @@
 import type { ClassConstructor, ZanixClassDecorator, ZanixInteractorClass } from '@zanix/server'
 
 import { Get, Post, SsrController } from '@zanix/server'
+import type { RtoTypes } from '@zanix/types'
 import { InternalError } from '@zanix/errors'
 import type { PageHeaderOptions } from './space-page-controller.tsx'
 import { SpacePageController } from './space-page-controller.tsx'
@@ -22,17 +23,79 @@ export type PageOptions = {
    */
   Interactor?: ZanixInteractorClass
   /**
+   * Validation for this page's `action`, using the ecosystem's own Request Transfer Objects — the
+   * same `BaseRTO` classes and the same `@zanix/validator` rules a `@zanix/server` handler uses.
+   * Space adds no validation of its own here; it only connects the RTO to `action`, which an app
+   * otherwise could not do (`@Page` wires `POST` to the BASE class's `handlePost`, so there is no
+   * method on the subclass to decorate).
+   *
+   * When the submitted body fails validation, the POST responds with the page **re-rendered** at
+   * status `422`, carrying `fieldErrors` and `submitted` on the page context — never raw JSON. A
+   * plain `<form>` therefore keeps working with scripting disabled, which a redirect-plus-flash
+   * design could not offer without inventing a flash mechanism this package does not have.
+   *
+   * `Body` only for now. The object shape leaves room for `Params`/`Search` if a real need appears;
+   * neither is built speculatively.
+   *
+   * Note: `Body` is parsed for `application/x-www-form-urlencoded` (what a plain `<form>` posts)
+   * and JSON. A `multipart/form-data` submission — a form with file uploads — has no parsed body at
+   * the server layer, so it cannot be validated this way; use `formData()` for those.
+   *
+   * @example
+   * ```ts
+   * class CheckoutBody extends BaseRTO {
+   *   \@IsEmail({ expose: true })
+   *   accessor email!: string
+   * }
+   *
+   * \@Page({ path: 'checkout', action: { Body: CheckoutBody } })
+   * class CheckoutPage extends SpacePageController {
+   *   action = async (ctx) => { ctx.body.email; return new Response('ok') }
+   * }
+   * ```
+   */
+  action?: { Body?: RtoTypes['Body'] }
+  /**
    * Response headers for this page — `Content-Security-Policy` (via `csp`, defaulting to a
    * nonce-based policy) plus common security headers (`frameOptions`, `referrerPolicy`, ...),
    * defaulting to `securityHeadersGuard`'s own defaults. See `SpacePageController.headers`'s own
    * doc for the full shape and defaults. Pass `false` to disable all of these for this page.
    *
-   * **Interaction with `defineMiddleware`**: this option always wins over a guard registered
-   * globally via `defineMiddleware` for the same header — class-level guards run after global ones
-   * (see `defineMiddleware`'s own doc), but a page's own `headers` is applied directly inside
-   * `handleGet`, not through the guard pipeline at all, and the two don't cleanly override each
-   * other for the same header (see `defineMiddleware`'s own doc for what actually happens if both
-   * are used together). Pick one mechanism per page.
+   * **`csp`'s own precedence chain, exactly three tiers, in order**:
+   *
+   * 1. **This page's own explicit `csp`** (or the app-wide `defineSpaceApp({ headers })` default,
+   *    still resolved first when this page sets none of its own — see `resolvePageHeaders`'s own
+   *    doc) — always wins outright, unconditionally, whenever configured, INCLUDING `csp: false`
+   *    (an explicit "no CSP for this page," which wins even over tier 2 below — see the `false`
+   *    case further down).
+   * 2. **A `cspGuard()` registered via `defineMiddleware` (app-wide) or `@Guard` (this page's own
+   *    class)** — acts as the base/default ONLY for a page that genuinely configured nothing at
+   *    tier 1 (not even `false`). `@zanix/server`'s own `mainInterceptor` is what actually merges
+   *    this in (see that package's own CHANGELOG) — a guard's header is only applied when the
+   *    handler's response doesn't already have that header, never blindly combined into an
+   *    already-set value (which used to corrupt into one invalid, comma-joined result — CSP
+   *    directives are `;`-separated, never `,`).
+   * 3. **This page's own zero-config default** (`DEFAULT_CSP_DIRECTIVES`, nonce-based — see
+   *    `SpacePageController.headers`'s own doc) — the last resort, when NEITHER tier 1 NOR tier 2
+   *    has an answer. This tier is what makes the chain genuinely three-deep rather than two: a
+   *    naive "handler already set it wins" check alone can't express it, because this page's own
+   *    zero-config default is computed and applied inside the SAME handler that also applies tier
+   *    1 — indistinguishable from a deliberate choice unless something explicitly steps aside for
+   *    tier 2 first. See `applySecurityGuards`'s own doc (`space-page-controller.tsx`) for exactly
+   *    how it does that (reading `ctx.locals[GUARD_HEADERS_LOCALS_KEY]`, from `@zanix/server`,
+   *    BEFORE deciding whether to apply its own default at all).
+   *
+   * Concretely: `defineMiddleware([cspGuard({ 'default-src': ["'self'"] })])` becomes the
+   * effective CSP for any page that configures nothing of its own (tier 2, since tier 1 is empty);
+   * a specific page's own `Page({ headers: { csp } })` overrides it for just that page (tier 1); a
+   * page in an app with NO `cspGuard()` registered anywhere falls through to this page's own
+   * nonce-based default (tier 3). `csp: false` is tier 1 too — it wins even over a registered
+   * guard, ending up with the `Content-Security-Policy` header completely ABSENT (never the
+   * guard's, and never present-but-empty either).
+   *
+   * A page-level `@Guard(cspGuard(...))` is subject to the exact same tier-2 treatment as a global
+   * one — it's still a guard, not this option — so it loses to this page's own `headers.csp` (tier
+   * 1) exactly the same way.
    */
   headers?: PageHeaderOptions | false
 }
@@ -40,6 +103,7 @@ export type PageOptions = {
 type PendingPageOptions = {
   Interactor?: ZanixInteractorClass
   headers?: PageHeaderOptions | false
+  action?: { Body?: RtoTypes['Body'] }
 }
 
 /** Pages decorated with a pathless `@Page()`, awaiting `loadRoutes()` to tell them their real
@@ -48,7 +112,10 @@ type PendingPageOptions = {
  * `routesDir`) — silently never becomes a real route; that's why `@Page()`'s own doc calls this
  * mode out as depending on file-based discovery. Maps to the page's own options, carried along
  * until the path is known and the page can actually be registered. */
-const pendingPages = new Map<ClassConstructor<SpacePageController>, PendingPageOptions>()
+const pendingPages = new Map<
+  ClassConstructor<SpacePageController>,
+  PendingPageOptions
+>()
 
 /** Wires `GET`/`POST` to `handleGet`/`handlePost` for `path`, registers `Target` under `'ssr'`
  * (with `Interactor`, if the page declared one), and records its `headers` choice as a static
@@ -64,14 +131,18 @@ const pendingPages = new Map<ClassConstructor<SpacePageController>, PendingPageO
 function registerPage(
   Target: ClassConstructor<SpacePageController>,
   path: string,
-  { Interactor, headers }: PendingPageOptions,
+  { Interactor, headers, action }: PendingPageOptions,
 ): void {
   const proto = Target.prototype
   Get(path)(proto.handleGet)
   Post(path)(proto.handlePost)
   if (Interactor) SsrController({ Interactor })(Target)
   else SsrController()(Target)
-  ;(Target as unknown as typeof SpacePageController).headers = headers
+  ;(Target as unknown as typeof SpacePageController).headers = headers // Same stash-as-a-static mechanism `headers` uses immediately above — `handlePost`
+   // reads it per request. Deliberately NOT `Post(path, rto)`: that registers a PIPE, and a
+  // pipe throw escapes past the router's own catch to `Deno.serve`'s `onError`, which
+  // answers with JSON — the exact outcome the 422 re-render exists to avoid.
+  ;(Target as unknown as typeof SpacePageController).actionRto = action
 }
 
 /**
@@ -155,7 +226,9 @@ export function resolvePendingPage(
  * }
  * ```
  */
-export function Page(pathOrOptions?: string | PageOptions): ZanixClassDecorator {
+export function Page(
+  pathOrOptions?: string | PageOptions,
+): ZanixClassDecorator {
   return function (Target) {
     if (!(Target.prototype instanceof SpacePageController)) {
       throw new InternalError(
@@ -165,15 +238,15 @@ export function Page(pathOrOptions?: string | PageOptions): ZanixClassDecorator 
     }
 
     const Controller = Target as ClassConstructor<SpacePageController>
-    const { path, Interactor, headers } = typeof pathOrOptions === 'string'
-      ? { path: pathOrOptions, Interactor: undefined, headers: undefined }
+    const { path, Interactor, headers, action } = typeof pathOrOptions === 'string'
+      ? { path: pathOrOptions, Interactor: undefined, headers: undefined, action: undefined }
       : pathOrOptions ?? {}
 
     if (path === undefined) {
-      pendingPages.set(Controller, { Interactor, headers })
+      pendingPages.set(Controller, { Interactor, headers, action })
       return
     }
 
-    registerPage(Controller, path, { Interactor, headers })
+    registerPage(Controller, path, { Interactor, headers, action })
   }
 }

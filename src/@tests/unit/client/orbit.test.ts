@@ -85,13 +85,10 @@ Deno.test('extractFragmentTitle: undefined title when the fragment has none', ()
 
 // extractStylesheetLinks (P2-12d) — every scenario below is DOM-free by design (a plain regex,
 // same convention extractFragmentTitle already established above), so it runs directly in Deno,
-// no browser/DOM-shim needed. The DOM-touching half (ensureStylesheetsLoaded — inserting into
-// document.head, waiting for load/error/timeout, deduping against the live document) is NOT
-// covered here: this project has no DOM-shim dependency anywhere (a deliberate, already-documented
-// choice — see prefetch.test.ts's own "DOM-dependent trigger wiring... untested directly, matches
-// this project's own established convention" note), and adding one is an infrastructure decision
-// out of scope for this session. That half was verified by code review against the real DOM APIs
-// involved, not by an automated test.
+// no DOM needed. The DOM-touching half (ensureStylesheetsLoaded — inserting into document.head,
+// waiting for load/error/timeout, deduping against the live document) is deliberately NOT covered
+// in THIS file, to keep this suite itself DOM-free — see `ensure-stylesheets-loaded.test.ts` for
+// that half, against a real `happy-dom` document.
 
 Deno.test(
   "extractStylesheetLinks: a destination page's own CSS link is extracted, and stripped from the body",

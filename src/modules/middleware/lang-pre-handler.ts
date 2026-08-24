@@ -1,4 +1,5 @@
 import type { PreHandler } from '@zanix/server'
+import { assertZnxCookieName, PUBLIC_COOKIE_ATTRIBUTES } from '@zanix/helpers'
 
 /** Path prefixes `langPreHandler` never redirects, regardless of `ignorePrefixes` — every
  * framework-internal route `@zanix/space` itself can register. A caller's own `ignorePrefixes`
@@ -28,14 +29,14 @@ export type LangPreHandlerOptions = {
    * Name of the cookie an explicitly-chosen language persists to (e.g. via a language switcher
    * navigating to `/es/...`), so a LATER visit to an un-prefixed URL — a bookmark, an external
    * link, `/checkout` reached from within the app itself — still honors that choice instead of
-   * re-resolving from `Accept-Language` every time. **Must start with `X-Znx-`**, the same
-   * ecosystem-wide convention `populationGuard`'s own cookie follows — this one isn't filtered by
-   * `@zanix/server`'s `cookiesGuard` (a `PreHandler` runs before any guard, reading the raw
-   * `Request` directly), but keeping the same prefix avoids two different naming conventions for
-   * what is, conceptually, the exact same kind of "persisted resolution" cookie
-   * `populationGuard` already establishes. Deliberately NOT `HttpOnly`, same reasoning as
-   * `populationGuard`'s own cookie: client-side code (a language switcher) is expected to set/read
-   * it too. @default 'X-Znx-Lang'
+   * re-resolving from `Accept-Language` every time. **Must start with `X-Znx-`**, enforced at
+   * construction via `@zanix/utils`'s `assertZnxCookieName` (throws `ApplicationError`) even though
+   * this one isn't actually filtered by `@zanix/server`'s `cookiesGuard` itself (a `PreHandler` runs
+   * before any guard, reading the raw `Request` directly) — kept consistent with `populationGuard`'s
+   * own cookie so there's one naming convention for this kind of "persisted resolution" cookie, not
+   * two, and so `langGuard`'s own copy of the same name (which IS read through `ctx.cookies`) stays
+   * valid too. Deliberately NOT `HttpOnly`, same reasoning as `populationGuard`'s own cookie:
+   * client-side code (a language switcher) is expected to set/read it too. @default 'X-Znx-Lang'
    */
   cookieName?: string
 }
@@ -103,27 +104,24 @@ function readCookie(request: Request, name: string): string | undefined {
  * instead. Otherwise, resolves a language — cookie, then `Accept-Language`, then
  * `defaultLang` — and 301-redirects to that same path with it prepended: `/products` →
  * `/en/products`, `/` → `/en`. `301`, not `302`: a lang-less URL and its canonical, prefixed form
- * are a permanent relationship, the same choice the legacy component this replaces made for its
- * own equivalent "missing param" case. The redirect response also sets the cookie, so a later
- * visit to another un-prefixed URL resolves the same way without needing `Accept-Language` again.
+ * are a permanent relationship. The redirect response also sets the cookie, so a later visit to
+ * another un-prefixed URL resolves the same way without needing `Accept-Language` again.
  *
- * Deliberately simpler than that legacy component in one way: this collapses ITS two separate
- * cases — missing language segment vs. an invalid one — into a single check ("is the first
- * segment already a valid language?"), rather than tracking them as different states with
- * different redirect codes. A per-route opt-out (some pages need no language prefix at all,
- * others do) is NOT supported here either; the legacy version had one, but nothing in
- * `@zanix/space` today has a proven need for mixed prefixed/unprefixed pages in the same app — add
- * it if that changes, rather than building the flexibility speculatively now. The cookie itself
- * has no legacy precedent (that component never persisted a resolved language at all) — added
- * here for consistency with `populationGuard`'s own persistence, and because the real gap it
- * closes (an explicit choice silently reverting on the next un-prefixed URL) applies to language
- * exactly as much as it does to population.
+ * A missing language segment and an invalid one are treated as the same case — a single check
+ * ("is the first segment already a valid language?") rather than two separate states with
+ * different redirect codes. A per-route opt-out (some pages need no language prefix at all, others
+ * do) is NOT supported: nothing in `@zanix/space` today has a proven need for mixed
+ * prefixed/unprefixed pages in the same app — add it if that changes, rather than building the
+ * flexibility speculatively now. The cookie exists for consistency with `populationGuard`'s own
+ * persistence, and because the same gap it closes for population — an explicit choice silently
+ * reverting on the next un-prefixed URL — applies to language exactly as much.
  *
  * Never redirects a framework-internal route (`/health`, `/ready`, `/assets/`, `/icons/`,
  * `/manifest.webmanifest`, `/sw.js`) — `ignorePrefixes` extends that list, never replaces it.
  */
 export function langPreHandler(options: LangPreHandlerOptions): PreHandler {
   const { availableLangs, defaultLang, ignorePrefixes = [], cookieName = 'X-Znx-Lang' } = options
+  assertZnxCookieName(cookieName, 'langPreHandler')
   const ignored = [...FRAMEWORK_PREFIXES, ...ignorePrefixes]
 
   return (request) => {
@@ -154,7 +152,7 @@ export function langPreHandler(options: LangPreHandlerOptions): PreHandler {
       status: 301,
       headers: {
         Location: redirectUrl.href,
-        'Set-Cookie': `${cookieName}=${lang}; Path=/; SameSite=Lax`,
+        'Set-Cookie': `${cookieName}=${lang}; ${PUBLIC_COOKIE_ATTRIBUTES}`,
       },
     })
   }

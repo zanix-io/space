@@ -24,6 +24,8 @@ import { clientBarrelGuardPlugin } from 'modules/bundler/client-barrel-guard.ts'
  * @module
  */
 
+console.error = () => {}
+
 const REPO_ROOT = Deno.cwd()
 const REACT_BARREL = `${REPO_ROOT}/src/modules/client/mod.ts`
 const PREACT_BARREL = `${REPO_ROOT}/src/modules/client/mod-preact.ts`

@@ -2,9 +2,9 @@
  * One build-time pass over every page, producing everything a build needs to know about it
  * STATICALLY — its declared stylesheets, its resolved head, and what it says it is.
  *
- * Generalizes what used to be `discoverPageStyles`, which scanned and imported the same modules for
- * the sake of one field. Two consumers now read from a single pass: `build-client.ts` for CSS
- * entries, and document validation for everything else.
+ * A single pass replaces scanning and importing the same modules separately for each field. Two
+ * consumers read from this one pass: `build-client.ts` for CSS entries, and document validation for
+ * everything else.
  *
  * **The boundary this module is careful about.** It reports only what is knowable without rendering,
  * and it never manufactures anything that belongs downstream. It does not build a `DocumentModel`
@@ -92,10 +92,10 @@ const nativeImport: ModuleImporter = (filePath) => import(toFileUrl(resolve(file
 /**
  * Discovers every page under `routesDir`, in one pass.
  *
- * **Real consequence, unchanged from before this module existed**: importing a page module runs its
- * `@Page()` decorator, registering route metadata into `@zanix/server`'s containers — the same side
- * effect `loadRoutes()` already causes at server startup, now also happening once during a build.
- * Safe in normal CLI usage, where the build and the deployed server are separate processes.
+ * **Real consequence**: importing a page module runs its `@Page()` decorator, registering route
+ * metadata into `@zanix/server`'s containers — the same side effect `loadRoutes()` already causes
+ * at server startup, now also happening once during a build. Safe in normal CLI usage, where the
+ * build and the deployed server are separate processes.
  *
  * @param routesDir - Passed to `scanPageFiles` UNCHANGED, so `filePath` comes out in exactly the
  * shape `loadRoutes()` will produce for the same value at server startup.

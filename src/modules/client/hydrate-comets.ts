@@ -2,7 +2,7 @@
 import { createElement } from 'react'
 import { createRoot, hydrateRoot } from 'react-dom/client'
 import type { CometStrategy } from 'typings/comet.ts'
-import logger from '@zanix/logger'
+import logger from './client-logger.ts'
 import {
   COMET_EXPORT_ATTR,
   COMET_ID_ATTR,

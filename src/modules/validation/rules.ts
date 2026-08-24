@@ -22,6 +22,7 @@
  * @module
  */
 import type { RuleDefinition } from './diagnostic.ts'
+import { InternalError } from '@zanix/errors'
 import { HTML_RULES } from './rules/html.ts'
 import { A11Y_RULES } from './rules/a11y.ts'
 import { SEO_RULES } from './rules/seo.ts'
@@ -65,9 +66,16 @@ export const UNAUTOMATABLE: ReadonlyArray<{ concern: string; phase: 'runtime' | 
 ]
 
 /** Looks a rule up by code. Throws for an unknown code — a typo in a rule reference should fail
- * loudly at the point of use, never silently produce a diagnostic with no metadata. */
+ * loudly at the point of use, never silently produce a diagnostic with no metadata.
+ *
+ * @throws {InternalError} If `code` names no catalogued rule. */
 export function getRule(code: string): RuleDefinition {
   const rule = RULES[code]
-  if (!rule) throw new Error(`Unknown validation rule code: ${code}`)
+  if (!rule) {
+    throw new InternalError(`Unknown validation rule code: ${code}`, {
+      code: 'SPACE_VALIDATION_UNKNOWN_RULE_CODE',
+      meta: { ruleCode: code },
+    })
+  }
   return rule
 }

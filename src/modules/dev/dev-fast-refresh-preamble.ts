@@ -2,11 +2,10 @@
  * Hand-written, NOT imported from `@vitejs/plugin-react` (`viteReact.preambleCode`) — that package
  * is a dev/build-only npm dependency (`spacePlugin`'s own `client`-environment wiring), and this
  * module is reached from `render-to-response.tsx`, the production SSR path every request goes
- * through. Importing it here would pull `@vitejs/plugin-react` into every production render, the
- * exact class of eager-heavy-import regression already fixed once in `@zanix/cli` (see
- * `space/build/command.ts`'s own doc there). The content itself is small and stable enough to keep
- * as a literal, verified against the real package's own `preambleCode` export in this file's own
- * test (a real, disposable comparison — not an assumption it'll never drift).
+ * through. Importing it here would pull `@vitejs/plugin-react` into every production render — an
+ * eager, dev/build-only-sized dependency has no place on a production request path. The content
+ * itself is small and stable enough to keep as a literal, verified against the real package's own
+ * `preambleCode` export by this file's own test, so it won't silently drift out of sync.
  *
  * Must run as `type="module"` (it contains a real `import` statement) — the preamble content
  * itself, as-is, is invalid inside a classic `<script>`.
@@ -24,9 +23,9 @@ window.$RefreshSig$ = () => (type) => type;`
  * {@linkcode buildDevClientScript}) — registers `window.$RefreshReg$`/`window.$RefreshSig$` and
  * connects `/@react-refresh`'s own runtime to `window` via `injectIntoGlobalHook`, BEFORE any
  * Comet's own transformed code runs. Every Comet transformed with `spacePlugin()`'s own `react()`
- * wired in calls `$RefreshSig$()`/`$RefreshReg$()` unconditionally at module evaluation time
- * (confirmed via a real, disposable spike reading the actual transform output) — without this
- * preamble having already run first, that throws `@vitejs/plugin-react can't detect preamble`.
+ * wired in calls `$RefreshSig$()`/`$RefreshReg$()` unconditionally at module evaluation time —
+ * without this preamble having already run first, that throws `@vitejs/plugin-react can't detect
+ * preamble`.
  *
  * Placed BEFORE `bootstrapModules`' own emitted `<script type="module">` tags in document order —
  * `type="module"` scripts execute in relative document order (same guarantee `defer` gives classic

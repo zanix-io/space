@@ -198,7 +198,7 @@ Deno.test(
       const response = await new ThemedFragmentPage(ctxFor()).handleGet(
         mockHandlerContext({
           req: new Request('http://localhost/', {
-            headers: { 'x-space-navigate': '1' },
+            headers: { 'X-Znx-Space-Navigate': '1' },
           }),
         }),
       )

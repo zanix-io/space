@@ -24,7 +24,11 @@ export interface OptimizeRunner {
     source: Uint8Array,
     options: true | ImagesOptimizeOptions,
   ): Promise<OptimizedAssetEntry[]>
-  optimizeSvg(relativePath: string, source: Uint8Array): Promise<OptimizedAssetEntry>
+  optimizeSvg(
+    relativePath: string,
+    source: Uint8Array,
+    preserveIds?: boolean,
+  ): Promise<OptimizedAssetEntry>
   /** Terminates every worker in the pool, if any were ever created. A no-op for the inline
    * (`useWorker` falsy) strategy. Always safe to call even if nothing was ever optimized. */
   close(): void
@@ -76,8 +80,8 @@ export function createOptimizeRunner(useWorker: boolean | number | undefined): O
   return {
     optimizeImage: (relativePath, source, options) =>
       runOnWorker(wm, optimizeImageAssetTask, [relativePath, source, options]),
-    optimizeSvg: (relativePath, source) =>
-      runOnWorker(wm, optimizeSvgAssetTask, [relativePath, source]),
+    optimizeSvg: (relativePath, source, preserveIds) =>
+      runOnWorker(wm, optimizeSvgAssetTask, [relativePath, source, preserveIds]),
     close: () => wm.close(),
   }
 }

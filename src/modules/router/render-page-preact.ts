@@ -2,12 +2,14 @@ import { createElement, Fragment } from 'preact'
 import type { ComponentChildren, ComponentType, VNode } from 'preact'
 import type { ClassConstructor } from '@zanix/server'
 import type { ErrorBoundaryProps, LayoutProps, PageContext } from 'typings/page.ts'
+import logger from '@zanix/logger'
 import { renderToResponse } from '../render/render-to-response-preact.ts'
 import { resolveCssHrefs, resolvePageCssHrefs } from '../render/css-manifest.ts'
 import { resolvePwaHead } from '../pwa/pwa-registry.ts'
 import { isDevClientEnabled } from '../dev/dev-client-registry.ts'
 import { SpaceErrorBoundary } from './error-boundary-preact.ts'
 import { getPageTree } from './page-tree-registry.ts'
+import { resolveSegmentData } from './segment-loader.ts'
 import { applyDocumentShell } from './document-shell-preact.ts'
 import { serializeHeadMarkup } from '../render/head-markup.ts'
 import type { DocumentModel } from '../render/document-model.ts'
@@ -39,25 +41,29 @@ import type { StylesheetRef } from '../render/css-manifest.ts'
  * own `composeSegments`, same segment-walk, same `ORBIT_OUTLET_ATTR` marker, deliberately DIFFERENT
  * in one respect: no `Suspense` wrapping anywhere, ever.
  *
- * This isn't a simplification of the React version — it reflects a real, confirmed constraint of
- * this renderer's own contract (this package's own decision spike): Preact core has no `Suspense`
- * at all, so `loading.tsx` is rejected outright at `loadRoutes()` time (`load-routes.ts`'s own
- * guard) — a page reaching this function is already guaranteed to have no `loading` segment to
- * wrap. `error.tsx` support does NOT need the `Suspense`-wrapping workaround React's own version
- * requires either: `preact-render-to-string`'s synchronous render recovers a thrown error into an
- * already-mounted `SpaceErrorBoundary` directly (see `error-boundary-preact.ts`'s own doc for the
- * `options.errorBoundaries` flag that makes this true, confirmed via a real, disposable spike) —
- * there is no streaming/resume-on-client mechanism to work around in the first place.
+ * This isn't a simplification of the React version — it reflects a real constraint of this
+ * renderer's own contract: Preact core has no `Suspense` at all, so `loading.tsx` is rejected
+ * outright at `loadRoutes()` time (`load-routes.ts`'s own guard) — a page reaching this function
+ * is already guaranteed to have no `loading` segment to wrap. `error.tsx` support does NOT need
+ * the `Suspense`-wrapping workaround React's own version requires either: `preact-render-to-string`'s
+ * synchronous render recovers a thrown error into an already-mounted `SpaceErrorBoundary` directly
+ * (see `error-boundary-preact.ts`'s own doc for the `options.errorBoundaries` flag that makes this
+ * true) — there is no streaming/resume-on-client mechanism to work around in the first place.
+ *
+ * `async` for the same one reason as React's own counterpart: `resolveSegmentData`
+ * (`segment-loader.ts`) resolves every segment's own `layout.tsx` `loader` in parallel so each
+ * `Layout` below receives its own `data` prop — see that function's own doc for the full contract,
+ * shared verbatim between both renderers.
  */
-function composeSegments<Params>(
+async function composeSegments<Params>(
   // Same structural supertype this file's own `renderPageResponse` documents below.
   Target: ClassConstructor<SpacePageController<never>>,
   element: VNode,
-  params: Params,
+  pageCtx: PageContext<Params>,
   fragmentOnly: boolean,
   pageHead: HeadDescriptor | undefined,
-  // This page's own resolved `styles` (P2-12b) — rendered as real `<link>` elements ONLY here, in
-  // the `fragmentOnly` branch below (P2-12d): a full document already gets them through
+  // This page's own resolved `styles` — rendered as real `<link>` elements ONLY here, in
+  // the `fragmentOnly` branch below: a full document already gets them through
   // the document model's own `cssHrefs` (see `renderPageResponse`'s own doc for why it only
   // ever passes a non-empty array when `fragmentOnly` is true). Same reasoning as
   // `render-page-react.tsx`'s own `composeSegments` — see that function's own doc for the full
@@ -69,11 +75,15 @@ function composeSegments<Params>(
   // only ever assignable to `VNode<X>` when `X` itself is assignable TO `Specific` — no non-`any`
   // supertype satisfies that across the different concrete prop shapes this loop produces
   // (`SpaceErrorBoundary`'s own props, `Layout`'s own `LayoutProps`, the outlet `<div>`'s own DOM
-  // attributes, ...). Confirmed empirically before landing on this, not assumed.
+  // attributes, ...).
   // deno-lint-ignore no-explicit-any
-): { element: VNode<any>; head: ResolvedHead } {
+): Promise<{ element: VNode<any>; head: ResolvedHead }> {
   const segments = getPageTree(Target)?.segments ?? []
-  const paramsRecord = params as unknown as Record<string, string>
+  const paramsRecord = pageCtx.params as unknown as Record<string, string>
+  const segmentData = await resolveSegmentData(
+    segments,
+    pageCtx as unknown as PageContext,
+  )
 
   // Most-specific-first, same reasoning/order as `render-page-react.tsx`'s own `composeSegments` —
   // the page's own head, then each segment from nearest (leaf) to farthest (root).
@@ -108,6 +118,7 @@ function composeSegments<Params>(
     if (Layout && i !== 0) {
       node = createElement(Layout, {
         params: paramsRecord,
+        data: segmentData[i],
         children: node,
       })
     }
@@ -124,7 +135,7 @@ function composeSegments<Params>(
     // literal, findable text, exactly what `orbit.ts`'s own `extractFragmentTitle` regex expects.
     // Never `meta`/`link` — see `head-descriptor.ts`'s own doc on why fragments stay title-only.
     //
-    // `pageCssRefs` (P2-12d) render the same way — plain `<link>` elements, no special treatment
+    // `pageCssRefs` render the same way — plain `<link>` elements, no special treatment
     // (Preact never hoists anyway). `orbit.ts`'s own `ensureStylesheetsLoaded` strips every
     // `<link rel="stylesheet">` out of the fragment body before it ever reaches the live DOM, so
     // their exact position here doesn't matter, same reasoning as `<title>` above.
@@ -154,6 +165,11 @@ function composeSegments<Params>(
         | undefined,
       outlet,
       paramsRecord,
+      // No `lang` slot to fill here — this composition path never resolved one before this change
+      // either; `data` is the new, 5th positional argument (see `document-shell-preact.ts`'s own
+      // doc for why it comes after `lang`, not before it).
+      undefined,
+      segmentData[0],
     ),
     head,
   }
@@ -171,14 +187,13 @@ function composeSegments<Params>(
  * `getPageTree(Target)?.filePath`), real Prefresh HMR wired end to end
  * (`dev-vite-hot-client.ts`'s own doc has the full transport, shared with React's own dev sessions).
  */
-export function renderPageResponse<Params>(
+export async function renderPageResponse<Params>(
   // `SpacePageController<never>` — identical to `render-page-react.tsx`'s own `Target`, and for the
   // same structural reason: `Params` appears CONTRAVARIANTLY inside `SpacePageExtensions`, so
-  // `never` is the one type argument every page class is assignable TO. No slot is widened to `any`
-  // any more. `TComponent` in particular needs nothing: it defaults to the renderer-neutral
-  // `SpaceComponent`, which a page on either renderer satisfies — it used to default to React's own
-  // `ComponentType`, which is what once made this function, the PREACT renderer, declare that it
-  // only accepted React-typed pages.
+  // `never` is the one type argument every page class is assignable TO. No slot is widened to
+  // `any`. `TComponent` in particular needs nothing: it defaults to the renderer-neutral
+  // `SpaceComponent`, which a page on either renderer satisfies, so this function — the PREACT
+  // renderer — accepts a page typed for either renderer, not only React-typed ones.
   Target: ClassConstructor<SpacePageController<never>>,
   Component: unknown,
   pageCtx: PageContext<Params>,
@@ -209,10 +224,10 @@ export function renderPageResponse<Params>(
   // exposes no static members).
   const rawPageHead = (Target as unknown as typeof SpacePageController).head
   const pageHead = typeof rawPageHead === 'function' ? rawPageHead(data) : rawPageHead
-  const { element, head } = composeSegments(
+  const { element, head } = await composeSegments(
     Target,
     createElement(RealComponent, data as Record<string, unknown>),
-    pageCtx.params,
+    pageCtx,
     fragmentOnly,
     pageHead,
     // Only the fragment branch actually renders these (see `composeSegments`'s own doc) — a full
@@ -235,11 +250,19 @@ export function renderPageResponse<Params>(
   }
 
   // Same reasoning as React's own `renderPageResponse` for why a fragment skips all of this — see
-  // that file's own doc.
+  // that file's own doc. Same `onError` reasoning too — see that file's own comment on it: without
+  // this, a shell-breaking render error here vanishes with zero trace, console or persisted.
+  const onError = (error: unknown) =>
+    logger.error(
+      `Uncaught error rendering "${pageCtx.url.pathname}" (${getPageTree(Target)?.filePath})`,
+      error,
+    )
+
   return Promise.resolve(
     renderToResponse(
       element,
-      document === undefined ? {} : {
+      document === undefined ? { onError } : {
+        onError,
         initialState: document.initialState,
         nonce: document.nonce,
         doctype: true,

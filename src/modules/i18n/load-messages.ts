@@ -1,5 +1,6 @@
 import { join } from '@std/path'
 import logger from '@zanix/logger'
+import { InternalError } from '@zanix/errors'
 import { isDevClientEnabled } from 'modules/dev/dev-client-registry.ts'
 import { getMessagesDir } from './messages-registry.ts'
 
@@ -37,7 +38,19 @@ async function readJsonObject(path: string): Promise<Messages | undefined> {
     raw = await Deno.readTextFile(path)
   } catch (error) {
     if (error instanceof Deno.errors.NotFound) return undefined
-    throw error
+    // A native `Deno.errors.*` besides `NotFound` (permission denied, disk failure, ...) must
+    // never cross this function unwrapped: its raw `.message` routinely embeds a real, absolute
+    // filesystem path — `loadMessages()` is called from a page's own `loader`, and an unwrapped
+    // native error thrown there is caught by `@zanix/server`'s `routerInterceptor` and turned
+    // straight into an HTTP error response via `getPublicErrorResponse`, which allowlists
+    // `message` by default (this never reaches `error.tsx`'s fallback — that boundary only
+    // catches RENDER errors, not a `loader` throw). The real error detail still reaches the log
+    // via `cause`.
+    throw new InternalError('Failed to read a message catalog file from disk.', {
+      code: 'SPACE_I18N_MESSAGES_READ_FAILED',
+      meta: { source: 'zanix', path },
+      cause: error,
+    })
   }
 
   try {
@@ -98,10 +111,9 @@ async function resolve(lang: string, population: string | undefined): Promise<Me
 /**
  * Resolves the message catalog for a `(lang, population)` pair — the "content resolution" half of
  * i18n (population/language IDENTIFICATION is `populationGuard`/`langPreHandler`/`langGuard`'s own
- * job, not this function's). Ports the legacy component's real pattern (flat catalogs, shallow
- * override merge, module-lifetime cache) deliberately WITHOUT its `react-intl` coupling — this
- * returns a plain {@linkcode Messages} object; formatting (plurals, dates, ICU) is entirely the
- * consuming app's own concern, using whatever library it prefers.
+ * job, not this function's). Uses flat catalogs, a shallow override merge, and a module-lifetime
+ * cache, and returns a plain {@linkcode Messages} object; formatting (plurals, dates, ICU) is
+ * entirely the consuming app's own concern, using whatever library it prefers.
  *
  * Reads `{messagesDir}/{lang}/index.json` (the base catalog) and, when `population` is given,
  * `{messagesDir}/{lang}/populations/{population}.json` (an override — only the keys that differ
@@ -116,33 +128,26 @@ async function resolve(lang: string, population: string | undefined): Promise<Me
  * this, the URL's `lang` is already one of `availableLangs`. A MALFORMED file (invalid JSON, or not
  * a flat object) logs an error and is treated as missing — critically, the base and override are
  * each read and validated INDEPENDENTLY: a broken override file degrades to base-only instead of
- * discarding otherwise-valid base content, unlike the legacy component this replaces (which wrapped
- * both in one try/catch, so one bad override file broke a page's entire base-language render too).
+ * discarding otherwise-valid base content.
  *
- * Cached for the process lifetime, keyed by `${lang}:${population ?? ''}` (an explicit delimiter —
- * the legacy version concatenated `lang + population` with no separator at all, which only worked
- * because its language codes were a fixed 2-character union). Concurrent calls for the same
- * not-yet-cached key share a single in-flight resolution instead of each redoing the same file I/O
- * — the legacy version had no such de-duplication.
+ * Cached for the process lifetime, keyed by `${lang}:${population ?? ''}` — the explicit delimiter
+ * keeps two different `(lang, population)` pairs from ever colliding on the same concatenated
+ * string, regardless of either value's length. Concurrent calls for the same not-yet-cached key
+ * share a single in-flight resolution instead of each redoing the same file I/O.
  *
  * **The cache is bypassed entirely under `znx space dev`** (`isDevClientEnabled()`), so editing a
  * message file while the dev server is running is reflected on the very next request — no restart
  * needed, the same live-edit experience `assetsDir`'s own per-request `Deno.readFile` already gives
  * (concurrent in-flight de-duplication still applies even in dev; only the CACHE read/write is
- * skipped). This is a real improvement over the legacy version, not a port of it: that version's
- * equivalent (`refresh: true`) was fully plumbed through but never actually triggered by anything in
- * that repo — dead code, presumably meant to be driven by an external CLI's watch-mode HTTP layer
- * that never shipped. Here it's automatic, driven by the SAME dev-mode flag every other Space
- * dev-time behavior already reads, not an opt-in flag a caller has to remember to pass.
+ * skipped). This is automatic, driven by the SAME dev-mode flag every other Space dev-time behavior
+ * already reads, not an opt-in flag a caller has to remember to pass.
  *
- * Deliberately deferred, not implemented here (see this package's own CHANGELOG for the full
- * reasoning): a secondary "lazy content" tier fetched after first paint. The legacy version had one
- * — client-side, fetched over HTTP after hydration — but it existed to solve a problem specific to a
- * CSR-first app bolting SSR on: `@zanix/space` is SSR-first, so a page's `loader` already resolves
- * (and embeds in the initial serialized state) whatever it calls `loadMessages()` for; there's no
- * post-hydration gap to fill the same way. If a real page ever needs to defer a genuinely large,
+ * Deliberately deferred, not implemented here: a secondary "lazy content" tier fetched after first
+ * paint. `@zanix/space` is SSR-first, so a page's `loader` already resolves (and embeds in the
+ * initial serialized state) whatever it calls `loadMessages()` for; there's no post-hydration gap to
+ * fill the way a CSR-first app would need to. If a real page ever needs to defer a genuinely large,
  * non-critical message subset, a Comet (this package's own selective-hydration mechanism) fetching
- * its own subset on hydration is the natural fit — not a bespoke fetch layer copied from the legacy.
+ * its own subset on hydration is the natural fit — not a bespoke fetch layer.
  *
  * @example
  * ```tsx

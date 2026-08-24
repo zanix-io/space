@@ -14,6 +14,8 @@
  * @module
  */
 
+import { InternalError } from '@zanix/errors'
+
 let manifest: Record<string, string> | undefined
 let buildOutputDir: string | undefined
 
@@ -32,7 +34,12 @@ export async function loadAssetsManifest(path: string): Promise<void> {
     manifest = JSON.parse(await Deno.readTextFile(path))
   } catch (error) {
     if (error instanceof Deno.errors.NotFound) return
-    throw error
+    // Boot-time-only — see `comet-manifest.ts`'s own `loadCometManifest` for why no `code`/
+    // `userMessage` here, matching `WebServerManager`'s `readSslFile` precedent.
+    throw new InternalError(`Failed to load the assets manifest from "${path}".`, {
+      cause: error,
+      meta: { source: 'zanix', method: 'loadAssetsManifest', path },
+    })
   }
 }
 
@@ -53,8 +60,12 @@ export function loadAssetsBuildOutput(dir: string): void {
 }
 
 /** Test-only escape hatch — sets (or clears, via `undefined`) both the manifest and the build
- * output directory directly, without touching the filesystem. Not exported from this package's
- * public entry points. */
+ * output directory directly, without touching the filesystem. Reachable via the public
+ * `@zanix/space/assets-manifest` subpath (`deno.jsonc`'s `./assets-manifest` maps this whole file),
+ * same as {@linkcode loadAssetsManifest}/{@linkcode loadAssetsBuildOutput} above — unlike the
+ * equivalent test-only hatches in sibling modules (`setCometManifest`, `setCssManifest`, ...),
+ * which sit behind a curated barrel that never re-exports them. Not meant for production use: an
+ * app author has no real reason to call this outside a test fixture. */
 export function setAssetsManifestState(
   value: { manifest?: Record<string, string>; buildOutputDir?: string } | undefined,
 ): void {

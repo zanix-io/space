@@ -7,7 +7,13 @@ import { iconFileName } from 'modules/pwa/icon-naming.ts'
 import { SW_FILE_NAME } from 'modules/bundler/pwa-plugin.ts'
 import { addGlobalCssPaths, setGlobalCssPaths } from 'modules/render/css-manifest.ts'
 import { getActiveRenderer, setActiveRenderer } from 'modules/router/active-renderer.ts'
-import { resetAssetsDirConfig, setAssetsDirConfig } from 'modules/assets/asset-registry.ts'
+import {
+  getOptimizeConfig,
+  resetAssetsDirConfig,
+  resetOptimizeConfig,
+  setAssetsDirConfig,
+  setOptimizeConfig,
+} from 'modules/assets/asset-registry.ts'
 
 const TMP_ROOT = getTemporaryFolder(import.meta.url)
 
@@ -59,6 +65,36 @@ async function theOneJsFile(dir: string): Promise<string> {
     throw new Error(`expected exactly one .js file, got: ${files.join(', ')}`)
   }
   return files[0]
+}
+
+/** A real, deterministic photo-like JPEG (same reasoning `assets-plugin.test.ts`'s own
+ * `gradientJpeg` doc gives: a gradient, not per-pixel random noise, for reliable, non-flaky
+ * compression comparisons across repeated builds). */
+async function gradientJpeg(width: number, height: number, quality: number): Promise<Uint8Array> {
+  const raw = new Uint8Array(width * height * 3)
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 3
+      raw[i] = Math.floor((x / width) * 255)
+      raw[i + 1] = Math.floor((y / height) * 255)
+      raw[i + 2] = Math.floor(128 + 127 * Math.sin((x + y) / 12))
+    }
+  }
+  return await sharp(raw, { raw: { width, height, channels: 3 } }).jpeg({ quality }).toBuffer()
+}
+
+/** Every real cache blob file's `mtime`, keyed by name — `index.json` excluded (its own mtime
+ * legitimately updates even on a hit-only run, since `optimizeImageAsset`'s own cache-hit path
+ * never touches it, but a from-scratch first build always does; the byte-blob files are the ones
+ * whose mtime ONLY ever changes on a real `setBytes` call — i.e. a real, uncached optimize run). */
+async function snapshotCacheBlobMtimes(cacheDir: string): Promise<Map<string, number>> {
+  const snapshot = new Map<string, number>()
+  for await (const entry of Deno.readDir(cacheDir)) {
+    if (entry.name === 'index.json') continue
+    const stat = await Deno.stat(join(cacheDir, entry.name))
+    snapshot.set(entry.name, stat.mtime?.getTime() ?? 0)
+  }
+  return snapshot
 }
 
 Deno.test(
@@ -716,6 +752,303 @@ Deno.test(
         assert(!manifestExists, 'expected no assets-manifest.json when assetsDir was never set')
       } finally {
         setGlobalCssPaths(undefined)
+      }
+    })
+  },
+)
+
+// =================================================================================================
+// End-to-end: znx space build -> buildSpaceClient -> assetsPlugin -> image optimizer -> transform
+// cache -> sharp -> optimized outputs + manifest. Real Vite build, real sharp, real persisted
+// cache — the actual official path an app reaches purely via `defineSpaceApp({ assetsDir,
+// optimize })`, never a hand-wired `vite.config.ts` call to `assetsPlugin` directly.
+// =================================================================================================
+
+Deno.test(
+  "buildSpaceClient: with optimize omitted, defaults to getOptimizeConfig() — a single app's " +
+    'own defineSpaceApp({ assetsDir, optimize }) reaches the production build with no explicit ' +
+    'option, real breakpoints/formats produced, manifest reflects every real output',
+  async () => {
+    await withTempDir(async (root) => {
+      const assetsDir = join(root, 'assets-src')
+      const cacheDir = join(root, 'transform-cache')
+      await Deno.mkdir(assetsDir, { recursive: true })
+      const source = await gradientJpeg(1600, 1200, 100)
+      await Deno.writeFile(join(assetsDir, 'hero.jpg'), source)
+      try {
+        // Stands in for a single defineSpaceApp({ assetsDir, optimize }) call having already run —
+        // exactly what `zanix space build` (via `importSpaceApp`) triggers before ever calling
+        // `buildSpaceClient`, with NO explicit option threaded through by the CLI itself.
+        setAssetsDirConfig(assetsDir)
+        setOptimizeConfig({ images: { breakpoints: ['msm', 'dlg'], formats: ['webp'] }, cacheDir })
+
+        const result = await buildSpaceClient({ root, css: { tailwind: false } })
+
+        const manifest: Record<string, string> = JSON.parse(
+          await Deno.readTextFile(join(result.outDir, 'assets-manifest.json')),
+        )
+        assert('hero.jpg' in manifest, JSON.stringify(manifest))
+        assert(
+          /hero\.msm-[\w-]+\.jpg$/.test(manifest['hero.msm.jpg'] ?? ''),
+          JSON.stringify(manifest),
+        )
+        assert(
+          /hero\.dlg-[\w-]+\.jpg$/.test(manifest['hero.dlg.jpg'] ?? ''),
+          JSON.stringify(manifest),
+        )
+        assert(
+          /hero\.msm-[\w-]+\.webp$/.test(manifest['hero.msm.webp'] ?? ''),
+          JSON.stringify(manifest),
+        )
+        assert(
+          /hero\.dlg-[\w-]+\.webp$/.test(manifest['hero.dlg.webp'] ?? ''),
+          JSON.stringify(manifest),
+        )
+
+        // The transform cache was REALLY used, from the official path — not a bypass.
+        const cacheEntries: string[] = []
+        for await (const entry of Deno.readDir(cacheDir)) cacheEntries.push(entry.name)
+        assert(cacheEntries.includes('index.json'), 'expected a real persisted cache index')
+        assert(cacheEntries.length > 1, 'expected at least one real cached output blob')
+      } finally {
+        resetAssetsDirConfig()
+        resetOptimizeConfig()
+      }
+    })
+  },
+)
+
+Deno.test(
+  'buildSpaceClient: optimize.svg.preserveIds reaches assetsPlugin through the REAL ' +
+    'defineSpaceApp → getOptimizeConfig() path, not just a direct assetsPlugin() call — a ' +
+    'matching sprite keeps its ids, a non-matching file still gets the default cleanupIds',
+  async () => {
+    await withTempDir(async (root) => {
+      const assetsDir = join(root, 'assets-src')
+      await Deno.mkdir(join(assetsDir, 'icons'), { recursive: true })
+      const sprite = '<svg xmlns="http://www.w3.org/2000/svg" width="0">' +
+        '<symbol id="search" viewBox="0 0 512 512"><path d="M1 1"/></symbol></svg>'
+      await Deno.writeTextFile(join(assetsDir, 'icons/catalog.svg'), sprite)
+      const plain = '<svg xmlns="http://www.w3.org/2000/svg" width="10">' +
+        '<circle id="stray" r="1"/></svg>'
+      await Deno.writeTextFile(join(assetsDir, 'plain.svg'), plain)
+      try {
+        // Stands in for a single defineSpaceApp({ assetsDir, optimize }) call having already
+        // run — exactly what `zanix space build` triggers before ever calling
+        // `buildSpaceClient`, with NO explicit `optimize` option threaded through by the CLI
+        // itself (confirmed against the real `command.ts`: it never mentions `optimize` at all).
+        setAssetsDirConfig(assetsDir)
+        setOptimizeConfig({ svg: { preserveIds: ['icons/**'] } })
+        assertEquals(
+          getOptimizeConfig(),
+          { svg: { preserveIds: ['icons/**'] } },
+          'sanity: the exact object defineSpaceApp would have registered',
+        )
+
+        const result = await buildSpaceClient({ root, css: { tailwind: false } })
+
+        const manifest: Record<string, string> = JSON.parse(
+          await Deno.readTextFile(join(result.outDir, 'assets-manifest.json')),
+        )
+        const catalogFileName = manifest['icons/catalog.svg']
+        assert(catalogFileName, JSON.stringify(manifest))
+        const catalogText = await Deno.readTextFile(
+          join(result.outDir, catalogFileName.replace(/^\//, '')),
+        )
+        assert(
+          catalogText.includes('id="search"'),
+          'a file matching preserveIds must keep its real symbol id through the full ' +
+            'defineSpaceApp → buildSpaceClient → assetsPlugin path',
+        )
+
+        const plainFileName = manifest['plain.svg']
+        assert(plainFileName, JSON.stringify(manifest))
+        const plainText = await Deno.readTextFile(
+          join(result.outDir, plainFileName.replace(/^\//, '')),
+        )
+        assert(
+          !plainText.includes('id="stray"'),
+          'a file NOT matching preserveIds must still get the default cleanupIds behavior',
+        )
+      } finally {
+        resetAssetsDirConfig()
+        resetOptimizeConfig()
+      }
+    })
+  },
+)
+
+Deno.test(
+  'buildSpaceClient: a bare optimize.svg: true (NO preserveIds declared at all) already keeps ' +
+    'a real sprite’s symbol ids, through the REAL defineSpaceApp → buildSpaceClient path — the ' +
+    'default is safe, preserveIds is no longer required for a <symbol>-based catalog',
+  async () => {
+    await withTempDir(async (root) => {
+      const assetsDir = join(root, 'assets-src')
+      await Deno.mkdir(join(assetsDir, 'icons'), { recursive: true })
+      const sprite = '<svg xmlns="http://www.w3.org/2000/svg" width="0">' +
+        '<symbol id="search" viewBox="0 0 512 512"><path d="M1 1"/></symbol></svg>'
+      await Deno.writeTextFile(join(assetsDir, 'icons/catalog.svg'), sprite)
+      try {
+        setAssetsDirConfig(assetsDir)
+        setOptimizeConfig({ svg: true }) // bare boolean — no preserveIds, on purpose
+
+        const result = await buildSpaceClient({ root, css: { tailwind: false } })
+
+        const manifest: Record<string, string> = JSON.parse(
+          await Deno.readTextFile(join(result.outDir, 'assets-manifest.json')),
+        )
+        const catalogFileName = manifest['icons/catalog.svg']
+        assert(catalogFileName, JSON.stringify(manifest))
+        const catalogText = await Deno.readTextFile(
+          join(result.outDir, catalogFileName.replace(/^\//, '')),
+        )
+        assert(
+          catalogText.includes('id="search"'),
+          'a bare `optimize: { svg: true }` must already protect a real <symbol> id — no ' +
+            'preserveIds config required for this to be safe',
+        )
+      } finally {
+        resetAssetsDirConfig()
+        resetOptimizeConfig()
+      }
+    })
+  },
+)
+
+Deno.test(
+  'buildSpaceClient: optimize.cacheDir survives a SECOND real znx-space-build-equivalent run — ' +
+    'zero new sharp invocations (cache blob mtimes untouched), byte-identical manifest output',
+  async () => {
+    await withTempDir(async (root) => {
+      const assetsDir = join(root, 'assets-src')
+      const cacheDir = join(root, 'transform-cache')
+      await Deno.mkdir(assetsDir, { recursive: true })
+      const source = await gradientJpeg(1600, 1200, 100)
+      await Deno.writeFile(join(assetsDir, 'hero.jpg'), source)
+      try {
+        setAssetsDirConfig(assetsDir)
+        setOptimizeConfig({ images: { breakpoints: ['msm'] }, cacheDir })
+
+        const first = await buildSpaceClient({ root, css: { tailwind: false } })
+        const firstManifest: Record<string, string> = JSON.parse(
+          await Deno.readTextFile(join(first.outDir, 'assets-manifest.json')),
+        )
+        const firstBlobMtimes = await snapshotCacheBlobMtimes(cacheDir)
+        assert(firstBlobMtimes.size > 0, 'expected real cache blobs after the first build')
+
+        // A SECOND build, same source/options/cacheDir — same source+transform+policy per the
+        // requested criterion. `outDir` is emptied by Vite each build (`emptyOutDir: true`), so a
+        // byte-identical manifest here can ONLY come from the cache, never a leftover file.
+        const second = await buildSpaceClient({ root, css: { tailwind: false } })
+        const secondManifest: Record<string, string> = JSON.parse(
+          await Deno.readTextFile(join(second.outDir, 'assets-manifest.json')),
+        )
+        assertEquals(
+          secondManifest,
+          firstManifest,
+          'a repeat build must reuse the exact same cached output',
+        )
+
+        // The real, load-bearing idempotency proof: `setBytes`/`setEntry` ALWAYS re-touch a blob's
+        // mtime, even when writing byte-identical content — so an UNCHANGED mtime after the second
+        // build is direct, real evidence sharp was never asked to re-optimize this source.
+        const secondBlobMtimes = await snapshotCacheBlobMtimes(cacheDir)
+        assertEquals(
+          [...secondBlobMtimes.entries()],
+          [...firstBlobMtimes.entries()],
+          'zero new sharp invocations means zero cache blobs re-written — mtimes must be identical',
+        )
+      } finally {
+        resetAssetsDirConfig()
+        resetOptimizeConfig()
+      }
+    })
+  },
+)
+
+Deno.test(
+  'buildSpaceClient: a changed breakpoint (via optimize) on a THIRD run still produces its own ' +
+    "real output, without disturbing the already-cached, unrelated breakpoint's own blob",
+  async () => {
+    await withTempDir(async (root) => {
+      const assetsDir = join(root, 'assets-src')
+      const cacheDir = join(root, 'transform-cache')
+      await Deno.mkdir(assetsDir, { recursive: true })
+      const source = await gradientJpeg(1600, 1200, 100)
+      await Deno.writeFile(join(assetsDir, 'hero.jpg'), source)
+      try {
+        setAssetsDirConfig(assetsDir)
+        setOptimizeConfig({ images: { breakpoints: ['msm'] }, cacheDir })
+        await buildSpaceClient({ root, css: { tailwind: false } })
+        const msmBlobMtimes = await snapshotCacheBlobMtimes(cacheDir)
+
+        // A real POLICY CHANGE — an additional breakpoint — must be picked up correctly, without
+        // needing any explicit cache invalidation: this is a different transformId, a real miss.
+        setOptimizeConfig({ images: { breakpoints: ['msm', 'dlg'] }, cacheDir })
+        const result = await buildSpaceClient({ root, css: { tailwind: false } })
+        const manifest: Record<string, string> = JSON.parse(
+          await Deno.readTextFile(join(result.outDir, 'assets-manifest.json')),
+        )
+        assert(
+          /hero\.dlg-[\w-]+\.jpg$/.test(manifest['hero.dlg.jpg'] ?? ''),
+          JSON.stringify(manifest),
+        )
+
+        // The ORIGINAL msm blob(s) must be untouched by this unrelated, additive change.
+        const afterBlobMtimes = await snapshotCacheBlobMtimes(cacheDir)
+        for (const [name, mtime] of msmBlobMtimes) {
+          assertEquals(
+            afterBlobMtimes.get(name),
+            mtime,
+            `msm's own cached blob '${name}' must stay untouched`,
+          )
+        }
+      } finally {
+        resetAssetsDirConfig()
+        resetOptimizeConfig()
+      }
+    })
+  },
+)
+
+Deno.test(
+  'buildSpaceClient: with optimize omitted (assetsDir alone), assetsPlugin runs its own ' +
+    'pre-existing hash-and-emit behavior, completely unchanged — no optimize means no optimization',
+  async () => {
+    await withTempDir(async (root) => {
+      const assetsDir = join(root, 'assets-src')
+      await Deno.mkdir(assetsDir, { recursive: true })
+      const source = await gradientJpeg(400, 300, 100)
+      await Deno.writeFile(join(assetsDir, 'hero.jpg'), source)
+      try {
+        setAssetsDirConfig(assetsDir)
+        assertEquals(getOptimizeConfig(), undefined, 'sanity: no optimize registered in this test')
+
+        const result = await buildSpaceClient({ root, css: { tailwind: false } })
+        const manifest: Record<string, string> = JSON.parse(
+          await Deno.readTextFile(join(result.outDir, 'assets-manifest.json')),
+        )
+        const heroAssets = Object.keys(manifest).filter((key) => key.startsWith('hero'))
+        assertEquals(
+          heroAssets,
+          ['hero.jpg'],
+          'no variants of any kind without an explicit optimize',
+        )
+
+        const heroPath = join(result.outDir, manifest['hero.jpg'].replace(/^\//, ''))
+        // `sharp().toBuffer()` returns a Node `Buffer` (a `Uint8Array` SUBCLASS, different
+        // constructor); `Deno.readFile()` always returns a plain `Uint8Array` — `assertEquals`
+        // treats the two as structurally unequal even with identical bytes, confirmed empirically
+        // (byte-for-byte identical, `assertEquals` still failed until normalized). Wrapping both
+        // sides in a fresh plain `Uint8Array` compares real content only, never constructor identity.
+        assertEquals(
+          new Uint8Array(await Deno.readFile(heroPath)),
+          new Uint8Array(source),
+          'must be the exact original bytes',
+        )
+      } finally {
+        resetAssetsDirConfig()
       }
     })
   },

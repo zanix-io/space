@@ -4,24 +4,23 @@ import type { LayoutProps } from 'typings/page.ts'
 
 /**
  * The document shell used when there's no root `layout.tsx` to provide one — Preact counterpart to
- * `document-shell.tsx`'s own `DefaultDocumentShell`, and now structurally identical to it: an
- * `<html lang>` with a `<head>` carrying the encoding and viewport declarations, and a `<body>`
- * holding the page.
+ * `document-shell.tsx`'s own `DefaultDocumentShell`, structurally identical to it: an `<html lang>`
+ * with a `<head>` carrying the encoding and viewport declarations, and a `<body>` holding the page.
  *
- * **This component no longer places the resolved head, and neither does a custom root layout.**
- * It used to: Preact has no equivalent of React 19's hoisting, so an earlier version of this module
- * threaded `title`/`meta`/`link`/`cssHrefs`/`pwaHead` through as a `headExtras` prop — to this shell
- * when the app had no root layout of its own, and to that layout when it did. The second half of
- * that was the problem. It made the document's entire metadata conditional on an app-authored
- * component destructuring a prop that was not part of the public {@linkcode LayoutProps} type, so a
- * root layout written from this package's own README (or produced by `zanix generate layout`)
- * silently served every page with no `<title>`, no canonical, no hreflang and no stylesheet links —
- * under Preact only, while the identical source produced a complete document under React.
+ * **This component never places the resolved head, and neither does a custom root layout.** Preact
+ * has no equivalent of React 19's hoisting, so threading `title`/`meta`/`link`/`cssHrefs`/`pwaHead`
+ * through as a `headExtras` prop instead — to this shell when the app has no root layout of its own,
+ * and to that layout when it does — would make the document's entire metadata conditional on an
+ * app-authored component destructuring a prop that is not part of the public {@linkcode LayoutProps}
+ * type: a root layout written from this package's own README (or produced by `zanix generate
+ * layout`) would silently serve every page with no `<title>`, no canonical, no hreflang and no
+ * stylesheet links — under Preact only, while the identical source produces a complete document
+ * under React.
  *
- * Head placement now happens once, after render, in `render-to-response-preact.ts` via
+ * Head placement instead happens once, after render, in `render-to-response-preact.ts` via
  * `placeHeadMarkup` (`render/head-markup.ts`) — the same string-level technique that module already
- * used for its trailing scripts. A root layout is back to being what it is under React: a component
- * that owns the document's structure, with no obligation toward its metadata.
+ * uses for its trailing scripts. A root layout is what it is under React: a component that owns the
+ * document's structure, with no obligation toward its metadata.
  */
 function DefaultDocumentShell(
   { children, lang }: { children: VNode; lang?: string },
@@ -69,6 +68,12 @@ function DefaultDocumentShell(
  * @param lang - The document language for the default shell's own `<html lang>`. Ignored when a
  * custom `RootLayout` is present — that layout renders `<html>` itself and therefore owns the
  * attribute. Defaults to `'en'`, exactly what this shell hardcoded before the value was threaded.
+ * @param data - `RootLayout`'s own resolved `loader` data (see `LayoutProps.data`'s own doc,
+ * `typings/page.ts`) — `undefined` when it declares none, or for `createNotFoundHandler`'s own use
+ * of this same root layout (see that type's own doc for why). Irrelevant for the default shell, same
+ * as `params`. Added AFTER `lang`, not before it — every existing caller already passes `lang`
+ * positionally at this 4th slot, and shifting it would break every one of them for a value they
+ * don't even use (the default shell ignores `data` entirely).
  */
 export function applyDocumentShell(
   RootLayout: ComponentType<LayoutProps<ComponentChildren>> | undefined,
@@ -77,10 +82,11 @@ export function applyDocumentShell(
   content: VNode<any>,
   params: Record<string, string>,
   lang?: string,
+  data?: unknown,
   // deno-lint-ignore no-explicit-any
 ): VNode<any> {
   if (RootLayout) {
-    return createElement(RootLayout, { params, children: content })
+    return createElement(RootLayout, { params, data, children: content })
   }
   return createElement(DefaultDocumentShell, { children: content, lang })
 }

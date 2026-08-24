@@ -11,6 +11,8 @@
  * @module
  */
 
+/** Which renderer implementation an app installed — `'react'` or `'preact'`, matching
+ * `defineSpaceApp({ renderer })`'s own accepted values. */
 export type RendererKind = 'react' | 'preact'
 
 let activeRenderer: RendererKind = 'react'
@@ -23,8 +25,7 @@ export function setActiveRenderer(renderer: RendererKind): void {
 
 /** Read by `load-routes.ts`'s `loading.tsx` guard and `request-cache.tsx`'s `useRequestCache`
  * guard — the only two places this package's own contract says must reject something outright
- * under Preact (this package's own decision spike, §8.1). Every other shared module stays fully
- * unaware this even exists. */
+ * under Preact. Every other shared module stays fully unaware this even exists. */
 export function getActiveRenderer(): RendererKind {
   return activeRenderer
 }

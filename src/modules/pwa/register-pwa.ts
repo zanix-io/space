@@ -1,5 +1,6 @@
 import type { HandlerContext } from '@zanix/server'
 import { Get, SsrController, ZanixSsrController } from '@zanix/server'
+import { InternalError } from '@zanix/errors'
 import type { PwaConfig } from 'typings/pwa.ts'
 import { buildWebManifest, iconRoute, MANIFEST_ROUTE, SW_ROUTE } from './web-manifest.ts'
 import { DEFAULT_ICON_SIZES, iconFileName, SW_FILE_NAME } from './icon-naming.ts'
@@ -43,7 +44,17 @@ function registerFileRoute(
       if (error instanceof Deno.errors.NotFound) {
         return new Response('Not Found', { status: 404 })
       }
-      throw error
+      // A native `Deno.errors.*` besides `NotFound` (permission denied, disk failure, ...) must
+      // never cross this live route handler unwrapped: its raw `.message` routinely embeds the
+      // real, absolute `filePath` on disk — `@zanix/server`'s own `getPublicErrorResponse`
+      // allowlists `message` by default, so an unwrapped native error reaching this route would
+      // hand that path straight to the client. The real error detail still reaches the log via
+      // `cause`.
+      throw new InternalError(`Failed to read a PWA file for route "${path}" from disk.`, {
+        code: 'SPACE_PWA_FILE_READ_FAILED',
+        meta: { source: 'zanix', path, filePath },
+        cause: error,
+      })
     }
   })
 }

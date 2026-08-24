@@ -1,4 +1,5 @@
 import { assert, assertEquals, assertMatch, assertThrows } from '@std/assert'
+import { InternalError } from '@zanix/errors'
 import { renderToReadableStream } from 'react-dom/server'
 import { renderToResponse, useRequestCache } from '../../../../mod-react.ts'
 import { setActiveRenderer } from 'modules/router/active-renderer.ts'
@@ -84,11 +85,12 @@ Deno.test(
       // Expected — see comment above; the assertions below are what this test actually verifies.
     }
 
-    assert(reported instanceof Error)
+    assert(reported instanceof InternalError)
     assertMatch(
-      (reported as Error).message,
+      reported.message,
       /useRequestCache.*renderToResponse/,
     )
+    assertEquals(reported.code, 'SPACE_RENDER_REQUEST_CACHE_OUTSIDE_TREE')
   },
 )
 
@@ -108,9 +110,10 @@ Deno.test(
       })
     }
     try {
-      const thrown = assertThrows(() => Reader(), Error)
+      const thrown = assertThrows(() => Reader(), InternalError)
       assertMatch(thrown.message, /--renderer=preact/)
       assertMatch(thrown.message, /Suspense/)
+      assertEquals(thrown.code, 'SPACE_RENDER_REQUEST_CACHE_UNAVAILABLE_PREACT')
       assertEquals(
         fetcherCalled,
         false,

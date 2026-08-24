@@ -24,16 +24,14 @@ const STYLESHEET_LINK_TAG = /<link\b[^>]*\brel="stylesheet"[^>]*\/?>/g
  * new tab, `target="_blank"`, an external origin) — Orbit only ever takes over the one case a
  * normal link click already means "replace this document," never anything else.
  *
- * `isSameDocumentHashLink` is its own escape hatch, real bug fixed here: an in-page anchor link
- * (`<a href="#section">`, or `<a href="/current/path#section">` while already on that exact path)
- * used to be intercepted like any other same-origin link — `swapOutlet` would then `fetch` a whole
- * new fragment and replace the outlet's `innerHTML` just to reach an anchor already present in the
- * current DOM, discarding the browser's own native "scroll to this element" behavior entirely (a
- * real, user-visible regression: no smooth native scroll, an unnecessary network round-trip, and
- * `<a href="#section">` clicked twice would re-fetch and re-render identical content each time).
- * `onClick` computes this by comparing the resolved URL's `pathname`+`search` against the current
- * page's own — true only for a genuine "same document, different hash" link, never a link to a
- * different page that merely happens to also carry a hash.
+ * `isSameDocumentHashLink` is its own escape hatch: an in-page anchor link (`<a href="#section">`,
+ * or `<a href="/current/path#section">` while already on that exact path) must NOT be intercepted
+ * like an ordinary same-origin link — it needs the browser's own native "scroll to this element"
+ * behavior, not a `fetch` of a whole new fragment and a replace of the outlet's `innerHTML` just to
+ * reach an anchor already present in the current DOM. `onClick` computes this by comparing the
+ * resolved URL's `pathname`+`search` against the current page's own — true only for a genuine
+ * "same document, different hash" link, never a link to a different page that merely happens to
+ * also carry a hash.
  */
 export function shouldInterceptNavigation(input: {
   href: string | null
@@ -66,12 +64,12 @@ export function extractFragmentTitle(
 }
 
 /** A single stylesheet reference, exactly as found in a fragment's own HTML — never a distinct
- * "page CSS" vs. "comet CSS" shape (P2-12d's own point): SSR already resolved the real, final
- * list for each; this is just discovery. */
+ * "page CSS" vs. "comet CSS" shape: SSR already resolved the real, final list for each; this is
+ * just discovery. */
 export type FragmentStylesheetRef = { href: string; media?: string }
 
 /**
- * Pulls every `<link rel="stylesheet">` (P2-12d) out of a fragment response's raw HTML — a page's
+ * Pulls every `<link rel="stylesheet">` out of a fragment response's raw HTML — a page's
  * own `styles` (rendered as real `<link>`s only in a fragment response, see
  * `render-page-react.tsx`'s own `composeSegments` doc) AND any Comet's own already-inline `<link>`
  * (unconditionally rendered by `CometBoundary` regardless of full-document/fragment, completely
@@ -143,12 +141,17 @@ function awaitStylesheetLoad(link: HTMLLinkElement): Promise<void> {
  * {@linkcode awaitStylesheetLoad}), then returns `html` with every stylesheet `<link>` stripped
  * out, so the outlet's own swapped content never ends up carrying one.
  *
- * The one client-side piece P2-12d adds — everything else (which stylesheets a destination needs,
- * in what order, with what `media`) was already decided server-side, by the exact same
+ * The only client-side piece of this mechanism — everything else (which stylesheets a destination
+ * needs, in what order, with what `media`) was already decided server-side, by the exact same
  * `CssManifest`/`StylesheetRef` resolution a full SSR render uses. No client-side registry
  * duplicates that; this only ever reacts to what THIS response's own HTML already says.
+ *
+ * Exported (only `swapOutlet` above calls it in real client code) so `ensure-stylesheets-loaded.
+ * test.ts` can exercise it directly against a real `happy-dom` document — see that file's own doc
+ * for why this is the one function in this module that needed a real DOM instead of a plain
+ * string/object fixture.
  */
-async function ensureStylesheetsLoaded(html: string): Promise<string> {
+export async function ensureStylesheetsLoaded(html: string): Promise<string> {
   const { refs, body } = extractStylesheetLinks(html)
   if (refs.length === 0) return html
 
@@ -222,7 +225,7 @@ async function swapOutlet(href: string, replace: boolean): Promise<void> {
 
   const { title, body } = extractFragmentTitle(html)
   // Awaited BEFORE `swap` is even defined — every stylesheet this destination needs (page CSS,
-  // Comet CSS, whichever it turns out to have) is already loaded (or gave up trying, P2-12d) by
+  // Comet CSS, whichever it turns out to have) is already loaded (or gave up trying) by
   // the time `swap()` runs, so the destination markup is never visible without its own CSS.
   const readyBody = await ensureStylesheetsLoaded(body)
 

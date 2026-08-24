@@ -46,6 +46,7 @@ export async function optimizeImageAssetTask(
 export async function optimizeSvgAssetTask(
   relativePath: string,
   source: Uint8Array,
+  preserveIds?: boolean,
 ): Promise<{ relativePath: string; bytes: Uint8Array }> {
-  return await optimizeSvgAsset(relativePath, source)
+  return await optimizeSvgAsset(relativePath, source, preserveIds)
 }

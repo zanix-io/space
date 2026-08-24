@@ -117,16 +117,15 @@ export function defineComet<P extends object>(
     // already injects a loaded comet's CSS Module client-side with zero help needed here).
     const cometCssRefs = getCometCssHrefs(sourceUrl)
     // React 19 hoists AND dedupes (by `href`) a `precedence`-managed `<link>` declared anywhere in
-    // the tree into the real `<head>`, confirmed empirically (this package's own decision spike,
-    // same mechanism `theme.resolve`'s own `<style>` placement already relies on) — so rendering it
-    // right here, at this comet's own position, is enough; React moves it. Preact has no hoisting
-    // at all (confirmed absent, same spike `themeStyle`'s own doc already documents), so its
-    // `<link>` renders wherever declared — exactly here, the same "wherever placed IS its final
-    // position" contract already established for `themeStyle` under this renderer. One accepted,
-    // documented consequence: a comet used twice on the same PREACT page repeats its own `<link>`
-    // (React would dedupe it automatically) — harmless, since it's the same URL and CSS rules are
-    // idempotent to reapply, not a correctness gap, just one more already-reduced capability this
-    // renderer has relative to React (see this package's own Preact decision spike).
+    // the tree into the real `<head>` — the same mechanism `theme.resolve`'s own `<style>`
+    // placement already relies on — so rendering it right here, at this comet's own position, is
+    // enough; React moves it. Preact has no hoisting at all (same contract `themeStyle`'s own doc
+    // already documents), so its `<link>` renders wherever declared — exactly here, the same
+    // "wherever placed IS its final position" contract already established for `themeStyle` under
+    // this renderer. One accepted, documented consequence: a comet used twice on the same PREACT
+    // page repeats its own `<link>` (React would dedupe it automatically) — harmless, since it's
+    // the same URL and CSS rules are idempotent to reapply, not a correctness gap, just one more
+    // already-reduced capability this renderer has relative to React.
     const precedence = getActiveRenderer() === 'react' ? 'space' : undefined
 
     // A Comet's own props cross the server/client boundary as plain JSON — the same contract

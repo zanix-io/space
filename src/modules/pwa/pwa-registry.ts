@@ -60,9 +60,8 @@ export function setPwaBuildOutput(dir: string | undefined): void {
  *
  * Typed against `render/document-model.ts`'s own renderer-agnostic shape, deliberately, rather than
  * against either renderer's serializer options: PWA is an orthogonal capability of the document, not
- * a feature of React's or Preact's rendering, and this module previously referenced React's own
- * `RenderToResponseOptions` — which meant the Preact render path reached a React type to describe
- * something neither renderer owns. */
+ * a feature of React's or Preact's rendering, so neither render path needs to depend on a type
+ * owned by the other renderer. */
 export function resolvePwaHead(): DocumentPwa | undefined {
   if (!pwaConfig) return undefined
   return {

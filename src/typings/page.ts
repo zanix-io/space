@@ -55,6 +55,41 @@ export type PageContext<Params = Record<string, string>> = {
    * right content override; see `populationGuard`'s own doc for the resolution order. */
   population?: string
   /**
+   * Dedupes an async fetch, by `key`, across every `loader` this SAME request's composition chain
+   * runs — the page's own AND every `layout.tsx`'s own (see `LayoutProps.data`'s own doc for how
+   * segment-level loaders share this exact `ctx` object). The first call for a given `key` runs
+   * `fetcher()` and caches its promise; every later call for that key, from ANY of those loaders,
+   * gets that same promise back instead of triggering a second fetch.
+   *
+   * This exists because segment-level loaders made a real duplicate-fetch case possible that could
+   * not occur before them: two independent loaders — a page's own and a `layout.tsx` wrapping it —
+   * each wanting the same underlying data, with no shared scope between two separate files to
+   * coordinate through by hand. Renderer-neutral by construction: a `loader` is a plain async
+   * function that always runs BEFORE rendering starts, on EITHER renderer, so nothing here needs to
+   * know or care which one is active.
+   *
+   * **Not** `render/request-cache.tsx`'s `useRequestCache` — that dedupes a fetch issued FROM
+   * INSIDE COMPONENT RENDER, via React's `use()`/`Suspense` (deliberately React-only — see that
+   * function's own doc for why no Preact counterpart is possible, not just unbuilt). This solves a
+   * different problem than that one: across LOADERS, not across components, which is exactly what
+   * makes it renderer-neutral where that one cannot be.
+   *
+   * Request-scoped only — discarded once this request finishes, same lifetime as `csrfToken`/
+   * `population` above. Not a general application cache; for anything that should outlive a single
+   * request, use `@zanix/server`'s own cache provider (`this.cache`, reached through a page's own
+   * `Interactor` — see `PageOptions.Interactor`'s own example, `router/page-decorator.ts`).
+   *
+   * @template T - The fetcher's own resolved type — inferred from `fetcher`, never declared by hand.
+   * @param key - Unique within this request; two loaders wanting the SAME key must mean the SAME
+   * underlying data (e.g. `'current-user'`), the same responsibility a cache key always carries.
+   * @param fetcher - Invoked at most once per request for a given `key` — never called again once
+   * something (a resolved value OR a rejection) is cached under it.
+   * @returns `fetcher()`'s own resolved value — its rejection, unchanged, propagates identically to
+   * every caller of the same `key`, exactly as an un-deduped `await fetcher()` would to its own
+   * single caller.
+   */
+  dedupe: <T>(key: string, fetcher: () => Promise<T>) => Promise<T>
+  /**
    * Present ONLY when this render is the response to an `action` whose payload failed validation —
    * a real POST that came back as the re-rendered page with status `422`. **Always `undefined` on
    * a GET, and on any successful action.**
@@ -117,6 +152,18 @@ export type PageActionContext<Params = Record<string, string>, Body = unknown> =
      * `SpacePageController.handlePost` for the seam and why it runs there rather than as a pipe.
      */
     body?: Body
+    /**
+     * The real, underlying request's `locals` — the SAME object `@zanix/server` itself reads/
+     * writes throughout the request pipeline, not a copy (unlike `csrfToken`/`population` above,
+     * which are one-way SNAPSHOTS read out of it at context-build time). Exposed specifically for
+     * an action that needs to issue or mutate a session mid-request (a login/OTP/OAuth2 callback
+     * page calling `@zanix/auth`'s `generateSessionTokens(ctx, ...)`/`refreshSessionTokens`/etc.,
+     * all of which write onto `ctx.locals.session` and expect `sessionHeadersInterceptor` —
+     * registered globally by that package's own `/core` entrypoint — to read it back afterward and
+     * set the response cookie). Confirmed there is no other way to reach this from a page's own
+     * `action`: `PageContext`'s other fields are all curated, read-only snapshots by design.
+     */
+    locals: Record<string, unknown>
   }
 
 /**
@@ -146,6 +193,25 @@ export type RedirectConfig = {
  * export default function ProductsLayout({ children }: LayoutProps) { ... }
  * ```
  *
+ * A `layout.tsx` may ALSO export a named `loader` — a function of {@linkcode PageContext} (the
+ * exact same context shape a page's own `loader` receives, including `request`/`url`/`csrfToken`),
+ * resolving to whatever this layout wants as its own {@linkcode LayoutProps.data}:
+ * ```ts
+ * // routes/dashboard/layout.tsx
+ * export const loader = (ctx: PageContext) => getCurrentUser(ctx.request)
+ * export default function DashboardLayout({ children, data }: LayoutProps<SpaceChildren, User>) { ... }
+ * ```
+ * Every segment's own `loader` in a page's composition chain resolves in PARALLEL — via a single
+ * `Promise.all`, never sequentially, and never depending on another segment's own `data` — the same
+ * "no waterfalls" property the page's own single loader already has, just extended per segment
+ * rather than reproducing RSC's arbitrary-depth per-component fetching. A segment's `loader`
+ * throwing behaves exactly like a page's own `loader` throwing: uncaught, propagating past
+ * `handleGet` unchanged — no per-segment try/catch, no partial-render fallback. **Root-layout-only
+ * exception**: the app-wide root `layout.tsx` used by `createNotFoundHandler`'s own not-found page
+ * never runs its `loader` — that page has no route `params`/matched segment chain to build a real
+ * `PageContext` from, so its root layout always receives `data: undefined`, whatever `loader` it
+ * declares for every OTHER page that shares it.
+ *
  * @template TChildren - What this layout receives as `children`. Defaults to
  * {@linkcode SpaceChildren} — the renderer-neutral renderable type, assignable to React's own
  * `ReactNode` and to Preact's own `ComponentChildren` alike, so `export default function
@@ -159,12 +225,22 @@ export type RedirectConfig = {
  * `document-shell-preact.ts`). A layout needs it only for something the neutral type deliberately
  * cannot express — see {@linkcode SpaceChildren}'s own doc for the one such case (a bare `Promise`
  * child under React 19).
+ *
+ * @template TData - What this layout's own `loader` resolves to, if it declares one. Defaults to
+ * `unknown` — a layout with no `loader` still receives `data: undefined`, never an absent prop (an
+ * input's own `value` flipping between present/absent across renders is the same footgun
+ * `getActionFieldValue`'s own doc already documents for a page's `submitted`); it simply has nothing
+ * useful typed to read from it.
  */
-export type LayoutProps<TChildren = SpaceChildren> = {
+export type LayoutProps<TChildren = SpaceChildren, TData = unknown> = {
   children: TChildren
   /** The route's dynamic segments, as raw strings — never narrowed to a specific page's own
    * `Params` generic, since a single layout can wrap pages with different param shapes. */
   params: Record<string, string>
+  /** This layout's own resolved `loader` data — `undefined` when the layout declares no `loader`
+   * (the common case), or for the not-found page's own use of the root layout (see this type's own
+   * doc). */
+  data: TData
 }
 
 /**

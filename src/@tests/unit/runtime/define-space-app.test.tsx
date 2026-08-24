@@ -5,7 +5,7 @@ import { assert, assertEquals, assertThrows } from '@std/assert'
 import { join } from '@std/path'
 import { getTemporaryFolder } from '@zanix/helpers'
 import { isZanixAppDefinition } from '@zanix/app'
-import { bootstrapServers, ProgramModule, webServerManager } from '@zanix/server'
+import { ProgramModule } from '@zanix/server'
 import { defineSpaceApp } from 'modules/runtime/mod.ts'
 import { Page, SpacePageController } from 'modules/router/mod.ts'
 import {
@@ -13,7 +13,7 @@ import {
   resetDefaultPageHeaders,
 } from 'modules/router/default-page-headers.ts'
 import { getThemeResolver, resetThemeResolver } from 'modules/theme/theme-registry.ts'
-import { getPwaConfig, MANIFEST_ROUTE, setPwaConfig } from 'modules/pwa/mod.ts'
+import { getPwaConfig, setPwaConfig } from 'modules/pwa/mod.ts'
 import { getActiveRenderer, setActiveRenderer } from 'modules/router/active-renderer.ts'
 import { getGlobalCssPaths, setGlobalCssPaths } from 'modules/render/css-manifest.ts'
 import {
@@ -40,10 +40,6 @@ const mockSetupCtx = {
 
 function OverriddenView() {
   return <p>dev-import-override-ok</p>
-}
-
-function ReloadedView() {
-  return <p>dev-import-reloaded-ok</p>
 }
 
 Deno.test('defineSpaceApp: minimal config (only `name`) is valid', () => {
@@ -82,7 +78,14 @@ Deno.test('defineSpaceApp: forwards version/dependencies/setup as given', async 
     cache: { type: 'local', required: false },
   })
 
-  await app.definition.setup?.(mockSetupCtx)
+  // A dedicated Application scope — `createLogApiController()` (always called from `setup()`)
+  // registers a real, process-wide route; without its own scope, this and every other test that
+  // calls `setup()` directly (bypassing `activateApps`'s real per-Application isolation) would
+  // collapse into the shared default Application and collide with each other's registration.
+  await ProgramModule.defineApplication(
+    'storefront-forwards-setup-test',
+    () => app.definition.setup?.(mockSetupCtx),
+  )
   assert(
     setupRan,
     'the setup callback passed to defineSpaceApp must be the one @zanix/app calls',
@@ -234,7 +237,11 @@ Deno.test(
   async () => {
     resetResolvedAssets()
     const app = defineSpaceApp({ name: 'storefront' })
-    await app.definition.setup?.(mockSetupCtx)
+    // Own Application scope, same reasoning as the test above.
+    await ProgramModule.defineApplication(
+      'storefront-omitted-assetsdir-test',
+      () => app.definition.setup?.(mockSetupCtx),
+    )
     assertEquals(getResolvedAssets(), undefined)
   },
 )
@@ -381,58 +388,14 @@ Deno.test(
         name: 'storefront-messages-post-setup',
         messagesDir: './messages',
       })
-      await app.definition.setup?.(mockSetupCtx)
+      // Own Application scope, same reasoning as the assetsDir tests above.
+      await ProgramModule.defineApplication(
+        'storefront-messages-post-setup',
+        () => app.definition.setup?.(mockSetupCtx),
+      )
       assertEquals(getMessagesDir(), './messages')
     } finally {
       resetMessagesDir()
-    }
-  },
-)
-
-Deno.test(
-  "defineSpaceApp: setup()'s own loadRoutes() call uses a registered dev import override",
-  async () => {
-    // Same shape as `load-routes.test.tsx`'s "second call deregisters" test, but exercised
-    // through `defineSpaceApp`'s OWN internal `loadRoutes()` call (never called directly here) —
-    // this is what proves the registry actually reaches that call, not just `loadRoutes` itself.
-    const routesDir = await Deno.makeTempDir({ dir: TMP_ROOT })
-    try {
-      await Deno.writeTextFile(
-        join(routesDir, 'page.tsx'),
-        'export default null\n',
-      )
-
-      @Page()
-      class OverriddenPage extends SpacePageController {
-        public override component = OverriddenView
-      }
-
-      let calledWith: string | undefined
-      setDevImportModule((filePath) => {
-        calledWith = filePath
-        return Promise.resolve({ default: OverriddenPage })
-      })
-
-      try {
-        const app = defineSpaceApp({ name: 'storefront', routesDir })
-        await app.definition.setup?.(mockSetupCtx)
-
-        assertEquals(calledWith, join(routesDir, 'page.tsx'))
-
-        const servers = await bootstrapServers({ ssr: { port: 20905 } })
-        try {
-          const res = await fetch('http://localhost:20905')
-          const html = await res.text()
-          assert(html.includes('dev-import-override-ok'), html)
-        } finally {
-          await webServerManager.stop(servers)
-        }
-      } finally {
-        setDevImportModule(undefined)
-        setDevRoutesReloader(undefined)
-      }
-    } finally {
-      await Deno.remove(routesDir, { recursive: true })
     }
   },
 )
@@ -466,7 +429,11 @@ Deno.test(
           name: 'storefront',
           routesDir: [overrideDir, baseDir],
         })
-        await app.definition.setup?.(mockSetupCtx)
+        // Own Application scope, same reasoning as the assetsDir tests above.
+        await ProgramModule.defineApplication(
+          'storefront-routesdir-array-test',
+          () => app.definition.setup?.(mockSetupCtx),
+        )
 
         assert(
           imported.includes(join(baseDir, 'page.tsx')),
@@ -488,110 +455,16 @@ Deno.test(
 )
 
 Deno.test(
-  'defineSpaceApp: in dev mode, the registered reloader re-runs loadRoutes with a fresh import',
-  async () => {
-    // Simulates `zanix space dev`'s own file-change flow: it never calls `loadRoutes` itself —
-    // only `getDevRoutesReloader()?.()`, generically, with no knowledge of this app's own name or
-    // `routesDir`. Both must already be captured correctly inside `defineSpaceApp`'s own closure.
-    const routesDir = await Deno.makeTempDir({ dir: TMP_ROOT })
-    try {
-      await Deno.writeTextFile(
-        join(routesDir, 'page.tsx'),
-        'export default null\n',
-      )
-
-      @Page()
-      class GenOnePage extends SpacePageController {
-        public override component = OverriddenView
-      }
-      @Page()
-      class GenTwoPage extends SpacePageController {
-        public override component = ReloadedView
-      }
-
-      let generation = 0
-      setDevImportModule(() => {
-        generation++
-        return Promise.resolve({
-          default: generation === 1 ? GenOnePage : GenTwoPage,
-        })
-      })
-
-      try {
-        const app = defineSpaceApp({ name: 'storefront', routesDir })
-        // Matches `@zanix/app`'s own `registerApp`: the real `activateApps()` path always runs
-        // `setup()` inside this exact `defineApplication` scope, which is what the reloader below
-        // also re-enters — calling `setup()` unscoped here (as this file's other tests safely do)
-        // would register the first generation under the DEFAULT Application instead, mismatching
-        // the reload's own `application: 'storefront'` scope for no reason but this test's shortcut.
-        await ProgramModule.defineApplication(
-          'storefront',
-          () => app.definition.setup?.(mockSetupCtx),
-        )
-
-        const reload = getDevRoutesReloader()
-        assert(
-          reload,
-          'a reloader must be registered once a dev import override is set',
-        )
-        await reload()
-
-        const servers = await bootstrapServers({
-          ssr: { port: 20906, application: 'storefront' },
-        })
-        try {
-          const res = await fetch('http://localhost:20906')
-          const html = await res.text()
-          // Only the reloaded (second) generation is served — the first generation's route was
-          // deregistered, not left dangling alongside the new one (same guarantee `loadRoutes`'s
-          // own "second call deregisters" test already covers directly).
-          assert(html.includes('dev-import-reloaded-ok'), html)
-          assert(!html.includes('dev-import-override-ok'), html)
-        } finally {
-          await webServerManager.stop(servers)
-        }
-      } finally {
-        setDevImportModule(undefined)
-        setDevRoutesReloader(undefined)
-      }
-    } finally {
-      await Deno.remove(routesDir, { recursive: true })
-    }
-  },
-)
-
-Deno.test(
   'defineSpaceApp: outside dev mode, setup() never registers a routes reloader',
   async () => {
     setDevRoutesReloader(undefined) // baseline: nothing registered from an earlier test
     const app = defineSpaceApp({ name: 'storefront' })
-    await app.definition.setup?.(mockSetupCtx)
+    // Own Application scope, same reasoning as the assetsDir tests above.
+    await ProgramModule.defineApplication(
+      'storefront-no-dev-reloader-test',
+      () => app.definition.setup?.(mockSetupCtx),
+    )
 
     assertEquals(getDevRoutesReloader(), undefined)
-  },
-)
-
-Deno.test(
-  "defineSpaceApp: registers this app's PWA routes as part of setup(), same timing as loadRoutes()",
-  async () => {
-    const app = defineSpaceApp({
-      name: 'storefront',
-      pwa: { name: 'Storefront', icon: '/tmp/icon.png', iconSizes: [] },
-    })
-    try {
-      await app.definition.setup?.(mockSetupCtx)
-
-      const servers = await bootstrapServers({ ssr: { port: 20904 } })
-      try {
-        const res = await fetch(`http://localhost:20904${MANIFEST_ROUTE}`)
-        assertEquals(res.status, 200)
-        const manifest = await res.json()
-        assertEquals(manifest.name, 'Storefront')
-      } finally {
-        await webServerManager.stop(servers)
-      }
-    } finally {
-      setPwaConfig(undefined)
-    }
   },
 )

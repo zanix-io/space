@@ -33,6 +33,10 @@ function DefaultDocumentShell(
  * @param content - The tree to place inside it.
  * @param params - Forwarded to `RootLayout` as its own `params` prop; irrelevant (and omitted) for
  * the default shell, which never reads route params.
+ * @param data - `RootLayout`'s own resolved `loader` data (see `LayoutProps.data`'s own doc,
+ * `typings/page.ts`) — `undefined` when it declares none, or for `createNotFoundHandler`'s own use
+ * of this same root layout (see that type's own doc for why). Irrelevant for the default shell,
+ * same as `params`.
  */
 export function applyDocumentShell(
   // `LayoutProps<ReactNode>`, spelled out: `LayoutProps`' own default is renderer-neutral
@@ -43,7 +47,8 @@ export function applyDocumentShell(
   RootLayout: ComponentType<LayoutProps<ReactNode>> | undefined,
   content: ReactElement,
   params: Record<string, string> = {},
+  data: unknown = undefined,
 ): ReactElement {
-  if (RootLayout) return <RootLayout params={params}>{content}</RootLayout>
+  if (RootLayout) return <RootLayout params={params} data={data}>{content}</RootLayout>
   return <DefaultDocumentShell>{content}</DefaultDocumentShell>
 }

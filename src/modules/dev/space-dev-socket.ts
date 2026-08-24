@@ -20,14 +20,14 @@ const CONNECTIONS_REGISTRY_KEY = 'zanix-space-dev-sockets'
  * The real notification channel `zanix space dev` pushes over — never Vite's own client HMR
  * WebSocket (that one is never exposed to the browser at all, see `createSpaceDevEngine`'s own
  * doc), and never a bespoke `Deno.upgradeWebSocket` handler either. This is the same
- * `ZanixWebSocket`/`@Socket` primitive any application handler uses — see `docs/HANDLERS.md`'s
+ * `ZanixWebSocket`/`@Socket` primitive any application handler uses — see `docs/handlers.md`'s
  * "Tracking connections and pushing messages proactively" section in `@zanix/server`, which this
  * class follows directly: `this.registry`'s array helpers (`push`/`array`, backed by
  * `RegistryContainer`) track open connections, since `ZanixWebSocket` itself gives no built-in
  * way to reach a connection except in reply to its own incoming message.
  *
  * Meant to share its listener with the app's own `'ssr'` server via an explicit, matching port
- * (see `docs/HANDLERS.md`'s "Sharing a port with an unanchored server") — so the browser can
+ * (see `docs/handlers.md`'s "Sharing a port with an unanchored server") — so the browser can
  * connect same-origin, no separate port/CORS configuration needed.
  *
  * A dev-server orchestrator registers this once at boot (alongside `bootstrapServers({ ssr, socket })`)

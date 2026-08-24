@@ -1,5 +1,6 @@
 import type { GuardContext, MiddlewareGuard } from '@zanix/server'
 import { HttpError } from '@zanix/errors'
+import { assertZnxCookieName, SESSION_COOKIE_ATTRIBUTES } from '@zanix/helpers'
 
 /** The `ctx.locals` key {@linkcode csrfGuard} stashes the current request's CSRF token under —
  * `SpacePageController` reads this back into `PageContext.csrfToken` automatically. */
@@ -8,15 +9,26 @@ export const CSRF_TOKEN_LOCALS_KEY = 'csrfToken'
 /** Options for {@linkcode csrfGuard}. */
 export type CsrfGuardOptions = {
   /**
-   * Name of the cookie carrying the token. **Must start with `X-Znx-`** — `@zanix/server`'s own
-   * `cookiesGuard` populates `ctx.cookies` with only cookies matching that prefix, filtering
-   * everything else out before any guard (this one included) ever runs; a cookie name outside that
-   * prefix would silently never be visible to `ctx.cookies`, no matter what's actually on the wire.
+   * Name of the cookie carrying the token. **Must start with `X-Znx-` and contain `Csrf`** —
+   * enforced at construction via `@zanix/utils`'s `assertZnxCookieName` (throws `ApplicationError`),
+   * not just documented: `@zanix/server`'s own `cookiesGuard` populates `ctx.cookies` with only
+   * cookies matching the `X-Znx-` prefix, filtering everything else out before any guard (this one
+   * included) ever runs; and `@zanix/utils`'s own sensitive-key redaction pattern recognizes a Csrf
+   * cookie by looking for that word in the key name, so a customized name dropping it would silently
+   * stop being redacted from logs.
    * @default 'X-Znx-Csrf'
    */
   cookieName?: string
-  /** Header a non-form (fetch/XHR) action can send the token back on, as an alternative to the
-   * `_csrf` form field. @default 'x-csrf-token' */
+  /**
+   * Header a non-form (fetch/XHR) action can send the token back on, as an alternative to the
+   * `_csrf` form field. `X-Znx-`-prefixed by default, same as every other framework-owned
+   * header/cookie in the ecosystem — but unlike `cookieName`, a custom value here is never
+   * validated: `@zanix/server`'s `cookiesGuard` only filters `ctx.cookies`, never arbitrary request
+   * headers, so there's no equivalent silent-drop risk a runtime assert would need to catch. A
+   * misconfigured `headerName` fails loudly instead (every non-safe request gets rejected as a
+   * missing/invalid token), the same way any other functional misconfiguration would.
+   * @default 'X-Znx-Csrf-Token'
+   */
   headerName?: string
 }
 
@@ -28,16 +40,28 @@ function generateToken(): string {
   return btoa(String.fromCharCode(...bytes)).replace(/[+/=]/g, '')
 }
 
-async function readFormField(req: Request): Promise<string | undefined> {
-  const contentType = req.headers.get('content-type') ?? ''
+async function readFormField(ctx: GuardContext): Promise<string | undefined> {
+  const contentType = ctx.req.headers.get('content-type') ?? ''
   if (!contentType.includes('form')) return undefined
+
+  // `@zanix/server` already consumes the request body while parsing it for
+  // `application/x-www-form-urlencoded` — the exact content type a real, no-JS
+  // `<form method="post">` submits, and the primary case this function exists for — leaving
+  // `ctx.payload.body` as the already-parsed `FormData` instead (same reason
+  // `SpacePageController.handlePost` reads from there rather than the request itself; see that
+  // method's own doc). `ctx.req.clone().formData()` throws `TypeError: Body is unusable` for this
+  // content type by the time any guard runs — a real, confirmed bug this replaces (the previous
+  // version's own comment had this backwards: it assumed avoiding `multipart/form-data` made
+  // cloning safe, when `x-www-form-urlencoded` is precisely the content type that's already
+  // consumed). Only genuinely untouched `multipart/form-data` (which `@zanix/server` never
+  // pre-parses) still needs, and is still safe for, the clone-and-read fallback below.
+  if (ctx.payload.body instanceof FormData) {
+    const value = ctx.payload.body.get(FORM_FIELD)
+    return typeof value === 'string' ? value : undefined
+  }
+
   try {
-    // `req.clone()` so the real handler can still read the body afterward — a `Request` body
-    // stream can only be consumed once, and this guard runs before the page's own `action`. Safe
-    // here specifically because `@zanix/server` only pre-reads the body itself (into
-    // `ctx.payload.body`) for `application/json`/`application/x-www-form-urlencoded`, never for
-    // `multipart/form-data` — the content type an HTML `<form>` (no JS) actually submits.
-    const value = (await req.clone().formData()).get(FORM_FIELD)
+    const value = (await ctx.req.clone().formData()).get(FORM_FIELD)
     return typeof value === 'string' ? value : undefined
   } catch {
     return undefined
@@ -62,11 +86,11 @@ async function readFormField(req: Request): Promise<string | undefined> {
  * ```
  *
  * On any other method, the request is rejected (`HttpError('FORBIDDEN')`) unless the submitted
- * token — that same `_csrf` form field, or the `x-csrf-token` header for a fetch/XHR-based action —
- * matches the cookie. The cookie being `HttpOnly` doesn't defeat this: the token reaches the page
- * through server-rendered HTML (`ctx.locals`/`PageContext.csrfToken`), never by reading the cookie
- * from client-side JS, so nothing needs to read it back except the browser re-sending it and this
- * guard comparing it.
+ * token — that same `_csrf` form field, or the `X-Znx-Csrf-Token` header for a fetch/XHR-based
+ * action — matches the cookie. The cookie being `HttpOnly` doesn't defeat this: the token reaches
+ * the page through server-rendered HTML (`ctx.locals`/`PageContext.csrfToken`), never by reading
+ * the cookie from client-side JS, so nothing needs to read it back except the browser re-sending
+ * it and this guard comparing it.
  *
  * **Not applied by default** by `Page()`, unlike `cspGuard`/`securityHeadersGuard` — those are
  * purely additive response headers that never change whether a request succeeds; this guard can
@@ -79,7 +103,8 @@ async function readFormField(req: Request): Promise<string | undefined> {
  */
 export function csrfGuard(options: CsrfGuardOptions = {}): MiddlewareGuard {
   const cookieName = options.cookieName ?? 'X-Znx-Csrf'
-  const headerName = options.headerName ?? 'x-csrf-token'
+  const headerName = options.headerName ?? 'X-Znx-Csrf-Token'
+  assertZnxCookieName(cookieName, 'csrfGuard', 'Csrf')
 
   return async (ctx: GuardContext) => {
     const existingToken = ctx.cookies[cookieName]
@@ -90,13 +115,13 @@ export function csrfGuard(options: CsrfGuardOptions = {}): MiddlewareGuard {
       if (existingToken) return {}
       return {
         headers: {
-          'Set-Cookie': `${cookieName}=${token}; Path=/; HttpOnly; SameSite=Strict`,
+          'Set-Cookie': `${cookieName}=${token}; ${SESSION_COOKIE_ATTRIBUTES}`,
         },
       }
     }
 
     const submitted = ctx.req.headers.get(headerName) ??
-      (await readFormField(ctx.req))
+      (await readFormField(ctx))
     if (!existingToken || submitted !== existingToken) {
       throw new HttpError('FORBIDDEN', {
         id: ctx.id,

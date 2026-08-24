@@ -11,6 +11,10 @@ export type {
 } from './space-page-controller.tsx'
 export { Page } from './page-decorator.ts'
 export type { PageOptions } from './page-decorator.ts'
+/** Re-exported because `PageOptions.action` (above) references it — see `@zanix/server`'s own
+ * `mod.ts` for the same reasoning applied to its own RTO-based validation options. */
+export type { RtoTypes } from '@zanix/types'
+export { getActionFieldError, getActionFieldValue } from './action-fields.ts'
 export type { ClassConstructor, TargetBaseClass, ZanixClassDecorator } from '@zanix/server'
 // `HandlerContext`'s own chain (below) and `ZanixClassDecorator`'s (`ClassConstructor` above,
 // terminating at `TargetBaseClass`, itself re-exported by `@zanix/server`) both resolve cleanly —

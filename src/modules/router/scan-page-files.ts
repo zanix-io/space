@@ -1,4 +1,5 @@
 import { join } from '@std/path'
+import { InternalError } from '@zanix/errors'
 
 /** A single directory level's own composition files, relative to the routes directory root —
  * `undefined` for whichever of the three a given directory doesn't have. */
@@ -51,7 +52,13 @@ async function walkOneDir(dir: string): Promise<DiscoveredPage[]> {
       for await (const entry of Deno.readDir(dir)) entries.push(entry)
     } catch (error) {
       if (error instanceof Deno.errors.NotFound) return []
-      throw error
+      // Composition-time-only (never runs per-request) — see `comet-manifest.ts`'s own
+      // `loadCometManifest` for why no `code`/`userMessage` here, matching `WebServerManager`'s
+      // `readSslFile` precedent.
+      throw new InternalError(`Failed to scan routes directory "${dir}".`, {
+        cause: error,
+        meta: { source: 'zanix', method: 'scanPageFiles', dir },
+      })
     }
 
     const hasFile = (name: string) => entries.some((entry) => entry.isFile && entry.name === name)

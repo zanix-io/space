@@ -1,4 +1,4 @@
-import { assert, assertEquals } from '@std/assert'
+import { assert, assertEquals, assertThrows } from '@std/assert'
 import type { GuardContext } from '@zanix/server'
 import { POPULATION_LOCALS_KEY, populationGuard } from 'modules/middleware/population-guard.ts'
 
@@ -36,6 +36,9 @@ Deno.test('populationGuard: a route param resolves and persists to the cookie', 
   assertEquals(ctx.locals[POPULATION_LOCALS_KEY], 'zanix')
   assert(headers?.['Set-Cookie']?.includes('X-Znx-Population=zanix'))
   assert(headers?.['Set-Cookie']?.includes('SameSite=Lax'))
+  // Regression guard: this cookie used to hand-roll 'Path=/; SameSite=Lax' with no `Secure` — the
+  // only cookie in the whole ecosystem missing it. Now built from `PUBLIC_COOKIE_ATTRIBUTES`.
+  assert(headers?.['Set-Cookie']?.includes('Secure'))
   assertEquals(headers?.['Set-Cookie']?.includes('HttpOnly'), false)
 })
 
@@ -105,4 +108,10 @@ Deno.test('populationGuard: a custom paramName/cookieName is respected', async (
 
   assertEquals(ctx.locals[POPULATION_LOCALS_KEY], 'vip')
   assert(headers?.['Set-Cookie']?.includes('X-Znx-Segment=vip'))
+})
+
+// See `csrf-guard.test.ts`'s identical comment for why `.code`, not `instanceof`, is asserted.
+Deno.test('populationGuard: a cookieName missing the X-Znx- prefix throws at construction', () => {
+  const error = assertThrows(() => populationGuard({ cookieName: 'segment' })) as { code?: string }
+  assertEquals(error.code, 'UTILS_COOKIES_INVALID_PREFIX')
 })

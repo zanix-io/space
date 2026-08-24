@@ -3,6 +3,7 @@ import { InternalError } from '@zanix/errors'
 import { renderToResponse } from '../../../../mod-react.ts'
 import { defineComet } from 'modules/comets/define-comet.ts'
 import { setCometManifest } from 'modules/comets/comet-manifest.ts'
+import { parseCometProps } from 'modules/render/serialization-codec.ts'
 import { stripHydrationComments } from '../../support/strip-hydration-comments.ts'
 
 console.error = () => {}
@@ -38,6 +39,33 @@ Deno.test(
     } finally {
       setCometManifest(undefined)
     }
+  },
+)
+
+function Labeled({ label }: { label: string }) {
+  return <span>{label}</span>
+}
+
+Deno.test(
+  'defineComet: a prop value containing a literal " doesn\'t break the attribute, round-trips',
+  async () => {
+    const Comet = defineComet(Labeled, FIXTURE_SOURCE_URL)
+    const evil = 'a "quoted" value'
+
+    const response = await renderToResponse(<Comet label={evil} comet='visible' />)
+    const html = stripHydrationComments(await response.text())
+
+    // The attribute must stay well-formed: a naive/unescaped implementation would let the
+    // literal `"` in `evil` close the attribute early, leaving the rest of the JSON as bogus
+    // markup instead of part of the attribute value.
+    const match = html.match(/data-comet-props="([^"]*)"/)
+    assert(match, html)
+    const decoded = match[1].replace(/&quot;/g, '"')
+    assertEquals(JSON.parse(decoded), { label: evil })
+
+    // Same decode a real browser's `element.getAttribute(...)` performs automatically — proving
+    // this round-trips through the actual client-side parsing path, not just "looks escaped".
+    assertEquals(parseCometProps(decoded), { label: evil })
   },
 )
 

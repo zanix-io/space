@@ -93,6 +93,23 @@ class PlainPage extends SpacePageController {
 }
 void PlainPage
 
+// A real side-effect counter, not just "the action's own response text is absent" — that alone
+// wouldn't prove `action` was never CALLED for a GET, only that its return value isn't what a GET
+// happens to render (`component`'s own output would look identical either way). Incrementing here
+// is the only way to observe whether `@Page` genuinely wires `action` to POST exclusively, or
+// whether it's also reachable — accidentally — through GET.
+let actionInvocations = 0
+
+@Page({ path: 'action-validation/post-only', headers: false })
+class PostOnlyPage extends SpacePageController {
+  public override component = () => <p>view</p>
+  public override action = () => {
+    actionInvocations++
+    return Promise.resolve(new Response('acted'))
+  }
+}
+void PostOnlyPage
+
 const PORT = 20_701
 const BASE = `http://localhost:${PORT}/action-validation`
 
@@ -191,6 +208,25 @@ Deno.test({
         assertStringIncludes(html, '<form method="post"')
         assert(!html.includes('data-error='), html)
       })
+
+      await t.step(
+        "8. action fires on POST, never on GET — @Page's own POST-only wiring, not just " +
+          "GET rendering `component` instead of action's response (which alone wouldn't " +
+          'prove action was never CALLED)',
+        async () => {
+          assertEquals(actionInvocations, 0)
+
+          const getResponse = await fetch(`${BASE}/post-only`)
+          assertEquals(getResponse.status, 200)
+          assertStringIncludes(await getResponse.text(), 'view')
+          assertEquals(actionInvocations, 0, 'GET must never invoke action')
+
+          const postResponse = await fetch(`${BASE}/post-only`, { method: 'POST' })
+          assertEquals(postResponse.status, 200)
+          assertEquals(await postResponse.text(), 'acted')
+          assertEquals(actionInvocations, 1, 'POST must invoke action exactly once')
+        },
+      )
     } finally {
       await webServerManager.stop(servers)
     }

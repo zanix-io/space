@@ -47,12 +47,12 @@ export interface CssPluginOptions {
   globalEntries?: Array<{ entryName: string; media?: string }>
   /**
    * `pageFilePath -> [{entryName, media}]` (see `build-client.ts`'s own construction, from
-   * `discoverPageStyles`), in DECLARATION order PER PAGE — same `chunk.viteMetadata.importedCss`
+   * `discoverPages`/`collectPageStyles`), in DECLARATION order PER PAGE — same `chunk.viteMetadata.importedCss`
    * correlation `cometEntries`/`globalEntries` already use, grouped by the page each entry belongs
    * to rather than flattened, since a page's own CSS must stay scoped to `css-manifest.json`'s
    * `pages[pageFilePath]` — never folded into `global`, never linked on a page that didn't declare
    * it (the same scoping principle `cometEntries` already established for Comets, applied here to
-   * pages — see P2-12b's own design doc). Omitted entirely (no page declares `styles` in this
+   * pages). Omitted entirely (no page declares `styles` in this
    * build): no behavior change at all, `pages` is simply never written.
    */
   pageEntries?: Record<string, Array<{ entryName: string; media?: string }>>
@@ -66,9 +66,9 @@ const MANIFEST_FILE_NAME = 'css-manifest.json'
  * vanilla-extract available as an opt-in for teams that want typed theme contracts. Also writes
  * `css-manifest.json` (in the client build's output directory), read back at request time via
  * `getCssManifest`/`resolveCssHrefs`/`getCometCssHrefs`, so a page's document can link to its real
- * stylesheet(s) instead of nothing at all (there is no dev-mode equivalent yet: live CSS delivery
- * in development is the Development Server module's own responsibility, not yet implemented — see
- * this package's own design doc).
+ * stylesheet(s) instead of nothing at all. In development, `SpaceDevEngine`/`resolveDevCssHrefs`
+ * serve each declared stylesheet directly (a `?direct` suffix on its URL, no manifest, no
+ * hashing) — same `<link>` shape, no build step in between.
  *
  * The manifest has three scopes: `global` (every stylesheet not claimed by a comet or a page —
  * `globalCss`, Tailwind, CSS Modules used outside a Comet, vanilla-extract), linked on every
@@ -172,8 +172,8 @@ export function cssPlugin(options: CssPluginOptions = {}): Plugin[] {
 
       // Page scope, in DECLARATION order PER PAGE — same correlation approach as comets/global
       // above, walking `pageEntries` (grouped by page, not flattened) so a page's own CSS lands
-      // under its own key in `pages`, never in `global` (the fix P2-12b's own scope requirement
-      // needs: a stylesheet declared by page A must never link on page B).
+      // under its own key in `pages`, never in `global` — a stylesheet declared by page A must
+      // never link on page B.
       const pages: Record<string, StylesheetRef[]> = {}
       for (const [pageFilePath, entries] of Object.entries(pageEntries)) {
         const hrefs: StylesheetRef[] = []

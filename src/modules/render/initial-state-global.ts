@@ -16,9 +16,8 @@
  * needed more than flat, JSON-safe data, and that inventing a richer wire format ahead of an
  * actual demonstrated need is exactly the premature protocol design that conclusion ruled out.
  *
- * **One narrow, opt-in exception exists, and it is worth being precise about why.** An earlier
- * version of this doc ended "Formalizing this contract keeps it this shape; it is not a step
- * toward a richer one." That still holds for everything below, with one amendment:
+ * **One narrow, opt-in exception exists, and it is worth being precise about why.** Formalizing
+ * this contract keeps it this shape; it is not a step toward a richer one, with one amendment:
  * `defineSpaceApp({ serialization: { extendedTypes: true } })` makes `Date`, `Map` and `Set`
  * round-trip as real instances (see `serialization-codec.ts`). Those three were chosen because
  * this contract already documents them as its own failures — a `Date` silently degrading to a
@@ -50,9 +49,9 @@
  *   needs to cross this boundary — or opt into `serialization.extendedTypes`, which carries it
  *   whole, keys included.
  * - `Set` — same shape as `Map`, for the same reason: no own enumerable properties and no
- *   `toJSON`, so it ALSO serializes to `{}` (confirmed empirically — `JSON.stringify` only ever
- *   produces array output for a real `Array`, never for another iterable that merely resembles
- *   one), every member lost. Convert to a plain array first — or opt into
+ *   `toJSON`, so it ALSO serializes to `{}` (`JSON.stringify` only ever produces array output for
+ *   a real `Array`, never for another iterable that merely resembles one), every member lost.
+ *   Convert to a plain array first — or opt into
  *   `serialization.extendedTypes`, which carries it whole.
  * - A circular reference — `JSON.stringify` itself throws. This is a genuine serialization
  *   FAILURE, not a lossy degradation, and it's the one case this contract required a real code

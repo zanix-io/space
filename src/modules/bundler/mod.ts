@@ -12,7 +12,20 @@ export type { CssPluginOptions } from './css-plugin.ts'
 export { pwaPlugin, SW_FILE_NAME } from './pwa-plugin.ts'
 export type { PwaPluginOptions } from './pwa-plugin.ts'
 export { assetsPlugin } from './assets-plugin.ts'
-export type { AssetsOptimizeOptions, AssetsPluginOptions } from './assets-plugin.ts'
+export type {
+  /** `assetsPlugin({ optimize })`'s own image/SVG optimization options — see `@zanix/space/vite`'s
+   * own doc for the full never-worsen, strictly-smaller-or-kept contract. */
+  AssetsOptimizeOptions,
+  AssetsPluginOptions,
+} from './assets-plugin.ts'
+export { mediaPlugin } from './media-plugin.ts'
+export type {
+  /** `mediaPlugin({ optimize })`'s own video/thumbnail/audio transcoding options. */
+  MediaOptimizeOptions,
+  MediaPluginOptions,
+} from './media-plugin.ts'
+export { createAssetManifestRegistry } from '../assets/asset-manifest-registry.ts'
+export type { AssetManifestRegistry } from '../assets/asset-manifest-registry.ts'
 export type { ImageFormat, ImagesOptimizeOptions } from '../assets/image-optimize.ts'
 export type {
   ImageBreakpoint,
@@ -23,6 +36,8 @@ export { createSpaceDevEngine } from './dev-engine.ts'
 export type {
   SpaceDevEngine,
   SpaceDevEngineOptions,
+  /** Reported once per file change that affects the `ssr` environment's module graph — never for
+   * the `client` environment. */
   SsrModuleChangedEvent,
   TransformedAsset,
 } from './dev-engine.ts'
@@ -35,4 +50,9 @@ export type { DiscoveredPage, DiscoveredPageStyle, ModuleImporter } from './disc
 export { validateBuild } from './validate-build.ts'
 export type { ValidateBuildOptions, ValidateBuildResult } from './validate-build.ts'
 export { hasDynamicSegment, runRenderProbe } from './render-probe.ts'
-export type { RenderProbeOptions, RenderProbeResult } from './render-probe.ts'
+export type { ProbeablePage, RenderProbeOptions, RenderProbeResult } from './render-probe.ts'
+export type {
+  /** `resolveHead`'s own return shape — always fully resolved, no more merging left to do. */
+  ResolvedHead,
+} from '../router/head-descriptor.ts'
+export type { PageRenderer } from '../router/page-renderer-registry.ts'

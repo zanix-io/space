@@ -42,14 +42,27 @@
 export {
   broadcastClientCssChanged,
   broadcastClientModuleChanged,
+  /** Notifies every connected dev client of an `ssr`-environment module change. */
   broadcastSsrModuleChanged,
+  /** Reserved WebSocket route `SpaceDevSocket` registers — never collides with a real page
+   * route. */
   SPACE_DEV_SOCKET_ROUTE,
+  /** The dev-time WebSocket channel real-time notifications (CSS/module changes) travel over. */
   SpaceDevSocket,
 } from './space-dev-socket.ts'
-export { ZanixWebSocket } from '@zanix/server'
-export type { SocketPrototype } from '@zanix/server'
+export {
+  /** `@zanix/server`'s own base WebSocket class `SpaceDevSocket` extends. */
+  ZanixWebSocket,
+} from '@zanix/server'
+export type {
+  /** `@zanix/server`'s own shape for a `@Socket`-decorated class instance. */
+  SocketPrototype,
+} from '@zanix/server'
 export { buildDevClientScript } from './dev-client-script.ts'
-export type { DevClientScriptOptions } from './dev-client-script.ts'
+export type {
+  /** Options for {@linkcode buildDevClientScript}. */
+  DevClientScriptOptions,
+} from './dev-client-script.ts'
 export { buildFastRefreshPreambleScript } from './dev-fast-refresh-preamble.ts'
 export {
   buildViteHotClientScript,
@@ -67,16 +80,35 @@ export {
   setDevRoutesReloader,
 } from './dev-engine-registry.ts'
 export type { DevImportModule } from './dev-engine-registry.ts'
-export { createSpaceDevEngine } from '../bundler/dev-engine.ts'
+export {
+  /** Builds the Vite-backed dev engine `zanix space dev` runs on. */
+  createSpaceDevEngine,
+} from '../bundler/dev-engine.ts'
 export type {
+  /** What {@linkcode createSpaceDevEngine} returns. */
   SpaceDevEngine,
+  /** Options for {@linkcode createSpaceDevEngine}. */
   SpaceDevEngineOptions,
+  /** Reported once per file change that affects the `ssr` environment's module graph. */
   SsrModuleChangedEvent,
+  /** The browser-ready counterpart of what `ssrLoadModule` produces for the server side. */
   TransformedAsset,
 } from '../bundler/dev-engine.ts'
-export { spacePlugin } from '../bundler/space-plugin.ts'
-export type { SpacePluginOptions } from '../bundler/space-plugin.ts'
-export { getActiveRenderer } from '../router/active-renderer.ts'
-export type { RendererKind } from '../router/active-renderer.ts'
+export {
+  /** Wires this app's CSS/Comet/React-Compiler pipeline into Vite. */
+  spacePlugin,
+} from '../bundler/space-plugin.ts'
+export type {
+  /** Options for {@linkcode spacePlugin}. */
+  SpacePluginOptions,
+} from '../bundler/space-plugin.ts'
+export {
+  /** Reads back which renderer this app was configured for. */
+  getActiveRenderer,
+} from '../router/active-renderer.ts'
+export type {
+  /** Which renderer implementation an app installed — `'react'` or `'preact'`. */
+  RendererKind,
+} from '../router/active-renderer.ts'
 // Re-exported for `zanix space dev`'s render probe, which reads the ACTIVE renderer here and hands
 // it to the probe. The probe deliberately does not import the registry itself: that edge made

@@ -1,7 +1,7 @@
 /// <reference lib="dom" />
 import { createElement, hydrate, render } from 'preact'
 import type { CometStrategy } from 'typings/comet.ts'
-import logger from '@zanix/logger'
+import logger from './client-logger.ts'
 import {
   COMET_EXPORT_ATTR,
   COMET_ID_ATTR,
@@ -58,9 +58,8 @@ async function hydrateBoundary(boundary: HTMLElement): Promise<void> {
  * Comet marker protocol (`marker.ts`, shared unmodified between both renderers), same
  * `scheduleCometHydration` scheduling. The only difference from the React version is this
  * function's own mount call: `hydrate`/`render` from `'preact'` (Preact core, never
- * `preact/compat`) in place of `hydrateRoot`/`createRoot` from `react-dom/client` — confirmed via
- * this package's own decision spike (a real, disposable `jsdom` + real `MouseEvent` dispatch) that
- * `hydrate()` reuses the server-rendered DOM node exactly like `hydrateRoot()` does, with no
+ * `preact/compat`) in place of `hydrateRoot`/`createRoot` from `react-dom/client`: `hydrate()`
+ * reuses the server-rendered DOM node exactly like `hydrateRoot()` does, with no
  * remount and no observable behavior difference for a Comet's own hydration/interaction path.
  *
  * Lives in a separate module (not a branch inside `hydrate-comets.ts`) on purpose — an app's own

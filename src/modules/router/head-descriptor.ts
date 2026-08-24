@@ -1,13 +1,12 @@
 /**
- * Space's own, renderer-agnostic `<title>`/`<meta>`/`<link>` resolution — the first iteration of
- * this package's own head-management decision spike (`title`/`meta`/`link` only; `style`/`script`
- * deliberately deferred until a real use case exists). A page (`SpacePageController.head`) or any
- * layout in its composition chain (`layout.tsx`'s own named `head` export) declares a
- * {@linkcode HeadDescriptor}; {@linkcode resolveHead} merges every declared descriptor in the
- * chain into one final, deterministic result — computed synchronously, BEFORE either renderer
- * renders anything (same timing `loader` already resolves data at), same reasoning the legacy
- * Zanix stack's own `tagProcessor()` used: a real head-management problem doesn't need to interact
- * with streaming/Suspense at all if it's resolved as plain data ahead of render.
+ * Space's own, renderer-agnostic `<title>`/`<meta>`/`<link>` resolution (`title`/`meta`/`link`
+ * only; `style`/`script` deliberately deferred until a real use case exists). A page
+ * (`SpacePageController.head`) or any layout in its composition chain (`layout.tsx`'s own named
+ * `head` export) declares a {@linkcode HeadDescriptor}; {@linkcode resolveHead} merges every
+ * declared descriptor in the chain into one final, deterministic result — computed synchronously,
+ * BEFORE either renderer renders anything (same timing `loader` already resolves data at): a
+ * head-management problem doesn't need to interact with streaming/Suspense at all if it's
+ * resolved as plain data ahead of render.
  *
  * **Precedence**: page wins over its nearest layout, which wins over the next one out, ... down to
  * the root layout — checked field by field (`title`), or per identity key (`meta`/`link`), never
@@ -31,17 +30,15 @@
  * Never dependent on registration order at runtime.
  *
  * **Coexistence with a manually-authored JSX `<title>`/`<meta>`/`<link>`** (React's own native
- * hoisting, explicitly PRESERVED, never suppressed or disabled — see this package's own decision
- * spike for the full investigation): `resolveHead`'s own output is rendered by
- * `render-to-response.tsx` BEFORE a page's own element tree (same position `cssHrefs`/`pwaHead`
- * already render at) — confirmed empirically (real `renderToReadableStream`, not just read from
- * React's source) that React's hoisting flushes tags into the real `<head>` in ENCOUNTER order, not
- * some other order. Per the HTML Living Standard, `document.title` is defined as the document's
- * FIRST `title` element — so Space's own resolved `<title>`, always encountered first, is always
- * the one a browser's `document.title`/a `<meta>` "first match" reader actually sees, without this
- * package ever detecting, removing, or otherwise touching whatever an author separately renders.
- * Preact has no hoisting at all (confirmed absent in this package's own earlier decision spike), so
- * the same outcome holds there even more directly: Space's resolved head is placed literally inside
+ * hoisting, explicitly PRESERVED, never suppressed or disabled): `resolveHead`'s own output is
+ * rendered by `render-to-response.tsx` BEFORE a page's own element tree (same position
+ * `cssHrefs`/`pwaHead` already render at) — React's hoisting flushes tags into the real `<head>`
+ * in ENCOUNTER order, not some other order. Per the HTML Living Standard, `document.title` is
+ * defined as the document's FIRST `title` element — so Space's own resolved `<title>`, always
+ * encountered first, is always the one a browser's `document.title`/a `<meta>` "first match"
+ * reader actually sees, without this package ever detecting, removing, or otherwise touching
+ * whatever an author separately renders. Preact has no hoisting at all, so the same outcome holds
+ * there even more directly: Space's resolved head is placed literally inside
  * the real `<head>` element (`document-shell-preact.ts`), which always precedes `<body>` — a
  * manually-authored `<title>` inside Preact page content renders wherever it is in `<body>` and
  * never becomes `document.title` at all, since Preact never moves it into `<head>`. Both renderers
@@ -77,11 +74,11 @@ export type HeadMetaTag = {
  * `<link {...tag} />` element (`render-to-response.tsx`), and React only translates a small,
  * hardcoded set of camelCase DOM property names to their real HTML attribute (`className`,
  * `htmlFor`, ...) — `hrefLang` is not among them, so it would render VERBATIM as the invalid
- * attribute `hrefLang="en"` instead of the real `hreflang="en"` a crawler expects (confirmed
- * empirically, not assumed — see `buildHreflangLinks`, `modules/seo/hreflang.ts`, the one place
- * this package itself produces `hreflang` tags). Preact's own serializer (`document-shell-preact.ts`)
- * diverges here — confirmed empirically it normalizes `hrefLang` to `hreflang` on its own — but the
- * contract stays the single, renderer-independent rule above: always write the real lowercase
+ * attribute `hrefLang="en"` instead of the real `hreflang="en"` a crawler expects (see
+ * `buildHreflangLinks`, `modules/seo/hreflang.ts`, the one place this package itself produces
+ * `hreflang` tags). Preact's own serializer (`document-shell-preact.ts`) diverges here — it
+ * normalizes `hrefLang` to `hreflang` on its own — but the contract stays the single,
+ * renderer-independent rule above: always write the real lowercase
  * attribute name, and both renderers produce the same correct output (see
  * `document-shell-preact.test.tsx`'s own "hreflang" case). */
 export type HeadLinkTag = { rel: string; href: string } & Record<string, string | undefined>
@@ -149,12 +146,12 @@ export const SINGLETON_LINK_RELS: ReadonlySet<string> = new Set(['canonical'])
  *
  * **Exported so that every document serializer keys its rendered elements by the SAME identity
  * `resolveHead` deduplicated them by.** This is not a convenience: React requires a `key` on each
- * element of a rendered array, and an earlier version of `render-to-response.tsx` computed its own
- * `` `${rel}:${href}` `` key independently of this function. That drifted the moment `hreflang`
- * entered the dedup key — a full hreflang set contains, by design, an `x-default` entry sharing its
- * `href` with the default language's own entry, so the two survived `resolveHead` as distinct tags
- * and then collided under one duplicate React key on every i18n page. Deriving both from this one
- * function makes that class of drift structurally impossible rather than merely fixed once.
+ * element of a rendered array, and computing that key independently (e.g. a plain
+ * `` `${rel}:${href}` ``) would drift out of sync with this function the moment `hreflang` enters
+ * the dedup key — a full hreflang set contains, by design, an `x-default` entry sharing its `href`
+ * with the default language's own entry, so the two survive `resolveHead` as distinct tags but would
+ * collide under one duplicate React key if keyed independently. Deriving both from this one function
+ * makes that class of drift structurally impossible.
  */
 export function linkIdentityKey(tag: HeadLinkTag): string {
   const rel = tag.rel.trim().toLowerCase()

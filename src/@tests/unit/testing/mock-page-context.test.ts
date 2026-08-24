@@ -1,4 +1,4 @@
-import { assertEquals, assertStrictEquals } from '@std/assert'
+import { assertEquals, assertNotStrictEquals, assertStrictEquals } from '@std/assert'
 import { mockPageContext } from 'modules/testing/mod.ts'
 
 Deno.test(
@@ -50,5 +50,33 @@ Deno.test(
 
     assertStrictEquals(ctx.url, url)
     assertEquals(ctx.request.url, 'http://localhost/')
+  },
+)
+
+Deno.test(
+  'mockPageContext: ctx.dedupe works like the real one — same key, one fetcher call',
+  async () => {
+    const ctx = mockPageContext()
+    let calls = 0
+    const fetcher = () => {
+      calls++
+      return Promise.resolve('value')
+    }
+
+    const [a, b] = await Promise.all([ctx.dedupe('key', fetcher), ctx.dedupe('key', fetcher)])
+
+    assertEquals([a, b], ['value', 'value'])
+    assertEquals(calls, 1)
+  },
+)
+
+Deno.test(
+  'mockPageContext: two separate calls get their OWN dedupe cache, never sharing state — same ' +
+    'isolation `toPageContext` gives two different requests',
+  () => {
+    const a = mockPageContext()
+    const b = mockPageContext()
+
+    assertNotStrictEquals(a.dedupe, b.dedupe)
   },
 )

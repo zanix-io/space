@@ -1,3 +1,5 @@
+import { InternalError } from '@zanix/errors'
+
 /** Maps a comet's own resolved source file path (as `file://` normalizes to a plain path) to the
  * real URL its build output chunk was served/built at. Written by `cometPlugin` during the client
  * build; read back here at request time. */
@@ -32,7 +34,15 @@ export async function loadCometManifest(path: string): Promise<void> {
     manifest = JSON.parse(await Deno.readTextFile(path))
   } catch (error) {
     if (error instanceof Deno.errors.NotFound) return
-    throw error
+    // Boot-time-only (called once, before serving any requests) — never reaches an HTTP response,
+    // so no `code`/`userMessage` here, same shape `@zanix/server`'s own `WebServerManager`'s
+    // `readSslFile` already establishes for a boot-time file-read failure: still the shared
+    // hierarchy (never a raw native error), just without the boundary-crossing metadata that only
+    // matters once something actually reaches a request/response cycle.
+    throw new InternalError(`Failed to load the comet manifest from "${path}".`, {
+      cause: error,
+      meta: { source: 'zanix', method: 'loadCometManifest', path },
+    })
   }
 }
 

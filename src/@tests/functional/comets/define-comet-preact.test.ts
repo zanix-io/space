@@ -7,6 +7,7 @@ import { createElement } from 'preact'
 import { useState } from 'preact/hooks'
 import { defineComet } from 'modules/comets/define-comet.ts'
 import { setCometManifest } from 'modules/comets/comet-manifest.ts'
+import { parseCometProps } from 'modules/render/serialization-codec.ts'
 import { setCssManifest } from 'modules/render/css-manifest.ts'
 import { setActiveRenderer } from 'modules/router/active-renderer.ts'
 import { renderToResponse as renderToResponsePreact } from 'modules/render/render-to-response-preact.ts'
@@ -178,6 +179,34 @@ Deno.test(
       // ...but `persist` DOES survive as its own marker attribute, for Orbit retention.
       assert(html.includes('data-orbit-persist="counter-1"'), html)
       assert(html.includes('data-comet-strategy="idle"'), html)
+    } finally {
+      reset()
+    }
+  },
+)
+
+Deno.test(
+  'defineComet (preact): a prop value containing a literal " doesn\'t break the attribute, ' +
+    'round-trips',
+  async () => {
+    setCometManifest({ [WIDGET_KEY]: '/assets/preact-widget-hash.js' })
+    try {
+      const Comet = defineCometPreact(Widget, WIDGET_SOURCE_URL)
+      const evil = 'a "quoted" value'
+      const html = await renderPreact(createElement(Comet as never, { label: evil }))
+
+      // The attribute must stay well-formed: a naive/unescaped implementation would let the
+      // literal `"` in `evil` close the attribute early, leaving the rest of the JSON as bogus
+      // markup instead of part of the attribute value.
+      const match = html.match(/data-comet-props="([^"]*)"/)
+      assert(match, html)
+      const decoded = match[1].replace(/&quot;/g, '"')
+      assertEquals(JSON.parse(decoded), { label: evil })
+
+      // Same decode a real browser's `element.getAttribute(...)` performs automatically —
+      // proving this round-trips through the actual client-side parsing path, not just "looks
+      // escaped".
+      assertEquals(parseCometProps(decoded), { label: evil })
     } finally {
       reset()
     }

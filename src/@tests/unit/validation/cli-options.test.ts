@@ -1,4 +1,5 @@
 import { assertEquals, assertThrows } from '@std/assert'
+import { InternalError } from '@zanix/errors'
 import { mergeValidationConfig, resolveValidationFlags } from 'modules/validation/cli-options.ts'
 
 // ================================================================================================
@@ -7,6 +8,8 @@ import { mergeValidationConfig, resolveValidationFlags } from 'modules/validatio
 // Two commands interpreting the same flag differently is the kind of implicit semantics that makes
 // a validator untrustworthy. These tests pin the mapping once; both commands consume it unchanged.
 // ================================================================================================
+
+console.error = () => {}
 
 Deno.test('flags: nothing given runs the static phase — the default', () => {
   const resolved = resolveValidationFlags({})
@@ -62,16 +65,22 @@ Deno.test(
   'flags: an unknown category FAILS rather than being ignored — a typo that silently matched ' +
     'nothing would report a clean run over an empty rule set',
   () => {
-    assertThrows(
+    const error = assertThrows(
       () => resolveValidationFlags({ validationCategory: 'html,seoo' }),
-      Error,
+      InternalError,
       'seoo',
     )
+    assertEquals(error.code, 'SPACE_VALIDATION_UNKNOWN_CATEGORY')
   },
 )
 
 Deno.test('flags: an unknown --validation mode fails loudly', () => {
-  assertThrows(() => resolveValidationFlags({ validation: 'deep' }), Error, 'deep')
+  const error = assertThrows(
+    () => resolveValidationFlags({ validation: 'deep' }),
+    InternalError,
+    'deep',
+  )
+  assertEquals(error.code, 'SPACE_VALIDATION_UNKNOWN_MODE')
 })
 
 Deno.test(

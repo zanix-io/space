@@ -3,6 +3,11 @@ import { scanAssets } from 'modules/assets/scan-assets.ts'
 import { matchesInclude } from 'modules/assets/optimize-include.ts'
 import { createOptimizeRunner, type OptimizeRunner } from 'modules/assets/optimize-runner.ts'
 import type { ImagesOptimizeOptions } from 'modules/assets/image-optimize.ts'
+import { createAssetTransformer } from 'modules/asset-transform/asset-transformer.ts'
+import {
+  type AssetManifestRegistry,
+  createAssetManifestRegistry,
+} from 'modules/assets/asset-manifest-registry.ts'
 
 // `Plugin` is not re-exported here — same accepted `deno doc --lint` finding as `cometPlugin`'s/
 // `spacePlugin`'s own.
@@ -26,10 +31,30 @@ export interface AssetsOptimizeOptions {
    * (`hero.msm.jpg`, `hero.webp`, ...) are added next to it. Applies to `jpg`/`jpeg`/`png`/`webp`/
    * `avif` sources only — any other extension is left completely untouched. */
   images?: boolean | ImagesOptimizeOptions
-  /** `true`: optimizes each `.svg` (safe transforms only — strip dimensions/metadata/comments,
-   * minify inline styles/ids; deliberately NOT the legacy CSS-selector purge, and unrelated to the
-   * sprite `<use>` icon pattern). Same key, replaced only when strictly smaller. */
-  svg?: boolean
+  /**
+   * `true`: optimizes each eligible `.svg` (safe transforms only — strip dimensions/metadata/
+   * comments, minify inline styles, minify+dedupe `id`s; deliberately NOT the legacy CSS-selector
+   * purge). Same key, replaced only when strictly smaller.
+   *
+   * **A `<symbol id="...">` — the sprite pattern one or more `<use href="other-file.svg#name">`
+   * elsewhere depend on (the `space-ui`/component-level icon pattern) — is protected from
+   * `cleanupIds` automatically, with NO config needed, on every file, every time.** A `<symbol>`
+   * never renders on its own; svgo only ever sees ONE file at a time, so left unguided it can't
+   * tell an id referenced from a SEPARATE document is "used" and deletes it — this plugin scans
+   * each file's own `<symbol id>`s first (see `svg-optimize.ts`'s own `extractSymbolIds` doc) and
+   * exempts exactly those from removal/renaming, never the whole file wholesale: a genuinely dead
+   * id on some OTHER, non-symbol element in the same file still gets cleaned normally. Confirmed
+   * empirically (not assumed) against a real 17-symbol icon sprite (`@zanix/space-ui`'s own
+   * `catalog.svg`): a bare `svg: true`, no other config, already keeps all 17.
+   *
+   * An object form additionally scopes `preserveIds`: glob patterns (same matching as `include`,
+   * against the same `relativePath`) for SVGs whose `id`s must ALL survive byte-for-byte,
+   * regardless of whether they belong to a `<symbol>` — skips `cleanupIds` entirely for a
+   * matching file. A supplementary escape hatch for the rarer non-symbol case (e.g. a plain
+   * element's id referenced only via a `clip-path: url(other-file.svg#id)` from outside) — no
+   * longer required for a `<symbol>`-based sprite, which is already safe by default.
+   */
+  svg?: boolean | { preserveIds?: string[] }
   /** Glob patterns (matched against the same `relativePath` the manifest keys on) scoping WHICH
    * assets `images`/`svg` apply to. Omitted (the default): every eligible asset. An asset outside
    * this filter — or one whose extension isn't supported by `images`/`svg` at all — is always left
@@ -42,6 +67,15 @@ export interface AssetsOptimizeOptions {
    * same emit/discard decisions as `useWorker: false` (the default); never changes what gets
    * optimized or which variants exist. */
   useWorker?: boolean | number
+  /** Persists `images` optimization results ACROSS builds — a real directory path this plugin
+   * creates if missing. Identity is `sha256(source) + breakpoints/formats/quality + policy
+   * version` (see `modules/assets/transform-cache.ts`'s own doc): an unchanged source re-optimized
+   * with the exact same options never runs `sharp` again, even across separate `deno run`
+   * invocations. Omitted (the default): every build re-optimizes every eligible asset from
+   * scratch — this plugin's original behavior, completely unchanged. Never applies to `svg` (not
+   * asked for; `svgo` is cheap enough that this wasn't a real problem the way repeated `sharp`
+   * raster re-encodes are). */
+  cacheDir?: string
 }
 
 /** Options for {@linkcode assetsPlugin}. */
@@ -52,9 +86,23 @@ export interface AssetsPluginOptions {
   /** See {@linkcode AssetsOptimizeOptions}. Omitted: this plugin's pre-existing hash-and-emit
    * behavior, completely unchanged. */
   optimize?: AssetsOptimizeOptions
+  /**
+   * Shares ONE `assets-manifest.json` across multiple independent build-time producers (this
+   * plugin, a future `mediaPlugin`, ...) — see {@linkcode AssetManifestRegistry}'s own doc for the
+   * full contract (registration, collision behavior, who writes the file).
+   *
+   * **Omitted (the default): this plugin creates its own internal registry and includes its own
+   * manifest-writing plugin automatically** — a caller using `assetsPlugin` standalone (no other
+   * producer in the same build) sees IDENTICAL behavior to every version before this option
+   * existed, byte-for-byte. Pass an EXPLICIT, shared instance only when composing this plugin
+   * alongside another real producer that writes into the SAME manifest (`buildSpaceClient` does
+   * this internally once `mediaPlugin` exists) — in that case, whichever code created the shared
+   * registry owns including `registry.createManifestPlugin()` in the build itself; this plugin
+   * never adds it a second time for you.
+   */
+  manifestRegistry?: AssetManifestRegistry
 }
 
-const MANIFEST_FILE_NAME = 'assets-manifest.json'
 const OPTIMIZABLE_IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'avif'])
 
 function extensionOf(relativePath: string): string {
@@ -80,7 +128,16 @@ function resolveEntryOutputs(
     return runner.optimizeImage(relativePath, source, optimize.images)
   }
   if (eligible && optimize?.svg && ext === 'svg') {
-    return runner.optimizeSvg(relativePath, source).then((entry) => [entry])
+    // `matchesInclude(path, undefined)` means "everything matches" — correct for `include`'s own
+    // documented default, but the OPPOSITE of what an omitted `preserveIds` should mean here (no
+    // file opts out of `cleanupIds` unless it explicitly matches a pattern) — so an empty/missing
+    // list short-circuits to `false` instead of delegating straight to `matchesInclude`.
+    const preserveIdsPatterns = typeof optimize.svg === 'object'
+      ? optimize.svg.preserveIds
+      : undefined
+    const preserveIds = !!preserveIdsPatterns?.length &&
+      matchesInclude(relativePath, preserveIdsPatterns)
+    return runner.optimizeSvg(relativePath, source, preserveIds).then((entry) => [entry])
   }
   return Promise.resolve([{ relativePath, bytes: source }])
 }
@@ -101,8 +158,17 @@ function resolveEntryOutputs(
  * module graph decided to emit on its own) back to a manifest entry after the fact, by scanning the
  * finished `bundle` in `generateBundle`. This plugin instead explicitly EMITS each asset itself (an
  * asset under `assetsDir` is never reached through the module graph at all — nothing `import`s it),
- * so it tracks each one's own Rollup-issued reference id at emit time and resolves the real
- * `fileName` via `this.getFileName(id)` once the bundle is final.
+ * so it registers each one's own Rollup-issued reference id into an {@linkcode AssetManifestRegistry}
+ * at emit time — see that type's own doc for why writing the actual manifest file is that
+ * registry's job now, not this function's own `generateBundle` (a future `mediaPlugin` needs to
+ * contribute to the SAME file without either plugin knowing the other exists).
+ *
+ * **Returns an array, not a single `Plugin`** — `[thisPlugin]` when composed with an explicit
+ * `manifestRegistry`, or `[thisPlugin, registry.createManifestPlugin()]` when used standalone (see
+ * `AssetsPluginOptions.manifestRegistry`'s own doc). Confirmed empirically (not assumed): Vite
+ * flattens a nested plugin array one level, so an existing direct caller's own
+ * `plugins: [assetsPlugin({ assetsDir })]` (no spread) keeps working completely unchanged — both
+ * elements still run.
  *
  * `assetsDir`'s own existing runtime route keeps working completely unchanged whether or not this
  * plugin ever runs — see `register-assets.ts`'s own doc for how the two compose (a hashed request
@@ -143,10 +209,15 @@ function resolveEntryOutputs(
  * })
  * ```
  */
-export function assetsPlugin(options: AssetsPluginOptions): Plugin {
-  const refs = new Map<string, string>()
+export function assetsPlugin(options: AssetsPluginOptions): Plugin[] {
+  // Standalone use (the default): this plugin owns a registry nobody else knows about, and must
+  // also include ITS OWN manifest-writing plugin — see `AssetsPluginOptions.manifestRegistry`'s
+  // own doc. Composed use (an explicit registry passed in, e.g. by `buildSpaceClient`): the
+  // CALLER already owns that responsibility, so only this plugin itself is returned.
+  const registry = options.manifestRegistry ?? createAssetManifestRegistry()
+  const ownsRegistry = options.manifestRegistry === undefined
 
-  return {
+  const plugin: Plugin = {
     name: 'zanix-space-assets',
     apply: 'build',
     async buildStart() {
@@ -160,6 +231,18 @@ export function assetsPlugin(options: AssetsPluginOptions): Plugin {
       )
 
       const runner = createOptimizeRunner(options.optimize?.useWorker)
+      // The transform cache wraps ONLY `optimizeImage` — never `optimizeSvg` (not asked for, see
+      // `AssetsOptimizeOptions.cacheDir`'s own doc) — and sits entirely OUTSIDE `runner`: it
+      // doesn't care whether the real work happens inline or on a worker, only that the function
+      // shape matches. `image-optimize.ts`'s own `optimizeImageAsset` stays exactly as unaware of
+      // caching as it already was. Cache wiring itself lives in `createAssetTransformer`
+      // (`modules/asset-transform/`) — this plugin only supplies the worker-pool-aware
+      // `runner.optimizeImage` as the real function to wrap.
+      const transformer = createAssetTransformer({
+        cacheDir: options.optimize?.cacheDir,
+        imageOptimizer: runner.optimizeImage,
+      })
+      const cachedRunner: OptimizeRunner = { ...runner, optimizeImage: transformer.transformImage }
       try {
         // Every asset's own optimize work is launched concurrently (never one `await` per asset in
         // a loop) — with `useWorker` enabled, this is what actually lets the worker pool run more
@@ -167,7 +250,7 @@ export function assetsPlugin(options: AssetsPluginOptions): Plugin {
         // one in-flight task regardless of its own size.
         const outputsPerEntry = await Promise.all(
           entries.map(([relativePath], index) =>
-            resolveEntryOutputs(runner, relativePath, sources[index], options.optimize)
+            resolveEntryOutputs(cachedRunner, relativePath, sources[index], options.optimize)
           ),
         )
 
@@ -178,26 +261,14 @@ export function assetsPlugin(options: AssetsPluginOptions): Plugin {
               name: output.relativePath,
               source: output.bytes,
             })
-            refs.set(output.relativePath, refId)
+            registry.register(output.relativePath, refId)
           }
         }
       } finally {
         runner.close()
       }
     },
-    generateBundle() {
-      if (refs.size === 0) return
-
-      const manifest: Record<string, string> = {}
-      for (const [relativePath, refId] of refs) {
-        manifest[relativePath] = `/${this.getFileName(refId)}`
-      }
-
-      this.emitFile({
-        type: 'asset',
-        fileName: MANIFEST_FILE_NAME,
-        source: JSON.stringify(manifest, null, 2),
-      })
-    },
   }
+
+  return ownsRegistry ? [plugin, registry.createManifestPlugin()] : [plugin]
 }

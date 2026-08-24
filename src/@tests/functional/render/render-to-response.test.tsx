@@ -340,6 +340,42 @@ Deno.test(
 )
 
 Deno.test(
+  'renderToResponse: initialState containing </script> cannot break out of its own script ' +
+    "tag — proves React's own bootstrapScriptContent escaping, this function relies on it " +
+    'entirely rather than hand-building the tag the way the Preact renderer does (see that ' +
+    "renderer's own equivalent test)",
+  async () => {
+    const response = await renderToResponse(<Greeting name='Ana' />, {
+      initialState: { evil: '</script><script>alert(1)</script>' },
+    })
+
+    const html = await response.text()
+
+    // The ONLY `</script>` in the whole document must be the initial-state script's own real
+    // closing tag — a naive/unescaped implementation would emit the attacker's literal
+    // `</script>` too, closing the script early and leaving `<script>alert(1)</script>` as real,
+    // executable markup.
+    const scriptCloseCount = (html.match(/<\/script>/g) ?? []).length
+    assertEquals(scriptCloseCount, 1, html)
+    assert(!html.includes('<script>alert(1)'), html)
+
+    // The escaped payload must still be real, valid JS that decodes back to the original string
+    // at runtime — proving this is a real encoding round-trip, not just "doesn't look dangerous
+    // as a string".
+    const marker = 'self.__ZANIX_SPACE_STATE__='
+    const start = html.indexOf(marker)
+    assert(start !== -1, html)
+    const end = html.indexOf('</script>', start)
+    const scriptBody = html.slice(start, end)
+    const fakeSelf: Record<string, unknown> = {}
+    new Function('self', scriptBody)(fakeSelf)
+    assertEquals(fakeSelf.__ZANIX_SPACE_STATE__, {
+      evil: '</script><script>alert(1)</script>',
+    })
+  },
+)
+
+Deno.test(
   'renderToResponse: an error thrown inside a Suspense boundary still yields status 200',
   async () => {
     function Broken(): never {

@@ -16,11 +16,10 @@ import { placeHeadMarkup } from './head-markup.ts'
  * into the rendered document's `<head>` afterwards. Both describe the SAME document — see
  * `render/document-model.ts`, the renderer-agnostic model both serializers are driven from.
  *
- * An earlier version of this module instead had `render-page-preact.ts` thread `cssHrefs`/`pwaHead`
- * into the document-shell layer, which passed them to the app's own root `layout.tsx` as a
- * `headExtras` prop. That made the document's metadata depend on an app-authored component
- * cooperating, and silently produced pages with no head at all when it didn't. See
- * `head-markup.ts`'s own module doc.
+ * Threading `cssHrefs`/`pwaHead` through the document-shell layer instead, as a `headExtras` prop
+ * passed to the app's own root `layout.tsx`, would make the document's metadata depend on an
+ * app-authored component cooperating, and would silently produce pages with no head at all whenever
+ * it didn't. See `head-markup.ts`'s own module doc.
  */
 export type RenderToResponsePreactOptions = {
   /** Serialized once into a `<script>` that runs before hydration — same contract, same global
@@ -40,8 +39,8 @@ export type RenderToResponsePreactOptions = {
   nonce?: string
   /** `true` for a full document (prefixes `<!doctype html>`) — `false`/omitted for an Orbit
    * fragment response, which is never a standalone document. `preact-render-to-string` never adds
-   * this itself (confirmed empirically — unlike `react-dom/server`, which does for an `<html>`
-   * root), so the caller states its intent explicitly instead of this function guessing it from
+   * this itself — unlike `react-dom/server`, which does for an `<html>`
+   * root — so the caller states its intent explicitly instead of this function guessing it from
    * `element`'s own root tag. */
   doctype?: boolean
   /** Called if rendering throws — Preact core has no streaming/recoverable-vs-fatal distinction
@@ -69,9 +68,9 @@ export type RenderToResponsePreactOptions = {
    * Placed inside the rendered document's own `<head>` by `placeHeadMarkup()` once `element` has
    * been serialized, rather than being rendered as part of the tree. That is not an implementation
    * detail of convenience: Preact has no head-hoisting, so tree-level rendering could only put these
-   * where the tree happens to be, which previously meant depending on an app's own root layout to
-   * accept and render a `headExtras` prop — and silently producing a document with no metadata at
-   * all whenever it didn't. See `head-markup.ts`'s own module doc for the full reasoning, and
+   * where the tree happens to be, which would mean depending on an app's own root layout to accept
+   * and render a `headExtras` prop — and silently producing a document with no metadata at all
+   * whenever it didn't. See `head-markup.ts`'s own module doc for the full reasoning, and
    * `placeHeadMarkup`'s for why the insertion point is the front of `<head>` rather than the end.
    *
    * Omitted (or empty) for an Orbit fragment response, which is not a document and has no `<head>`.
@@ -96,9 +95,8 @@ export type RenderToResponsePreactOptions = {
  * as this package's SSR entry point whenever `--renderer=preact` is active.
  *
  * Deliberately synchronous and unstreamed — `preact-render-to-string`'s plain `render()`, not
- * `renderToStringAsync`/`preact-render-to-string/stream`: this package's own decision spike found
- * no `Suspense`/`lazy`/`use()` in Preact core at all (confirmed by direct inspection, not assumed),
- * so there is no boundary a streaming renderer would have anything to stream AROUND — adopting a
+ * `renderToStringAsync`/`preact-render-to-string/stream`: Preact core has no `Suspense`/`lazy`/
+ * `use()` at all, so there is no boundary a streaming renderer would have anything to stream AROUND — adopting a
  * streaming API here would add real complexity for zero behavioral benefit under this renderer's
  * own contract (no suspending components, ever). No `RequestCacheProvider`-equivalent wraps the
  * tree either, for the same reason: `useRequestCache` is rejected outright under this renderer (see
@@ -145,16 +143,15 @@ export function renderToResponse(
   let serializedInitialState: string | undefined
   if (initialState !== undefined) {
     try {
-      // `<` escaped to `<` in the serialized payload — real bug found and fixed during this
-      // package's own Etapa 4 hardening pass: unlike this function, React's own `renderToResponse`
-      // never builds this script tag by hand — it forwards the raw string to
+      // `<` escaped to `<` in the serialized payload: unlike this function, React's own
+      // `renderToResponse` never builds this script tag by hand — it forwards the raw string to
       // `renderToReadableStream`'s own `bootstrapScriptContent` option, which React itself escapes
       // internally before embedding (confirmed empirically: a value containing a literal
       // `</script>` comes back out as `</script>` in React's real rendered output). This
       // function DOES build the tag by hand, so without this same escaping, a page whose
       // `initialState` includes untrusted content (e.g. a loader echoing a user-submitted string)
       // containing `</script>` could break out of this script tag and inject arbitrary HTML — a
-      // real, exploitable gap that only existed on the Preact side. Escaping every `<` (not just
+      // real, exploitable gap that exists only on the Preact side. Escaping every `<` (not just
       // the exact `</script>` sequence) matches the broader, standard mitigation (e.g. the
       // `serialize-javascript` package's own approach) and is a no-op for any `initialState` that
       // never contained one.

@@ -248,6 +248,61 @@ Deno.test(
 )
 
 Deno.test(
+  'assetsPlugin: optimize.svg.preserveIds — a matching sprite keeps every id, an unmatched ' +
+    'file still gets the default cleanupIds behavior',
+  async () => {
+    const assetsDir = await Deno.makeTempDir({ dir: TMP_ROOT })
+    const root = await Deno.makeTempDir({ dir: TMP_ROOT })
+    try {
+      await Deno.mkdir(`${assetsDir}/icons`, { recursive: true })
+      const sprite = '<svg xmlns="http://www.w3.org/2000/svg" width="0">' +
+        '<symbol id="search" viewBox="0 0 512 512"><path d="M1 1"/></symbol></svg>'
+      await Deno.writeTextFile(`${assetsDir}/icons/catalog.svg`, sprite)
+      const plain = '<svg xmlns="http://www.w3.org/2000/svg" width="10">' +
+        '<circle id="stray" r="1"/></svg>'
+      await Deno.writeTextFile(`${assetsDir}/plain.svg`, plain)
+      await Deno.writeTextFile(`${root}/main.ts`, 'export const x = 1\n')
+
+      const result = await build({
+        root,
+        logLevel: 'silent',
+        build: { write: false, minify: false, rollupOptions: { input: `${root}/main.ts` } },
+        plugins: [
+          assetsPlugin({
+            assetsDir,
+            optimize: { svg: { preserveIds: ['icons/**'] } },
+          }),
+        ],
+      })
+
+      const { output } = (Array.isArray(result) ? result[0] : result) as Rollup.RollupOutput
+      const assets = output.filter((entry) => entry.type === 'asset')
+
+      const catalogAsset = assets.find((a) =>
+        a.fileName.match(/^assets\/icons\/catalog-[\w-]+\.svg$/)
+      )
+      assertExists(catalogAsset)
+      const catalogText = new TextDecoder().decode(catalogAsset.source as Uint8Array)
+      assert(
+        catalogText.includes('id="search"'),
+        'a file matching preserveIds must keep its real symbol id',
+      )
+
+      const plainAsset = assets.find((a) => a.fileName.match(/^assets\/plain-[\w-]+\.svg$/))
+      assertExists(plainAsset)
+      const plainText = new TextDecoder().decode(plainAsset.source as Uint8Array)
+      assert(
+        !plainText.includes('id="stray"'),
+        'a file NOT matching preserveIds still gets the default cleanupIds behavior',
+      )
+    } finally {
+      await Deno.remove(assetsDir, { recursive: true })
+      await Deno.remove(root, { recursive: true })
+    }
+  },
+)
+
+Deno.test(
   'assetsPlugin: optimize.include scopes which assets are optimized — a file outside the ' +
     'glob is left completely untouched even with optimize.images on',
   async () => {
@@ -328,6 +383,95 @@ Deno.test(
     } finally {
       await Deno.remove(assetsDir, { recursive: true })
       await Deno.remove(root, { recursive: true })
+    }
+  },
+)
+
+Deno.test(
+  'assetsPlugin: optimize.images.cacheDir persists real entries across builds, stays consistent ' +
+    'when unchanged, and correctly reprocesses when the transform itself changes',
+  async () => {
+    const assetsDir = await Deno.makeTempDir({ dir: TMP_ROOT })
+    const root = await Deno.makeTempDir({ dir: TMP_ROOT })
+    const cacheDir = await Deno.makeTempDir({ dir: TMP_ROOT })
+    try {
+      const source = await gradientJpeg(2000, 1500, 100)
+      await Deno.writeFile(`${assetsDir}/hero.jpg`, source)
+      await Deno.writeTextFile(`${root}/main.ts`, 'export const x = 1\n')
+
+      const firstResult = await build({
+        root,
+        logLevel: 'silent',
+        build: { write: false, minify: false, rollupOptions: { input: `${root}/main.ts` } },
+        plugins: [
+          assetsPlugin({ assetsDir, optimize: { images: { breakpoints: ['msm'] }, cacheDir } }),
+        ],
+      })
+
+      // A real cache was actually written to disk — not just "didn't crash".
+      const cacheEntries: string[] = []
+      for await (const entry of Deno.readDir(cacheDir)) cacheEntries.push(entry.name)
+      assert(cacheEntries.includes('index.json'), 'expected a persisted cache index file')
+      assert(
+        cacheEntries.some((name) => name !== 'index.json'),
+        'expected at least one persisted output byte-blob file',
+      )
+
+      const { output: firstOutput } =
+        (Array.isArray(firstResult) ? firstResult[0] : firstResult) as Rollup.RollupOutput
+      const firstMsm = firstOutput.find((a) =>
+        a.type === 'asset' && a.fileName.match(/^assets\/hero\.msm-[\w-]+\.jpg$/)
+      )
+      assertExists(firstMsm, 'expected an hero.msm.jpg variant on the first build')
+
+      // Second build: SAME source, SAME options, SAME cacheDir — a cache hit must produce
+      // byte-identical output, never a silently different (even if still "valid") re-encode.
+      const secondResult = await build({
+        root,
+        logLevel: 'silent',
+        build: { write: false, minify: false, rollupOptions: { input: `${root}/main.ts` } },
+        plugins: [
+          assetsPlugin({ assetsDir, optimize: { images: { breakpoints: ['msm'] }, cacheDir } }),
+        ],
+      })
+      const { output: secondOutput } =
+        (Array.isArray(secondResult) ? secondResult[0] : secondResult) as Rollup.RollupOutput
+      const secondMsm = secondOutput.find((a) =>
+        a.type === 'asset' && a.fileName.match(/^assets\/hero\.msm-[\w-]+\.jpg$/)
+      )
+      assertExists(secondMsm)
+      assertEquals(
+        (secondMsm as Rollup.OutputAsset).source,
+        (firstMsm as Rollup.OutputAsset).source,
+        'a repeat build with unchanged source/options must reuse the cached bytes exactly',
+      )
+
+      // Third build: SAME source, SAME cacheDir, but a genuinely DIFFERENT transform (an extra
+      // breakpoint) — must still be correctly produced, never silently skipped/stale.
+      const thirdResult = await build({
+        root,
+        logLevel: 'silent',
+        build: { write: false, minify: false, rollupOptions: { input: `${root}/main.ts` } },
+        plugins: [
+          assetsPlugin({
+            assetsDir,
+            optimize: { images: { breakpoints: ['msm', 'dlg'] }, cacheDir },
+          }),
+        ],
+      })
+      const { output: thirdOutput } =
+        (Array.isArray(thirdResult) ? thirdResult[0] : thirdResult) as Rollup.RollupOutput
+      const thirdDlg = thirdOutput.find((a) =>
+        a.type === 'asset' && a.fileName.match(/^assets\/hero\.dlg-[\w-]+\.jpg$/)
+      )
+      assertExists(
+        thirdDlg,
+        'a changed transform (new breakpoint) must still produce its own real output',
+      )
+    } finally {
+      await Deno.remove(assetsDir, { recursive: true })
+      await Deno.remove(root, { recursive: true })
+      await Deno.remove(cacheDir, { recursive: true })
     }
   },
 )

@@ -29,7 +29,7 @@ Deno.test(
     // first imported — nothing re-runs that decorator later). The default `finalize: true` wipes
     // that registration once this call's own boot sequence finishes, which would leave the next
     // test's `bootstrapServers({ socket: {...} })` with zero socket routes to bind at all. See
-    // `docs/HANDLERS.md → Applications → Boot sessions` in `@zanix/server` for why this only
+    // `docs/handlers.md → Applications → Boot sessions` in `@zanix/server` for why this only
     // matters for a multi-call sequence, never a single standalone call.
     const port = 21001
     const servers = await bootstrapServers(

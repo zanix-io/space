@@ -49,8 +49,7 @@ export interface SpaceDevEngineOptions {
   onClientCssChanged?: (urls: string[]) => void
   /**
    * Called once per edited `client`-environment script module (a Comet's own `.tsx`/`.ts`/`.jsx`/
-   * `.js`) — the transport this package's own decision spike documented as "not yet
-   * wired": until this option is set, such a change is silently dropped (see
+   * `.js`). Optional: until this option is set, such a change is silently dropped (see
    * {@linkcode ssrHotUpdatePlugin}'s own doc for exactly where). `urls` are Vite's own module graph
    * urls (e.g. `/comets/counter.tsx`), the same identifiers `createHotContext(id)` receives on the
    * browser side (`dev-vite-hot-client.ts`'s own doc) — a caller re-broadcasts them verbatim over
@@ -58,7 +57,7 @@ export interface SpaceDevEngineOptions {
    * further itself.
    *
    * Genuinely renderer-agnostic, not just deliberately worded that way — this engine has no notion
-   * of which renderer produced a given Comet, and a real transform spike confirmed BOTH renderers'
+   * of which renderer produced a given Comet, and both renderers'
    * own transforms need this delivered the same way (React's `oxc.jsx`-based refresh transform and
    * Preact's `@prefresh/vite` transform both register through `import.meta.hot`/`createHotContext`
    * identically — see `dev-vite-hot-client.ts`'s own doc for the actual transform output). What
@@ -144,19 +143,17 @@ function contentTypeFor(moduleType: string | undefined): string {
  * a real `\0` byte, per the Rollup convention every plugin — `@deno/vite-plugin` included — marks
  * its own virtual ids with) as a valid browser-requestable URL: prefixed with `/@id/`, with the
  * `\0` byte itself replaced by the literal string `__x00__` (a real byte is invalid in a URL).
- * Vite's own dev middleware reverses this (`unwrapId`) before ever calling `transformRequest` —
- * confirmed by reading `vite@8.2.0`'s own `transformRequest`/`doTransform` source directly:
- * neither one performs this decoding itself, they only ever run downstream of the middleware that
- * already did. `createDevAssetHandler` never mounts that middleware (`Deno.serve()` is the only
- * listener, see `createSpaceDevEngine`'s own doc) — so every `/@id/__x00__deno::...` request this
- * engine receives from a real browser (any bare npm import a Comet makes — `react`, for
- * instance) needs this SAME decoding applied by hand first, or `@deno/vite-plugin`'s own
- * `resolveId`/`load` hooks silently never recognize it (`isDenoSpecifier` checks for a literal
- * `\0deno` prefix, which the still-`/@id/`-wrapped, still-`__x00__`-encoded string never has) and
- * the request 404s. Confirmed as a real, previously-uncaught gap via a real, disposable
- * `puppeteer-core` spike against a real Chrome — every prior test exercised `transformClientAsset`
- * with an ALREADY-unwrapped url (`/counter.tsx`), never with the wrapped `/@id/` form a real
- * browser's own `import` of a bare specifier actually requests next.
+ * Vite's own dev middleware reverses this (`unwrapId`) before ever calling `transformRequest` — per
+ * `vite@8.2.0`'s own `transformRequest`/`doTransform` source, neither one performs this decoding
+ * itself, they only ever run downstream of the middleware that already did. `createDevAssetHandler`
+ * never mounts that middleware (`Deno.serve()` is the only listener, see `createSpaceDevEngine`'s
+ * own doc) — so every `/@id/__x00__deno::...` request this engine receives from a real browser (any
+ * bare npm import a Comet makes — `react`, for instance) needs this SAME decoding applied by hand
+ * first, or `@deno/vite-plugin`'s own `resolveId`/`load` hooks silently never recognize it
+ * (`isDenoSpecifier` checks for a literal `\0deno` prefix, which the still-`/@id/`-wrapped,
+ * still-`__x00__`-encoded string never has) and the request 404s. This matters because a real
+ * browser's own `import` of a bare specifier requests exactly this wrapped `/@id/` form, distinct
+ * from an already-unwrapped url (`/counter.tsx`).
  *
  * A no-op for anything else (relative project files, `/@vite/`, `/@fs/`, `/.vite/`, `/@react-refresh`,
  * ...) — none of those carry an encoded null byte, so `unwrapId`'s own real implementation is a
@@ -226,10 +223,9 @@ function ssrHotUpdatePlugin(options: SpaceDevEngineOptions): Plugin {
  * detection/invalidation engine — never as an HTTP server. `Deno.serve()` stays the only
  * listener; the returned engine is never bound to a port, and Vite's own `middlewares` are never
  * mounted anywhere (there's no supported bridge between Vite's Connect-based dev middleware and
- * `Deno.serve()`'s Web `Request`/`Response` handler — see `denoland/deno#28850`). Confirmed
- * viable end-to-end with a real, disposable spike before this was written as production code: a
- * real `Deno.serve()` process reflected an SSR module's edited content on the very next request,
- * without the process ever restarting, including through transitive dependency changes.
+ * `Deno.serve()`'s Web `Request`/`Response` handler — see `denoland/deno#28850`). A `Deno.serve()`
+ * process reflects an SSR module's edited content on the very next request, without the process
+ * ever restarting, including through transitive dependency changes.
  *
  * No `vite.config.ts` is read (`configFile: false`) — every option this needs is passed inline,
  * which also sidesteps a documented `@deno/vite-plugin` gap (it can't resolve Deno-style imports
@@ -240,13 +236,13 @@ function ssrHotUpdatePlugin(options: SpaceDevEngineOptions): Plugin {
  * `options.plugins` never needs to add it separately. `cjsInteropFallbackPlugin()` and `deno()`'s
  * own `onLoad` (`cjs-interop.ts`) are ALSO always included, ahead of `deno()` in the array — a real
  * npm dependency that's structurally CommonJS at its own entry file (`react`/`react-dom` included)
- * fails to load through Vite's SSR pipeline otherwise, confirmed even against Vite's own untouched
+ * fails to load through Vite's SSR pipeline otherwise, including against Vite's own untouched
  * default evaluator; see `cjs-interop.ts`'s own doc for the full reasoning.
  *
  * `watch.usePolling` defaults to `true`: Deno's filesystem-event delivery underneath chokidar's
- * native watcher was unreliable in practice during that same spike — polling is slightly less
- * efficient but deterministic, and a dev-server watch loop doesn't need sub-millisecond
- * efficiency to feel instant to a person editing a file.
+ * native watcher is unreliable in practice — polling is slightly less efficient but deterministic,
+ * and a dev-server watch loop doesn't need sub-millisecond efficiency to feel instant to a person
+ * editing a file.
  *
  * @param options - See {@linkcode SpaceDevEngineOptions}.
  * @returns A handle exposing only what a caller needs — `ssrLoadModule` and `close` — never the
@@ -259,11 +255,10 @@ function ssrHotUpdatePlugin(options: SpaceDevEngineOptions): Plugin {
  * decorator `@zanix/server`'s handler classes use): it runs transformed code via `new
  * AsyncFunction(...)`, and V8 never parses native decorator syntax through that constructor. This
  * engine instead builds its own runner via `createServerModuleRunner` with a custom evaluator
- * (`ssr-module-evaluator.ts`'s own `RealImportEvaluator` — see its own doc for the full reasoning
- * and the real, disposable spike that confirmed it) that materializes the SAME transformed code as
- * a real `.ts` file and evaluates it via a real dynamic `import()` instead — the only thing that
- * changes; the module graph, hot-invalidation, and `transformRequest` below stay entirely Vite's
- * own.
+ * (`ssr-module-evaluator.ts`'s own `RealImportEvaluator` — see its own doc for the full reasoning)
+ * that materializes the SAME transformed code as a real `.ts` file and evaluates it via a real
+ * dynamic `import()` instead — the only thing that changes; the module graph, hot-invalidation, and
+ * `transformRequest` below stay entirely Vite's own.
  *
  * @example
  * ```ts

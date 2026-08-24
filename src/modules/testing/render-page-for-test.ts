@@ -11,6 +11,13 @@ export type RenderPageForTestResult = { response: Response; html: string }
  * without a real HTTP server. Builds a `HandlerContext` (via {@linkcode mockHandlerContext}),
  * instantiates `Controller`, and calls its `handleGet` directly.
  *
+ * @template Params - The route's dynamic segments, inferred from `Controller`'s own `Params`
+ * generic — never needs naming explicitly.
+ * @template TComponent - The real component type `Controller`'s own `component` field must
+ * satisfy, matching {@linkcode SpacePageController}'s own `TComponent` template param. Defaults to
+ * `any` and is never inferred from `Controller` (see the `NoInfer` wrapper below): every renderer's
+ * page — React's default `ComponentType`, Preact's, or any other — is accepted without naming this
+ * explicitly, since this function never reads `component` itself.
  * @param Controller - The page class to render. Never instantiate it yourself and call `handleGet`
  * for this — `renderPageForTest` handles the context wiring `handleGet` expects.
  * @param params - The route's dynamic segments (e.g. `{ id: '1' }` for a `[id]/page.tsx` file).
@@ -29,18 +36,18 @@ export type RenderPageForTestResult = { response: Response; html: string }
  */
 export async function renderPageForTest<
   Params = Record<string, string>,
-  // Defaulted, and inferred from `Controller` in practice — a React page (this package's default
-  // renderer) never has to know this parameter exists, exactly like `SpacePageController`'s own
-  // `TComponent`. It exists because pinning it to that class's own DEFAULT (React's
-  // `ComponentType<any> | null`) made this helper reject a `--renderer=preact` page outright: a
-  // Preact page names Preact's own `ComponentType` in its `extends` clause, and the two renderers'
-  // component types are nominally incompatible (confirmed empirically — the rejection reached down
-  // to `React.Context`'s own `$$typeof`), so the ONE public API for testing a page could not test
-  // half of the pages this framework renders. This function never reads `component` itself.
   // deno-lint-ignore no-explicit-any
   TComponent = any,
 >(
-  Controller: ClassConstructor<SpacePageController<Params, never, TComponent>>,
+  // `NoInfer` keeps `TComponent` from ever being inferred from `Controller` itself — every
+  // concrete page's own `component = X` field narrows to `typeof X` rather than the class's
+  // declared `TComponent` default, and inferring `TComponent` from that narrowed type here would
+  // make the resulting `SpacePageController<Params, never, TComponent>` a structurally different
+  // (invariant, through `HandlerBaseClass`'s index signature) type from `Controller`'s own —
+  // rejecting the page regardless of its renderer. `NoInfer` leaves `TComponent` at its `any`
+  // default unless a caller names it explicitly, which stays validated against `Controller` like
+  // any other explicit type argument.
+  Controller: ClassConstructor<SpacePageController<Params, never, NoInfer<TComponent>>>,
   params: Params = {} as Params,
   ctxOverrides: Partial<HandlerContext> = {},
 ): Promise<RenderPageForTestResult> {

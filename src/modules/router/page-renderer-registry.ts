@@ -13,8 +13,8 @@ import type { SpacePageController } from './space-page-controller.tsx'
  *
  * `Component` is `unknown`, not `ComponentType<...>` from either 'react' or 'preact' — this type
  * has to describe BOTH `render-page-react.tsx`'s own function and `render-page-preact.ts`'s, and a
- * React `ComponentType` and a Preact one are nominally incompatible types (confirmed empirically),
- * so no single concrete type here could describe both. `unknown` (not `any`) works because both
+ * React `ComponentType` and a Preact one are nominally incompatible types, so no single concrete
+ * type here could describe both. `unknown` (not `any`) works because both
  * concrete implementations ALSO declare their own `Component` parameter as `unknown` and cast it
  * back to their own renderer's real type internally, right before using it — see either file's own
  * `renderPageResponse` doc.

@@ -6,11 +6,10 @@
  * its caller, which reads it from the page-renderer registry that `defineSpaceApp({ renderer })`
  * populates. The registry is still the single source of truth; the probe simply does not import it.
  *
- * That indirection is not stylistic. `page-renderer-registry.ts` statically imports React's page
- * renderer as its eager default, so importing the registry from here made `@zanix/space/vite` — a
- * BUILD-TOOL entry point — transitively pull `react-dom/server` into every process that touched it.
- * Confirmed with a real module-graph inspection, not assumed. Injection keeps the build entry free
- * of the SSR runtime while leaving the renderer decision exactly where it was.
+ * That indirection is not stylistic: a page renderer registered eagerly would make
+ * `@zanix/space/vite` — a BUILD-TOOL entry point — transitively pull `react-dom/server` into every
+ * process that touches it, per its own module graph. Injection keeps the build entry free of the
+ * SSR runtime while leaving the renderer decision exactly where it was.
  *
  * The chain is:
  *
@@ -59,14 +58,13 @@ import type { DiscoveredPage } from './discover-pages.ts'
  * so `never` is the one type argument every page class is assignable TO, whatever param shape it
  * declared — a real structural supertype rather than a widening, and the same one
  * `page-tree-registry.ts` and both renderers' own `renderPageResponse` use. `TComponent` needs no
- * argument at all now that it defaults to the renderer-neutral `SpaceComponent`
- * (`typings/renderable.ts`); it used to default to React's own `ComponentType`, which is what once
- * forced a widening here to avoid rejecting a correctly-typed Preact page.
+ * argument at all: it defaults to the renderer-neutral `SpaceComponent` (`typings/renderable.ts`),
+ * so no widening is needed here to accept a correctly-typed Preact page alongside a React one.
  *
  * This probe never reads `Target` as a component anyway — it only forwards it to whichever renderer
  * it was handed.
  */
-type ProbeablePage = ClassConstructor<SpacePageController<never>>
+export type ProbeablePage = ClassConstructor<SpacePageController<never>>
 
 /** Options for {@linkcode runRenderProbe}. */
 export type RenderProbeOptions = {
@@ -91,12 +89,11 @@ export type RenderProbeOptions = {
    * Passing one explicitly is for isolation only (this package's own probe tests render both
    * renderers in one process, where no single installed runtime could serve both).
    *
-   * `PageRenderer` is named directly now. It used to be spelled out structurally, to avoid an edge
-   * from this module to `page-renderer-registry.ts` back when that registry statically imported
-   * React's renderer as its eager default — the exact edge that dragged `react-dom/server` into
-   * `@zanix/space/vite`. The entry-point split removed that default, so the registry reaches no
-   * renderer at all (0 value AND 0 type edges, asserted in `renderer-agnostic-layer.test.ts`) and
-   * this import costs the build entry point nothing.
+   * `PageRenderer` is named directly: the registry reaches no renderer at all (0 value AND 0 type
+   * edges, asserted in `renderer-agnostic-layer.test.ts`), so naming its type costs the build entry
+   * point nothing. The entry-point split keeps `page-renderer-registry.ts` from statically importing
+   * React's renderer as an eager default — the edge that would otherwise drag `react-dom/server`
+   * into `@zanix/space/vite`.
    *
    * @throws {InternalError} When omitted and no renderer entry point has been imported — the same
    * actionable error every other consumer of the registry gets. There is deliberately no fallback

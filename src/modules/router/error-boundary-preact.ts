@@ -10,17 +10,17 @@ type Props = {
 
 type State = { hasError: boolean; error: unknown }
 
-// Preact core's `getDerivedStateFromError`/`componentDidCatch` support is real (confirmed against
-// `preact/src/diff/catch-error.js` in this package's own decision spike — no `preact/compat`
-// needed for the class-component API itself), but `preact-render-to-string`'s SSR path does NOT
-// invoke it unless this exact flag is set first — confirmed empirically (a real, disposable spike:
-// without it, a thrown render error propagates straight past this boundary, uncaught; with it, the
-// boundary's `componentDidCatch`/fallback both fire correctly). Set once, at module load — this
+// Preact core's `getDerivedStateFromError`/`componentDidCatch` support is real (see
+// `preact/src/diff/catch-error.js` — no `preact/compat` needed for the class-component API
+// itself), but `preact-render-to-string`'s SSR path does NOT invoke it unless this exact flag is
+// set first: without it, a thrown render error propagates straight past this boundary, uncaught;
+// with it, the boundary's `componentDidCatch`/fallback both fire correctly. Set once, at module
+// load — this
 // module is only ever reached via `render-page-preact.ts`'s own dynamic import (see
 // `page-renderer-registry.ts`), so a React-only app never touches Preact's `options` object at all.
 // Cast needed because Preact's own `Options` type doesn't declare this field (real, supported, and
-// documented by `preact-render-to-string` itself regardless — confirmed via the real spike above,
-// not just its docs) — narrowed to exactly the one field being added, not `any`, so this cast can't
+// documented by `preact-render-to-string` itself regardless) — narrowed to exactly the one field
+// being added, not `any`, so this cast can't
 // silently hide a typo anywhere else `options` might be touched later in this same module.
 const preactOptions = options as unknown as { errorBoundaries: boolean }
 preactOptions.errorBoundaries = true

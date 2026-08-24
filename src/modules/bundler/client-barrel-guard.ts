@@ -1,4 +1,5 @@
 import type { Plugin } from 'vite'
+import { InternalError } from '@zanix/errors'
 
 /**
  * Fails a client build that pairs an app's declared renderer with the wrong client barrel.
@@ -82,7 +83,7 @@ export function clientBarrelGuardPlugin(renderer: 'react' | 'preact'): Plugin {
     },
     transform(_code, id) {
       if (!normalizeId(id).endsWith(wrongSuffix)) return null
-      throw new Error(
+      throw new InternalError(
         `@zanix/space: this app declares \`renderer: '${renderer}'\`, but its client entry ` +
           `imports \`${wrongBarrel}\` — the ${
             renderer === 'preact' ? 'React' : 'Preact'
@@ -92,6 +93,10 @@ export function clientBarrelGuardPlugin(renderer: 'react' | 'preact'): Plugin {
           'server-renders correctly, every comet boundary and all its content appear in the DOM, ' +
           'and nothing throws — but no Comet is ever interactive, with no error in the console. ' +
           `The offending module reached the client graph at: ${normalizeId(id)}`,
+        {
+          code: 'SPACE_BUNDLER_CLIENT_BARREL_MISMATCH',
+          meta: { renderer, wrongBarrel, rightBarrel, moduleId: normalizeId(id) },
+        },
       )
     },
   }

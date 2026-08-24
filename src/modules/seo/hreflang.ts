@@ -21,15 +21,11 @@ export type BuildHreflangLinksOptions = {
  * practice this ports as an explicit design choice rather than an emergent side effect), plus an
  * `x-default` entry.
  *
- * Deliberately NOT a port of the legacy component's own `getHrefLangs` — that one was a React hook
- * consumer (read the current lang via `useAppContext()`, making it unusable outside a component
- * render) with two real bugs this fixes: (1) `x-default` was hardcoded to the bare site root
- * regardless of the current page's own path — here it points at `{origin}/{defaultLang}{path}`, the
- * default-language version of THIS page, matching Google's own stated guidance for what `x-default`
- * should resolve to; (2) a standalone (non-templated) page only ever emitted a single self-hreflang,
- * never links to its OTHER language variants, because the legacy function had no way to know a
- * language list outside its own React-context lookup — here, `availableLangs` is always required
- * input, so every entry is always produced regardless of how this function is called.
+ * `x-default` points at `{origin}/{defaultLang}{path}` — the default-language version of THIS page
+ * — matching Google's own stated guidance for what `x-default` should resolve to, rather than the
+ * bare site root. Every entry in `availableLangs` is always produced, including links to every OTHER
+ * language variant on a standalone (non-templated) page, because `availableLangs` is always required
+ * input rather than inferred from any ambient context.
  *
  * Pure — no React/Preact/hook dependency, works identically for either renderer. Called from
  * `loader` (the only page method that receives `ctx`, hence `ctx.url`/`ctx.params`) rather than
@@ -52,11 +48,11 @@ export type BuildHreflangLinksOptions = {
  * ```
  */
 // `hreflang`, all lowercase — the real HTML attribute name, and NOT auto-corrected if it were
-// camelCased instead. Confirmed empirically: `render-to-response.tsx` spreads a `HeadLinkTag`
-// object directly onto a real `<link {...tag} />` element; React only special-cases a small,
-// hardcoded set of camelCase DOM property names (`className`, `htmlFor`, ...) — `hrefLang` is not
-// among them, so it would render VERBATIM as the invalid attribute `hrefLang="en"`, not translated
-// to the real `hreflang="en"` a crawler expects.
+// camelCased instead: `render-to-response.tsx` spreads a `HeadLinkTag` object directly onto a real
+// `<link {...tag} />` element; React only special-cases a small, hardcoded set of camelCase DOM
+// property names (`className`, `htmlFor`, ...) — `hrefLang` is not among them, so it would render
+// VERBATIM as the invalid attribute `hrefLang="en"`, not translated to the real `hreflang="en"` a
+// crawler expects.
 export function buildHreflangLinks(options: BuildHreflangLinksOptions): HeadLinkTag[] {
   const { url, lang, availableLangs, defaultLang } = options
   const prefix = `/${lang}`

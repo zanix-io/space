@@ -13,34 +13,33 @@ import { findDenoConfigPath } from './deno-loader.ts'
  * (`cjs-interop.ts`, `bare-specifier-resolve.ts` — see its own doc). This plugin resolves modules
  * a real BROWSER will load, so `platform: 'browser'` is the semantically correct choice — for a
  * package with platform-conditional `exports` (unlike `react`/`react-dom`, which don't
- * discriminate node/browser within the same subpath, confirmed empirically), reusing the SSR
- * loader here could silently resolve the wrong file.
+ * discriminate node/browser within the same subpath), reusing the SSR loader here could silently
+ * resolve the wrong file.
  *
- * Cached per discovered config path, never a single process-wide singleton — confirmed the hard
- * way that this matters: constructing one `Workspace` with no explicit `configPath` at all falls
- * back to auto-discovering from the process's own `Deno.cwd()`, which is `@zanix/space`'s own
- * development root while iterating on `@zanix/space` itself (this plugin's real, intended target
- * is always some OTHER app's `config.root`) — silently correct only by coincidence, for whichever
- * specifiers both configs happen to declare identically (`react`, in that spike), and silently
- * WRONG for anything declared only in the real target app's own `deno.json` (a real, separate npm
- * dependency — `ms` — imported through a Comet's own relative helper file, in that same spike).
- * Each loader still only ever computes resolutions on demand, never caches a module instance, so
- * sharing one across calls for the SAME root creates no second source of module identity — the
- * same guarantee `getSharedLoader()`'s own doc already establishes (that one is ALSO cached per
- * discovered config path now, not a bare singleton, fixed for the identical reason).
+ * Cached per discovered config path, never a single process-wide singleton: constructing one
+ * `Workspace` with no explicit `configPath` at all falls back to auto-discovering from the
+ * process's own `Deno.cwd()`, which is `@zanix/space`'s own development root while iterating on
+ * `@zanix/space` itself (this plugin's real, intended target is always some OTHER app's
+ * `config.root`) — silently correct only by coincidence, for whichever specifiers both configs
+ * happen to declare identically (`react`), and silently WRONG for anything declared only in the
+ * real target app's own `deno.json` (a real, separate npm dependency — `ms` — imported through a
+ * Comet's own relative helper file). Each loader still only ever computes resolutions on demand,
+ * never caches a module instance, so sharing one across calls for the SAME root creates no second
+ * source of module identity — the same guarantee `getSharedLoader()`'s own doc already establishes
+ * (that one is ALSO cached per discovered config path, not a bare singleton, for the identical
+ * reason).
  *
  * Deliberately never calls `loader.addEntrypoints(...)` — a real app's own `node_modules` is
  * already fully materialized by the time this plugin's `configResolved` ever runs (Deno's own
  * `nodeModulesDir: 'auto'` resolves every bare specifier the app's `deno.json` declares as part
  * of the SAME `deno run` invocation that starts `zanix space dev` in the first place, well before
  * this plugin gets a chance to run), so `resolveDeno`/`loader.resolveSync` already succeeds
- * without it for anything genuinely declared there. `addEntrypoints` was tried and reverted: it
- * has a real, confirmed side effect beyond THIS loader's own graph — triggering it against a
- * freshly-created project (never previously run through a real `deno run`, only true of a
- * disposable verification spike's own artificially-constructed temp project, never a real app)
- * broke the unrelated `ssr` environment's OWN, already-correct dependency resolution
- * (`RealImportEvaluator`/`bare-specifier-resolve.ts`'s own fix), the exact kind of cross-cutting
- * regression this file's own `ssr`-scoping comments elsewhere already guard against.
+ * without it for anything genuinely declared there. `addEntrypoints` has a real side effect beyond
+ * THIS loader's own graph: triggering it against a freshly-created project (one never previously
+ * run through a real `deno run`) breaks the unrelated `ssr` environment's OWN, already-correct
+ * dependency resolution (`RealImportEvaluator`/`bare-specifier-resolve.ts`'s own fix), the exact
+ * kind of cross-cutting failure this file's own `ssr`-scoping comments elsewhere already guard
+ * against — so it stays unused here.
  */
 const browserLoadersByConfigPath = new Map<string, Promise<Loader>>()
 function getBrowserLoader(root: string): Promise<Loader> {
@@ -195,51 +194,48 @@ function exactSpecifierRegex(specifier: string): RegExp {
 }
 
 /**
- * Fixes a real Vite architecture gap that breaks `optimizeDeps` (Vite's own npm dependency
- * pre-bundler — the step that, among other things, converts a CommonJS-only package like `react`
- * into the real ESM a browser's own `import` can execute) under `@deno/vite-plugin`: confirmed by
- * reading `vite@8.2.0`'s own source directly, `optimizeDeps.include` resolution for the `client`
- * (and `ssr`) environment goes through a completely SEPARATE, "back-compat" resolver
- * (`createBackCompatIdResolver` → `createIdResolver`) that builds its own minimal plugin
- * container — `resolve.alias` plus Vite's own built-in Node-style resolver — and NEVER consults
- * any user-added plugin's own `resolveId` hook, `@deno/vite-plugin`'s included. Since Deno's
- * flattened `.deno` npm store doesn't match the standard `node_modules` layout that built-in
- * resolver expects, every bare specifier Vite decided needs optimizing (`react`, `react-dom`, its
- * own jsx-runtime subpaths, ...) silently fails to resolve there — Vite then falls back to
- * serving the raw, un-bundled, still-CommonJS source directly, which a browser cannot execute as
- * ESM (`SyntaxError: does not provide an export named '...'`). This is real for ANY npm package a
- * Comet imports that Vite decides to optimize, not specific to React — confirmed via a real,
- * disposable `puppeteer-core` spike against a real Chrome (no prior test ever drove a real
- * browser through `dev-asset-handler.ts`'s own asset-serving path for an npm dependency; every
- * existing test called `transformClientAsset` with an already-resolved project file, never with
- * the `/@id/`-wrapped id a real browser's own `import` of a bare specifier requests next).
+ * Fixes a Vite architecture gap that breaks `optimizeDeps` (Vite's own npm dependency pre-bundler —
+ * the step that, among other things, converts a CommonJS-only package like `react` into the real
+ * ESM a browser's own `import` can execute) under `@deno/vite-plugin`: per `vite@8.2.0`'s own
+ * source, `optimizeDeps.include` resolution for the `client` (and `ssr`) environment goes through a
+ * completely SEPARATE, "back-compat" resolver (`createBackCompatIdResolver` → `createIdResolver`)
+ * that builds its own minimal plugin container — `resolve.alias` plus Vite's own built-in
+ * Node-style resolver — and NEVER consults any user-added plugin's own `resolveId` hook,
+ * `@deno/vite-plugin`'s included. Since Deno's flattened `.deno` npm store doesn't match the
+ * standard `node_modules` layout that built-in resolver expects, every bare specifier Vite decided
+ * needs optimizing (`react`, `react-dom`, its own jsx-runtime subpaths, ...) silently fails to
+ * resolve there — Vite then falls back to serving the raw, un-bundled, still-CommonJS source
+ * directly, which a browser cannot execute as ESM (`SyntaxError: does not provide an export named
+ * '...'`). This is real for ANY npm package a Comet imports that Vite decides to optimize, not
+ * specific to React: a real browser's own `import` of a bare specifier requests the `/@id/`-wrapped
+ * id through `dev-asset-handler.ts`'s own asset-serving path for an npm dependency, a request shape
+ * distinct from an already-resolved project file.
  *
  * The fix stays entirely inside Vite's own, well-supported mechanisms — no second CJS-interop
  * system, no renderer-specific logic anywhere in this file: `resolve.alias` is a first-class Vite
- * config option the back-compat resolver DOES fully respect (confirmed empirically), so once each
- * specifier is pre-resolved to its real absolute file path (via `@deno/vite-plugin`'s own exported
- * `resolveDeno` — the exact same resolution `@deno/vite-plugin` uses internally for the normal
- * transform path, just invoked ahead of time here for the one resolver that can't reach it on its
- * own), Vite's own `optimizeDeps`/CJS-interop pipeline runs completely unmodified and produces the
- * same real, battle-tested output it always does. This plugin never touches React, JSX, or any
- * renderer concern — it only ever reads whatever `optimizeDeps.include` already contains (whoever
- * put it there) plus whatever {@linkcode discoverBareSpecifiersFromComets} finds by walking this
- * project's own Comet files, for whatever future renderer (`--renderer=preact` included) ends up
- * needing the same fix.
+ * config option the back-compat resolver DOES fully respect, so once each specifier is pre-resolved
+ * to its real absolute file path (via `@deno/vite-plugin`'s own exported `resolveDeno` — the exact
+ * same resolution `@deno/vite-plugin` uses internally for the normal transform path, just invoked
+ * ahead of time here for the one resolver that can't reach it on its own), Vite's own
+ * `optimizeDeps`/CJS-interop pipeline runs completely unmodified and produces the same real,
+ * battle-tested output it always does. This plugin never touches React, JSX, or any renderer
+ * concern — it only ever reads whatever `optimizeDeps.include` already contains (whoever put it
+ * there) plus whatever {@linkcode discoverBareSpecifiersFromComets} finds by walking this project's
+ * own Comet files, for whatever future renderer (`--renderer=preact` included) ends up needing the
+ * same fix.
  *
  * Being resolved and aliased is not enough on its own for a specifier Vite never decided to
- * optimize in the first place — `optimizeDeps.include` membership is what actually triggers
- * Vite's own pre-bundling/CJS-interop pass; an alias with no corresponding `include` entry just
- * remaps a path Vite never touches. So every newly-discovered specifier gets pushed into the
- * `client` environment's own `optimizeDeps.include` too, alongside whatever was already there —
- * confirmed necessary the hard way: aliasing alone left `ms` (imported through a Comet's own
- * relative helper file, deliberately unrelated to React) still served as raw, un-bundled
- * CommonJS, exactly the original bug, just for a different package. Scoped to `client`
- * specifically, never `ssr` — confirmed, also the hard way, that adding a newly-discovered
- * specifier to `ssr`'s own `include` breaks its ALREADY-correct dependency resolution
- * (`RealImportEvaluator`/`bare-specifier-resolve.ts`'s own, unrelated fix for that environment);
- * `resolve.alias` itself stays harmless everywhere (see the real code comment below for why), only
- * `optimizeDeps.include` membership needed this narrower scope.
+ * optimize in the first place — `optimizeDeps.include` membership is what actually triggers Vite's
+ * own pre-bundling/CJS-interop pass; an alias with no corresponding `include` entry just remaps a
+ * path Vite never touches. So every newly-discovered specifier gets pushed into the `client`
+ * environment's own `optimizeDeps.include` too, alongside whatever was already there — this is
+ * necessary because aliasing alone leaves `ms` (imported through a Comet's own relative helper
+ * file, deliberately unrelated to React) still served as raw, un-bundled CommonJS, exactly the
+ * original bug, just for a different package. Scoped to `client` specifically, never `ssr` — adding
+ * a newly-discovered specifier to `ssr`'s own `include` breaks its ALREADY-correct dependency
+ * resolution (`RealImportEvaluator`/`bare-specifier-resolve.ts`'s own, unrelated fix for that
+ * environment); `resolve.alias` itself stays harmless everywhere (see the real code comment below
+ * for why), only `optimizeDeps.include` membership needed this narrower scope.
  *
  * Static aliases, computed once in `configResolved` (not a per-request `customResolver` function)
  * — `resolve.alias` entries with a function `customResolver` are deprecated as of `vite@8.2.0`

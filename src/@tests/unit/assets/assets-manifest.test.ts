@@ -1,6 +1,7 @@
-import { assertEquals } from '@std/assert'
+import { assertEquals, assertRejects } from '@std/assert'
 import { dirname, join } from '@std/path'
 import { getTemporaryFolder } from '@zanix/helpers'
+import { InternalError } from '@zanix/errors'
 import {
   getAssetsBuildOutput,
   getAssetsManifest,
@@ -63,6 +64,29 @@ Deno.test(
     reset()
     await loadAssetsManifest('/nonexistent/assets-manifest.json')
     assertEquals(getAssetsManifest(), undefined)
+  },
+)
+
+/**
+ * Regression coverage: `loadAssetsManifest` used to rethrow a non-`NotFound` error (e.g. a
+ * `SyntaxError` from malformed JSON) completely raw. Boot-time-only (never reaches an HTTP
+ * response), so this proves the shared `InternalError` class specifically — not `code`/
+ * `userMessage`, which the real exemption (`WebServerManager`'s own `readSslFile`) deliberately
+ * skips for a boot-time-only failure.
+ */
+Deno.test(
+  'loadAssetsManifest: a file that exists but holds invalid JSON is wrapped into InternalError — not the NotFound branch, never rethrown raw',
+  async () => {
+    reset()
+    const dir = await Deno.makeTempDir({ dir: TMP_ROOT })
+    try {
+      const manifestPath = join(dir, 'assets-manifest.json')
+      await Deno.writeTextFile(manifestPath, '{ not valid json')
+      const error = await assertRejects(() => loadAssetsManifest(manifestPath), InternalError)
+      assertEquals(error.cause instanceof SyntaxError, true)
+    } finally {
+      await Deno.remove(dir, { recursive: true })
+    }
   },
 )
 

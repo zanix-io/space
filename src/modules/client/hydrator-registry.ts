@@ -3,13 +3,13 @@
 /**
  * Which `hydrateComets` implementation Orbit re-hydrates a swapped outlet with.
  *
- * This exists because of a real defect. `orbit.ts` used to `import { hydrateComets } from
- * './hydrate-comets.ts'` — React's implementation, statically, unconditionally — and `orbit.ts` is
- * re-exported by BOTH client barrels, including `@zanix/space/client/preact`. So a Preact app
- * re-hydrated every Comet in the swapped region with React's `hydrateRoot` after every single
- * client-side navigation, and pulled React's hydrate module into its client graph to do it. Same
- * shape of bug as `defineComet` building React elements under Preact: one shared module hardcoding
- * one renderer, with the other renderer silently getting the wrong code path.
+ * This registry keeps `orbit.ts` genuinely renderer-agnostic. `orbit.ts` is re-exported by BOTH
+ * client barrels, including `@zanix/space/client/preact` — if it imported `hydrateComets` directly
+ * from `hydrate-comets.ts` (React's implementation), a Preact app would re-hydrate every Comet in a
+ * swapped region with React's `hydrateRoot` after every client-side navigation, and pull React's
+ * hydrate module into its client graph to do it. Same class of risk as `defineComet` building
+ * elements for the wrong renderer: one shared module hardcoding one renderer, with the other
+ * renderer silently getting the wrong code path.
  *
  * The registry keeps `orbit.ts` genuinely renderer-free — it imports this module, never either
  * implementation — so each barrel pulls exactly one hydrator and nothing else. That is also what

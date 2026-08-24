@@ -7,13 +7,19 @@ import { spacePlugin } from './space-plugin.ts'
 import { cometPlugin } from './comet-plugin.ts'
 import { cssPlugin, type CssPluginOptions } from './css-plugin.ts'
 import { pwaPlugin } from './pwa-plugin.ts'
-import { assetsPlugin } from './assets-plugin.ts'
+import { type AssetsOptimizeOptions, assetsPlugin } from './assets-plugin.ts'
+import { type MediaOptimizeOptions, mediaPlugin } from './media-plugin.ts'
+import { createAssetManifestRegistry } from 'modules/assets/asset-manifest-registry.ts'
 import { resolvePwaPluginOptions } from './resolve-pwa-plugin-options.ts'
 import { discoverComets } from './discover-comets.ts'
 import { collectPageStyles, discoverPages } from './discover-pages.ts'
 import { getGlobalCssPaths, type StylesheetRef } from 'modules/render/css-manifest.ts'
 import { normalizeSourceKey } from 'modules/comets/comet-manifest.ts'
-import { getAssetsDirConfig } from 'modules/assets/asset-registry.ts'
+import {
+  getAssetsDirConfig,
+  getMediaConfig,
+  getOptimizeConfig,
+} from 'modules/assets/asset-registry.ts'
 import { getActiveRenderer, type RendererKind } from 'modules/router/active-renderer.ts'
 import { getValidationConfig } from 'modules/validation/config-registry.ts'
 import type { Diagnostic, ValidationConfig } from 'modules/validation/mod.ts'
@@ -46,8 +52,8 @@ export interface BuildSpaceClientOptions {
    */
   globalCss?: StylesheetRef[]
   /**
-   * Where to look for pages' own `static styles` (P2-12b) — passed UNCHANGED to `scanPageFiles`
-   * (see {@linkcode discoverPageStyles}'s own doc for why this is deliberately NOT resolved against
+   * Where to look for pages' own `static styles` — passed UNCHANGED to `scanPageFiles`
+   * (see `discover-pages.ts`'s own doc for why this is deliberately NOT resolved against
    * `root` the way `globalCss`/`assetsDir` are: the resulting page identity must come out in
    * EXACTLY the same shape `loadRoutes()` itself will produce for the SAME value at real server
    * startup). @default './routes' — the same default `loadRoutes()` itself uses.
@@ -73,6 +79,24 @@ export interface BuildSpaceClientOptions {
    * here already follows.
    */
   assetsDir?: string | string[]
+  /**
+   * The SAME `optimize` `defineSpaceApp({ optimize })` takes — forwarded to `assetsPlugin({
+   * assetsDir, optimize })` as its own `optimize` option, unchanged. Defaults to
+   * `getOptimizeConfig()` — the same eager-registry pattern `assetsDir` above already
+   * establishes, so a build script that already imports the app's `space.app.ts` gets it
+   * automatically. Only ever takes effect when `assetsDir` also resolves to something (see
+   * `AssetsPluginOptions.optimize`'s own doc) — declaring `optimize` alone, with no `assetsDir`,
+   * does nothing, exactly like `assetsPlugin` itself already behaves when called directly.
+   */
+  optimize?: AssetsOptimizeOptions
+  /**
+   * The SAME `media` `defineSpaceApp({ media })` takes — forwarded to `mediaPlugin({ assetsDir,
+   * optimize: media, manifestRegistry })`, sharing the SAME manifest registry `assetsPlugin`
+   * above does (see `AssetManifestRegistry`'s own doc). Defaults to `getMediaConfig()` — same
+   * eager-registry pattern `optimize` above already establishes. Only ever takes effect when
+   * `assetsDir` also resolves to something — declaring `media` alone does nothing.
+   */
+  media?: MediaOptimizeOptions
   /** Extra Vite plugins, composed after this function's own. */
   plugins?: Plugin[]
   /** Forwarded to Vite's own `build.minify`. @default true */
@@ -131,7 +155,7 @@ export interface BuildSpaceClientResult {
  * map (the later one winning, the earlier one dropped from the build entirely) — confirmed
  * empirically before relying on this shape instead of a bare basename.
  *
- * The final sanitize pass (P2-12b) is not decorative: Vite/Rollup themselves sanitize a chunk's
+ * The final sanitize pass is not decorative: Vite/Rollup themselves sanitize a chunk's
  * OWN `name` for filename-safety internally (e.g. a dynamic-route folder's `[id]` becomes `_id_`
  * in the real built asset's own filename) — a page under such a folder is the first real case that
  * ever exercises this, since comet/`globalCss` paths rarely contain bracket characters. Confirmed
@@ -188,6 +212,8 @@ export async function buildSpaceClient(
     css,
     pwa,
     assetsDir = getAssetsDirConfig(),
+    optimize = getOptimizeConfig(),
+    media = getMediaConfig(),
     plugins = [],
     minify = true,
     renderer = getActiveRenderer(),
@@ -239,11 +265,11 @@ export async function buildSpaceClient(
   // `pageFilePath -> [{entryName, media}]`, in DECLARATION order per page — same entry-correlation
   // technique as `globalEntries` above, just grouped by the page each style belongs to instead of
   // flattened into one list, since a page's own CSS must stay scoped to that page (never folded
-  // into `global` — see `discoverPageStyles`'s own doc for the full identity/side-effect reasoning).
+  // into `global` — see `discoverPages`'s own doc for the full identity/side-effect reasoning).
   const pageEntries: Record<string, Array<{ entryName: string; media?: string }>> = {}
   // ONE pass over every page, shared by CSS entry construction here and by document validation
-  // below — see `discoverPages`'s own doc. This used to be a `discoverPageStyles` call that scanned
-  // and imported the same modules for the sake of one field.
+  // below — see `discoverPages`'s own doc: importing each page module once serves both `styles`
+  // and `head`/`redirect`, instead of a separate scan+import per concern.
   const discoveredPages = await discoverPages(routesDir)
 
   // Validated from the SAME discovery result the CSS entries below are built from — one pass, one
@@ -287,6 +313,12 @@ export async function buildSpaceClient(
   const syntheticEntryId = '\0zanix-space-empty-entry'
   if (Object.keys(input).length === 0) input['empty'] = syntheticEntryId
 
+  // Created unconditionally (cheap — just a `Map`) so `assetsPlugin`/a future `mediaPlugin` always
+  // share the exact same instance below, regardless of which one(s) actually end up in the plugins
+  // array — see `AssetManifestRegistry`'s own doc for why this must be one shared instance, never
+  // a process-wide singleton.
+  const manifestRegistry = createAssetManifestRegistry()
+
   await build({
     root,
     configFile: false,
@@ -314,7 +346,16 @@ export async function buildSpaceClient(
       cometPlugin({ knownEntryPaths: comets }),
       ...cssPlugin({ ...css, cometEntries, globalEntries, pageEntries }),
       ...(pwa ? [pwaPlugin(resolvePwaPluginOptions(pwa, root))] : []),
-      ...(assetsDir ? [assetsPlugin({ assetsDir })] : []),
+      // An explicit, shared `manifestRegistry` — never either plugin's own internal fallback one —
+      // since this is exactly the "composing multiple producers into one build" case
+      // `AssetManifestRegistry`'s own doc describes: `assetsPlugin` (images/SVG) and `mediaPlugin`
+      // (video/thumbnails) both contribute to the SAME `assets-manifest.json`, neither one ever
+      // knowing the other exists. The manifest plugin itself is included exactly once, after every
+      // producer, gated the same way each producer's own inclusion already is — no producer, no
+      // manifest file, unchanged.
+      ...(assetsDir ? assetsPlugin({ assetsDir, optimize, manifestRegistry }) : []),
+      ...(assetsDir ? mediaPlugin({ assetsDir, optimize: media, manifestRegistry }) : []),
+      ...(assetsDir ? [manifestRegistry.createManifestPlugin()] : []),
       {
         name: 'zanix-space-empty-entry',
         resolveId: (id) => id === syntheticEntryId ? id : null,

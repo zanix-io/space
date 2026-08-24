@@ -50,8 +50,8 @@ export type RenderToResponseOptions = {
    * the caller (never read from here directly, so a fragment-only Orbit response can omit it: it's
    * already in effect on the page it's swapping into, same reasoning as `cssHrefs`/`pwaHead`).
    * Rendered as a PLAIN `<style nonce={nonce}>` — deliberately NOT given a `precedence` prop the way
-   * `cssHrefs`' `<link>`s are: confirmed empirically that React 19 silently drops a manually-set
-   * `nonce` prop on a `precedence`-managed `<style>` tag (it wants the nonce via
+   * `cssHrefs`' `<link>`s are: React 19 silently drops a manually-set `nonce` prop on a
+   * `precedence`-managed `<style>` tag (it wants the nonce via
    * `renderToReadableStream`'s own render option instead, which this function already reserves for
    * the bootstrap script — mixing the two isn't supported). A plain `<style>` isn't hoisted into
    * `<head>` the way a `precedence`d one is — it renders at its own literal tree position — but CSS
@@ -74,9 +74,8 @@ export type RenderToResponseOptions = {
    * already merged across the page's own `SpacePageController.head` and its whole layout chain by
    * the caller (never read from here directly, same reasoning as `cssHrefs`/`pwaHead`). Rendered as
    * a real `<title>` element, positioned BEFORE `element` in this function's own tree — hoisted
-   * into `<head>` by React 19 like `cssHrefs`/`pwaHead` already are. Confirmed empirically (a real
-   * `renderToReadableStream` render, not assumed) that this positioning is what makes it the
-   * document's FIRST `<title>` element, and therefore `document.title` per the HTML Living
+   * into `<head>` by React 19 like `cssHrefs`/`pwaHead` already are. This positioning is what makes
+   * it the document's FIRST `<title>` element, and therefore `document.title` per the HTML Living
    * Standard, even when an author separately renders their own `<title>` deeper in `element` — see
    * `head-descriptor.ts`'s own doc for the full coexistence contract with hand-authored JSX. */
   title?: string

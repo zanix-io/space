@@ -1,4 +1,5 @@
 import { assert, assertEquals, assertThrows } from '@std/assert'
+import { InternalError } from '@zanix/errors'
 import { getRule, RULES, UNAUTOMATABLE } from 'modules/validation/rules.ts'
 import { isNormative } from 'modules/validation/diagnostic.ts'
 import type {
@@ -50,6 +51,8 @@ const EXPECTED = {
     social: 'SOC',
   } as Record<DiagnosticCategory, string>,
 } as const
+
+console.error = () => {}
 
 const ALL = Object.values(RULES)
 const codesWhere = (predicate: (rule: typeof ALL[number]) => boolean) =>
@@ -266,10 +269,11 @@ Deno.test(
   'getRule: throws for an unknown code, loudly, rather than returning a diagnostic with no ' +
     'metadata',
   () => {
-    assertThrows(
+    const error = assertThrows(
       () => getRule('NOT-A-REAL-CODE'),
-      Error,
+      InternalError,
       'Unknown validation rule code: NOT-A-REAL-CODE',
     )
+    assertEquals(error.code, 'SPACE_VALIDATION_UNKNOWN_RULE_CODE')
   },
 )

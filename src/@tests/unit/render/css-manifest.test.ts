@@ -1,5 +1,6 @@
 import { assertEquals, assertRejects } from '@std/assert'
 import { getTemporaryFolder } from '@zanix/helpers'
+import { InternalError } from '@zanix/errors'
 import {
   addGlobalCssPaths,
   getCssManifest,
@@ -191,14 +192,22 @@ Deno.test(
   },
 )
 
+/**
+ * Regression coverage: `loadCssManifest` used to rethrow a non-`NotFound` error (e.g. a
+ * `SyntaxError` from malformed JSON) completely raw. Boot-time-only (never reaches an HTTP
+ * response), so this proves the shared `InternalError` class specifically — not `code`/
+ * `userMessage`, which the real exemption (`WebServerManager`'s own `readSslFile`) deliberately
+ * skips for a boot-time-only failure.
+ */
 Deno.test(
-  'loadCssManifest: a file that exists but holds invalid JSON throws — not the NotFound branch',
+  'loadCssManifest: a file that exists but holds invalid JSON is wrapped into InternalError — not the NotFound branch, never rethrown raw',
   async () => {
     const dir = await Deno.makeTempDir({ dir: TMP_ROOT })
     const path = `${dir}/css-manifest.json`
     try {
       await Deno.writeTextFile(path, '{ not valid json')
-      await assertRejects(() => loadCssManifest(path), SyntaxError)
+      const error = await assertRejects(() => loadCssManifest(path), InternalError)
+      assertEquals(error.cause instanceof SyntaxError, true)
     } finally {
       await Deno.remove(dir, { recursive: true })
       reset()

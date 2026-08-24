@@ -13,6 +13,7 @@ export { SW_FILE_NAME }
 
 /** Options for {@linkcode pwaPlugin}. */
 export interface PwaPluginOptions {
+  /** Source image + generated size set for the app's PWA icons. */
   icons: {
     /** Path to a single source image (ideally ≥512×512, square) — resized to every size in
      * `sizes` at build time. Read once per build, never at request time: the deployed server

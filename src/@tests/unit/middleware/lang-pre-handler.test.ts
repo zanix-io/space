@@ -1,4 +1,4 @@
-import { assert, assertEquals } from '@std/assert'
+import { assert, assertEquals, assertThrows } from '@std/assert'
 import { langPreHandler } from 'modules/middleware/lang-pre-handler.ts'
 
 const info = {} as Deno.ServeHandlerInfo<Deno.NetAddr>
@@ -145,6 +145,9 @@ Deno.test(
     const setCookie = result.headers.get('Set-Cookie')
     assert(setCookie?.includes('X-Znx-Lang=en'))
     assert(setCookie?.includes('SameSite=Lax'))
+    // Regression guard: this cookie used to hand-roll 'Path=/; SameSite=Lax' with no `Secure` — the
+    // only cookie in the whole ecosystem missing it. Now built from `PUBLIC_COOKIE_ATTRIBUTES`.
+    assert(setCookie?.includes('Secure'))
     assertEquals(setCookie?.includes('HttpOnly'), false)
   },
 )
@@ -214,4 +217,12 @@ Deno.test('langPreHandler: a custom cookieName is both read and written', async 
   const withoutCookie = await handler(new Request('http://localhost/products'), info)
   assert(withoutCookie instanceof Response)
   assert(withoutCookie.headers.get('Set-Cookie')?.includes('X-Znx-App-Lang=en'))
+})
+
+// See `csrf-guard.test.ts`'s identical comment for why `.code`, not `instanceof`, is asserted.
+Deno.test('langPreHandler: a cookieName missing the X-Znx- prefix throws at construction', () => {
+  const error = assertThrows(() =>
+    langPreHandler({ availableLangs: ['en'], defaultLang: 'en', cookieName: 'lang' })
+  ) as { code?: string }
+  assertEquals(error.code, 'UTILS_COOKIES_INVALID_PREFIX')
 })

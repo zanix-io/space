@@ -3,20 +3,16 @@ import { Get, SsrController, ZanixSsrController } from '@zanix/server'
 import { isDevClientEnabled } from 'modules/dev/dev-client-registry.ts'
 
 /** One language variant of a {@linkcode SitemapEntry}, cross-referenced within its own `<url>`
- * block — real fix over the legacy component this replaces: its own multi-language sitemap
- * support only ever emitted a SELF-referencing `xhtml:link` per language block (confirmed by
- * reading its source), never the full alternate set Google's own sitemap-hreflang convention
- * actually requires (every language's `<url>` block should list EVERY variant, itself included).
- * Include an entry for the URL's own language too — this function performs no implicit
- * self-inclusion. */
+ * block. Google's sitemap-hreflang convention requires every language's `<url>` block to list
+ * EVERY variant, itself included — never just a self-referencing `xhtml:link`. Include an entry
+ * for the URL's own language too — this function performs no implicit self-inclusion. */
 export type SitemapAlternate = { lang: string; href: string }
 
 /** One `<url>` entry. `loc`/`alternates[].href` may be relative (`/products/widget`) or absolute
  * (`https://example.com/products/widget`) — {@linkcode buildSitemapXml} resolves a relative one
- * against the `origin` it's given, so an app never has to know/configure its own domain separately
- * (a real, common legacy footgun: `SITE_DOMAIN`-style env vars read independently in 2-3 different
- * places, silently producing invalid relative `<loc>` values wherever one was unset — confirmed in
- * the legacy component this replaces). */
+ * against the `origin` it's given, so an app never has to know/configure its own domain separately.
+ * `SITE_DOMAIN`-style env vars read independently at 2-3 different call sites are a common footgun:
+ * silently producing invalid relative `<loc>` values wherever one is unset. */
 export type SitemapEntry = {
   loc: string
   /** ISO 8601 date, e.g. `'2026-08-15'`. */
@@ -44,27 +40,24 @@ export type SitemapEntry = {
  * **A function is called once, then cached in memory for the process lifetime** — same pattern
  * `loadMessages()` already uses, applied here for the same reason: a function `source` doing real
  * work (a database query for a live product catalog) shouldn't repeat that work on every crawler
- * hit, which is what an earlier, simpler version of this contract did (call it fresh on every
- * request, no caching at all — confirmed real behavior, not a straw man). What's cached is the
- * resolved `SitemapEntry[]`, never the final XML string — `buildSitemapXml` still runs per request
- * against the CURRENT request's `ctx.url.origin`, so a cached result stays correct even if the app
- * is reachable under more than one origin. Concurrent requests racing before the first resolution
- * settles share a single in-flight call instead of each triggering their own.
+ * hit. What's cached is the resolved `SitemapEntry[]`, never the final XML string —
+ * `buildSitemapXml` still runs per request against the CURRENT request's `ctx.url.origin`, so a
+ * cached result stays correct even if the app is reachable under more than one origin. Concurrent
+ * requests racing before the first resolution settles share a single in-flight call instead of each
+ * triggering their own.
  *
  * **The cache is bypassed entirely under `znx space dev`** (`isDevClientEnabled()`), so editing
  * whatever backs the function's own data during development is reflected on the very next request
  * — no restart needed, same convention `loadMessages()`'s own dev bypass already establishes
  * (in-flight de-duplication still applies even in dev; only the cache read/write is skipped).
  *
- * The real, accepted trade-off in production: a function source's result is only as fresh as the
- * last process start — a change to the underlying data isn't reflected until the next
- * restart/redeploy, not on the next request. This was decided deliberately (see this package's own
- * roadmap for the full comparison against a legacy Zanix stack that generated its own sitemap once
- * at server-startup, not per request either): `sitemap.xml` is a low-traffic, crawler-only path
- * where staleness on the order of a deploy cycle is an acceptable cost for not repeating real work
- * on every hit. An app that genuinely needs sub-restart freshness can still bypass this by managing
- * its own cache invalidation inside the function itself (nothing here prevents that) — but that's
- * no longer this module's own default behavior.
+ * The accepted trade-off in production: a function source's result is only as fresh as the last
+ * process start — a change to the underlying data isn't reflected until the next restart/redeploy,
+ * not on the next request. `sitemap.xml` is a low-traffic, crawler-only path where staleness on the
+ * order of a deploy cycle is an acceptable cost for not repeating real work on every hit. An app
+ * that genuinely needs sub-restart freshness can still bypass this by managing its own cache
+ * invalidation inside the function itself (nothing here prevents that) — but that's not this
+ * module's own default behavior.
  */
 export type SitemapSource =
   | SitemapEntry[]
@@ -116,15 +109,12 @@ function resolveUrl(value: string, origin: string): string {
  * `xhtml` namespace for hreflang alternates) from `entries` — pure, synchronous, no I/O, no route
  * involved (see {@linkcode registerSitemap} for the HTTP route this backs).
  *
- * Deliberately NOT a port of the legacy component's own sitemap XML builder, beyond reusing its
- * correct boilerplate (the `urlset`/`xhtml` namespace declarations) — real fixes over it (confirmed
- * by reading its source, not assumed): every `loc`/`href` value is XML-escaped (the legacy used raw
- * template-string interpolation with no escaping at all — a URL containing `&` produced invalid
- * XML); redirected routes are never mixed into the same `<urlset>` as real, indexable URLs (the
- * legacy emitted non-standard `<redirect>`/`<target>` tags real crawlers don't recognize — a
- * sitemap should only ever list canonical, indexable URLs); and `changefreq`/`priority` are per-entry
- * and optional, not hardcoded to `daily`/`0.7` for every single URL regardless of how often it
- * actually changes.
+ * Every `loc`/`href` value is XML-escaped — raw, unescaped interpolation would let a URL containing
+ * `&` produce invalid XML. Redirected routes are never mixed into the same `<urlset>` as real,
+ * indexable URLs — a sitemap should only ever list canonical, indexable URLs, never non-standard
+ * `<redirect>`/`<target>` tags real crawlers don't recognize. `changefreq`/`priority` are per-entry
+ * and optional, not hardcoded to a single value for every URL regardless of how often it actually
+ * changes.
  *
  * @param entries - See {@linkcode SitemapEntry}.
  * @param origin - Resolves any relative `loc`/`alternates[].href` — e.g. `'https://example.com'`.
@@ -167,10 +157,7 @@ export function buildSitemapXml(entries: SitemapEntry[], origin: string): string
  * static array costs nothing extra per request (see that type's own doc), and a function source
  * genuinely REQUIRES per-request evaluation to stay correct for a live product catalog — freezing
  * that case at build time would silently go stale between deploys, defeating the reason a function
- * source exists at all. This was evaluated explicitly (not assumed) against this package's own
- * roadmap and against a legacy Zanix stack that DID generate sitemap output at build/CLI time (via
- * an external tool, never re-run per request) before concluding the live-route design is the
- * correct one to keep — see this package's own CHANGELOG/roadmap for the full comparison.
+ * source exists at all.
  *
  * A function `source` is called once and cached for the process lifetime, bypassed under
  * `znx space dev` (see {@linkcode SitemapSource}'s own doc for the exact guarantee, the

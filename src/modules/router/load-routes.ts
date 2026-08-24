@@ -12,11 +12,11 @@ import type { HeadDescriptor } from './head-descriptor.ts'
 import { setNotFoundComponent, setNotFoundHead, setRootLayout } from './app-shell-registry.ts'
 import { getActiveRenderer } from './active-renderer.ts'
 
-/** The shape any dynamic module import resolves to, as far as this module cares. `head` is only
- * ever meaningfully present on a `layout.tsx` module — its own named export, discovered alongside
- * the default export below, same import call, no separate file scan (see this module's own segment
- * resolution). */
-export type ImportedModule = { default?: unknown; head?: unknown }
+/** The shape any dynamic module import resolves to, as far as this module cares. `head`/`loader`
+ * are only ever meaningfully present on a `layout.tsx` module — its own named exports, discovered
+ * alongside the default export below, same import call, no separate file scan (see this module's
+ * own segment resolution). */
+export type ImportedModule = { default?: unknown; head?: unknown; loader?: unknown }
 
 /** Options for {@linkcode loadRoutes}. */
 export interface LoadRoutesOptions {
@@ -70,8 +70,9 @@ async function resolveRootSingleton(
 
 /**
  * Discovers and imports every `page.tsx` file under `routesDir` (plus each one's own
- * `layout.tsx`/`loading.tsx`/`error.tsx` composition chain), registering each page's `Page()`-
- * decorated default export as a route — importing a module is what actually runs its decorators,
+ * `layout.tsx`/`loading.tsx`/`error.tsx` composition chain, and each `layout.tsx`'s own optional
+ * `head`/`loader` named exports), registering each page's `Page()`-decorated default export as a
+ * route — importing a module is what actually runs its decorators,
  * so this is the step that turns the file tree into real, dispatchable routes. For a page decorated
  * with a pathless `@Page()`, this is also the step that tells it its real route path (derived from
  * its file's own location — see `scanPageFiles`); for an explicit `@Page(path)`, that already
@@ -126,8 +127,8 @@ async function resolveRootSingleton(
  * @param options - See {@linkcode LoadRoutesOptions}.
  * @throws {InternalError} If the active renderer is Preact (`defineSpaceApp({ renderer: 'preact' })`)
  * and any discovered route has a `loading.tsx` — rejected here, at registration time, rather than
- * left to fail confusingly the first time that route is actually requested; see this package's own
- * decision spike, §8.1.
+ * left to fail confusingly the first time that route is actually requested: Preact core has no
+ * `Suspense` to back a `loading.tsx` fallback with.
  */
 export async function loadRoutes(
   routesDir: string | string[] = './routes',
@@ -164,21 +165,20 @@ export async function loadRoutes(
     const previousTarget = registeredPageTargets.get(page.filePath)
 
     // Checked against `page.segments`' own RAW, pre-import shape (`scanPageFiles`'s own discovery
-    // result), and BEFORE any of this page's segment files are imported below — not after, the way
-    // an earlier version of this guard did. Rejected at registration time, before any request could
-    // ever reach it — not a runtime check inside the render path, and not a behavior this package
-    // tries to approximate for Preact (this package's own decision spike, §8.1): Preact core has no
-    // `Suspense` at all, so `loading.tsx`'s entire contract (a Suspense fallback shown while a
-    // segment suspends) has no renderer underneath it to run on. Checking BEFORE the import matters
-    // for real: a `loading.tsx` file is, by definition, never meant to run under `--renderer=preact`
-    // — if importing it also happened to throw its own unrelated error (a missing dependency, a
-    // typo), that raw import failure would reach the caller INSTEAD of this guard's own clear,
-    // actionable message, defeating the whole point of "before any request could reach it." Real bug
-    // found and fixed during this package's own Etapa 4 hardening pass — a rejected file's own code
-    // must never even run, let alone determine what error surfaces. `getActiveRenderer()` is read
-    // here, not passed as a parameter, because `loadRoutes()`'s own public signature (used directly
-    // by app code in some test setups, not only via `defineSpaceApp`) predates this option and
-    // adding a required parameter would be a breaking change for every existing caller.
+    // result), and BEFORE any of this page's segment files are imported below. Rejected at
+    // registration time, before any request could ever reach it — not a runtime check inside the
+    // render path, and not a behavior this package tries to approximate for Preact: Preact core has
+    // no `Suspense` at all, so `loading.tsx`'s entire
+    // contract (a Suspense fallback shown while a segment suspends) has no renderer underneath it to
+    // run on. Checking BEFORE the import matters for real: a `loading.tsx` file is, by definition,
+    // never meant to run under `--renderer=preact` — if importing it also happened to throw its own
+    // unrelated error (a missing dependency, a typo), that raw import failure would reach the caller
+    // INSTEAD of this guard's own clear, actionable message, defeating the whole point of "before any
+    // request could reach it." A rejected file's own code must never even run, let alone determine
+    // what error surfaces. `getActiveRenderer()` is read here, not passed as a parameter, because
+    // `loadRoutes()`'s own public signature (used directly by app code in some test setups, not only
+    // via `defineSpaceApp`) predates this option and adding a required parameter would be a breaking
+    // change for every existing caller.
     if (getActiveRenderer() === 'preact') {
       const offendingIndex = page.segments.findIndex((segment) => segment.loadingFilePath)
       if (offendingIndex !== -1) {
@@ -196,16 +196,17 @@ export async function loadRoutes(
       importModule(page.filePath),
       Promise.all(
         page.segments.map(async (segment): Promise<ResolvedSegment> => {
-          // One import call for `layout.tsx`, not two — `head` (if declared) is its own named
-          // export on the SAME module `layout` (the default export) already comes from;
-          // `importModule`'s own cache (above) would make a second call cheap too, but reading
-          // both off one already-awaited result is simpler and avoids relying on that cache.
+          // One import call for `layout.tsx`, not three — `head`/`loader` (if declared) are their
+          // own named exports on the SAME module `layout` (the default export) already comes from;
+          // `importModule`'s own cache (above) would make a second call cheap too, but reading all
+          // three off one already-awaited result is simpler and avoids relying on that cache.
           const layoutModule = segment.layoutFilePath
             ? await importModule(segment.layoutFilePath)
             : undefined
           return {
             layout: layoutModule?.default,
             head: layoutModule?.head as ResolvedSegment['head'],
+            loader: layoutModule?.loader as ResolvedSegment['loader'],
             loading: segment.loadingFilePath
               ? (await importModule(segment.loadingFilePath)).default
               : undefined,

@@ -113,7 +113,9 @@ Deno.test(
 
     render(applyDocumentShell(CustomLayout, createElement(Content, null), {}))
 
-    assertEquals(Object.keys(receivedProps).sort(), ['children', 'params'])
+    // `data` joined the set post-segment-loaders (`LayoutProps.data`, `typings/page.ts`) — still
+    // no head-related prop among them, which remains this test's own point.
+    assertEquals(Object.keys(receivedProps).sort(), ['children', 'data', 'params'])
   },
 )
 

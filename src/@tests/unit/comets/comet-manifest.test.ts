@@ -1,4 +1,5 @@
 import { assertEquals, assertRejects } from '@std/assert'
+import { InternalError } from '@zanix/errors'
 import {
   loadCometManifest,
   normalizeSourceKey,
@@ -110,12 +111,23 @@ Deno.test(
   },
 )
 
-Deno.test('loadCometManifest: a non-NotFound error (e.g. malformed JSON) is rethrown', async () => {
-  const path = await Deno.makeTempFile({ suffix: '.json' })
-  try {
-    await Deno.writeTextFile(path, '{ not valid json')
-    await assertRejects(() => loadCometManifest(path), SyntaxError)
-  } finally {
-    await Deno.remove(path)
-  }
-})
+/**
+ * Regression coverage: `loadCometManifest` used to rethrow a non-`NotFound` error (e.g. a
+ * `SyntaxError` from malformed JSON) completely raw. Boot-time-only (never reaches an HTTP
+ * response), so this proves the shared `InternalError` class specifically — not `code`/
+ * `userMessage`, which the real exemption (`WebServerManager`'s own `readSslFile`) deliberately
+ * skips for a boot-time-only failure.
+ */
+Deno.test(
+  'loadCometManifest: a non-NotFound error (e.g. malformed JSON) is wrapped into InternalError, never rethrown raw',
+  async () => {
+    const path = await Deno.makeTempFile({ suffix: '.json' })
+    try {
+      await Deno.writeTextFile(path, '{ not valid json')
+      const error = await assertRejects(() => loadCometManifest(path), InternalError)
+      assertEquals(error.cause instanceof SyntaxError, true)
+    } finally {
+      await Deno.remove(path)
+    }
+  },
+)

@@ -1,5 +1,5 @@
 /// <reference lib="dom" />
-import logger from '@zanix/logger'
+import logger from './client-logger.ts'
 import {
   COMET_EXPORT_ATTR,
   COMET_MODULE_ATTR,

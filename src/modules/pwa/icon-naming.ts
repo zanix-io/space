@@ -16,8 +16,8 @@ export function iconFileName(size: number): string {
 }
 
 /** The single source of truth for the default icon sizes — used only when `PwaConfig.iconSizes`
- * is omitted. Previously declared independently in three places (`register-pwa.ts`,
- * `web-manifest.ts`, `pwa-plugin.ts`) — consolidated here so all three can never drift apart. */
+ * is omitted. `register-pwa.ts`, `web-manifest.ts`, and `pwa-plugin.ts` all read this same
+ * constant, so the three can never drift apart. */
 export const DEFAULT_ICON_SIZES = [192, 512]
 
 /** Where `pwaPlugin` writes the generated service worker, relative to the client build's own

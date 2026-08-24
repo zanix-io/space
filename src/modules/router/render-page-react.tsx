@@ -2,12 +2,14 @@ import type { ComponentType, ReactElement, ReactNode } from 'react'
 import { Fragment, Suspense } from 'react'
 import type { ClassConstructor } from '@zanix/server'
 import type { ErrorBoundaryProps, LayoutProps, PageContext } from 'typings/page.ts'
+import logger from '@zanix/logger'
 import { renderToResponse } from '../render/render-to-response.tsx'
 import { resolveCssHrefs, resolvePageCssHrefs } from '../render/css-manifest.ts'
 import { resolvePwaHead } from '../pwa/pwa-registry.ts'
 import { isDevClientEnabled } from '../dev/dev-client-registry.ts'
 import { SpaceErrorBoundary } from './error-boundary.tsx'
 import { getPageTree } from './page-tree-registry.ts'
+import { resolveSegmentData } from './segment-loader.ts'
 import { applyDocumentShell } from './document-shell.tsx'
 import { ORBIT_OUTLET_ATTR } from './orbit-protocol.ts'
 import type { SpacePageController } from './space-page-controller.tsx'
@@ -57,8 +59,8 @@ import type { StylesheetRef } from '../render/css-manifest.ts'
  * data if it was a function (`renderPageResponse`'s own job, before calling this) — merged here
  * with every segment's own `head` export, most-specific-first (page, then nearest layout, ...,
  * root). See `resolveHead`'s own doc (`head-descriptor.ts`) for the full precedence contract.
- * @param pageCssRefs - This page's own resolved `styles` (P2-12b) — rendered as real `<link>`
- * elements ONLY in the `fragmentOnly` branch (P2-12d), same `<title>`-style body-embedding
+ * @param pageCssRefs - This page's own resolved `styles` — rendered as real `<link>`
+ * elements ONLY in the `fragmentOnly` branch, same `<title>`-style body-embedding
  * convention: a full document already gets this page's own CSS through `cssHrefs` (see
  * `renderPageResponse` below), so passing it here too would double-render it for that case —
  * `renderPageResponse` only ever passes a non-empty array when `fragmentOnly` is true. Orbit's
@@ -67,18 +69,31 @@ import type { StylesheetRef } from '../render/css-manifest.ts'
  * `define-comet.ts`'s own doc) from the fragment body BEFORE the visual swap, moves the ones not
  * already in `document.head` there, and awaits their load — never a header, since Orbit's own
  * prefetch cache (`prefetch.ts`) stores only the response BODY TEXT, not headers.
+ *
+ * `async` for exactly one reason: `resolveSegmentData` (`segment-loader.ts`) resolves every
+ * segment's own `layout.tsx` `loader` — all of them, in parallel, via a single `Promise.all` — so
+ * each `Layout` below receives its own `data` prop. This runs AFTER the page's own `loader` (already
+ * awaited by `handleGet` before this function is ever called) rather than alongside it, a deliberate
+ * scope boundary: keeping `PageRenderer`'s own signature (`page-renderer-registry.ts`) completely
+ * unchanged was worth the small sequential cost over threading a second loader-resolution phase
+ * through that shared seam. See `LayoutProps.data`'s own doc (`typings/page.ts`) for the full
+ * contract.
  */
-function composeSegments<Params>(
+async function composeSegments<Params>(
   // Same structural supertype this file's own `renderPageResponse` documents below.
   Target: ClassConstructor<SpacePageController<never>>,
   element: ReactElement,
-  params: Params,
+  pageCtx: PageContext<Params>,
   fragmentOnly: boolean,
   pageHead: HeadDescriptor | undefined,
   pageCssRefs: StylesheetRef[],
-): { element: ReactElement; head: ResolvedHead } {
+): Promise<{ element: ReactElement; head: ResolvedHead }> {
   const segments = getPageTree(Target)?.segments ?? []
-  const paramsRecord = params as unknown as Record<string, string>
+  const paramsRecord = pageCtx.params as unknown as Record<string, string>
+  const segmentData = await resolveSegmentData(
+    segments,
+    pageCtx as unknown as PageContext,
+  )
 
   // Most-specific-first: the page's own head, then each segment from nearest (leaf) to farthest
   // (root) — the REVERSE of `segments`' own root-first storage order.
@@ -112,7 +127,7 @@ function composeSegments<Params>(
     }
     if (Layout && i !== 0) {
       node = (
-        <Layout params={paramsRecord}>
+        <Layout params={paramsRecord} data={segmentData[i]}>
           {node}
         </Layout>
       )
@@ -138,14 +153,14 @@ function composeSegments<Params>(
     // inserting the remainder into the live DOM, so its exact position inside the fragment doesn't
     // matter — only that it's present, as real text, somewhere in the response.
     //
-    // `pageCssRefs` (P2-12d) renders with `precedence='space'` — the SAME resource-management prop
+    // `pageCssRefs` renders with `precedence='space'` — the SAME resource-management prop
     // a Comet's own `<link>` already carries (`define-comet.ts`) — REQUIRED, not decorative: React
     // 19 flushes `precedence`-managed resources ahead of ordinary content regardless of tree
-    // position, even with no real `<head>` in a bare fragment render (confirmed empirically while
-    // building this — a plain `<link>` here, with no `precedence`, rendered AFTER a Comet's own
-    // resource-managed one despite appearing BEFORE it in this very tree, silently breaking the
-    // global → page → comet cascade order this whole architecture promises). With BOTH on equal
-    // footing, first-encounter order among resources is preserved — this page's own `<link>`s
+    // position, even with no real `<head>` in a bare fragment render. A plain `<link>` here, with
+    // no `precedence`, renders AFTER a Comet's own resource-managed one despite appearing BEFORE it
+    // in this very tree, silently breaking the global → page → comet cascade order this whole
+    // architecture promises. With BOTH on equal footing, first-encounter order among resources is
+    // preserved — this page's own `<link>`s
     // (declared here, before `outlet`) precede any Comet's own (declared inside it). Orbit's own
     // client (`orbit.ts`) still just extracts every `<link rel="stylesheet">` it finds, in
     // whatever order the response's own HTML actually has them, ignoring `precedence` entirely — it
@@ -172,6 +187,7 @@ function composeSegments<Params>(
       segments[0]?.layout as ComponentType<LayoutProps<ReactNode>> | undefined,
       outlet,
       paramsRecord,
+      segmentData[0],
     ),
     head,
   }
@@ -183,7 +199,7 @@ function composeSegments<Params>(
  * `renderPageResponse`, so `SpacePageController.handleGet` can call whichever one is active without
  * knowing which renderer it belongs to.
  */
-export function renderPageResponse<Params>(
+export async function renderPageResponse<Params>(
   // `SpacePageController<never>` — the same structural supertype `page-tree-registry.ts` documents:
   // `Params` appears CONTRAVARIANTLY inside `SpacePageExtensions`, so `never` is the one type
   // argument every page class is assignable TO, whatever param shape it declared. The bare form
@@ -216,10 +232,10 @@ export function renderPageResponse<Params>(
   // purely from the manifest via this same page's own `filePath`.
   const pageStyles = (Target as unknown as typeof SpacePageController).styles
   const pageCssRefs = resolvePageCssHrefs(getPageTree(Target)?.filePath, pageStyles)
-  const { element, head } = composeSegments(
+  const { element, head } = await composeSegments(
     Target,
     <RealComponent {...(data as Record<string, unknown>)} />,
-    pageCtx.params,
+    pageCtx,
     fragmentOnly,
     pageHead,
     // Only the fragment branch actually renders these (see `composeSegments`'s own doc) — a full
@@ -251,9 +267,21 @@ export function renderPageResponse<Params>(
     devClient: isDevClientEnabled() ? { routeFilePath: getPageTree(Target)?.filePath } : undefined,
   }
 
+  // `renderToResponse`'s own default (no `onError`) is silent — this is the one place a
+  // shell-breaking render error would otherwise vanish with zero trace, console or persisted (see
+  // that function's own doc for exactly when it fires). `logger.error` here doesn't change the
+  // response the end user sees (still the same blank 500 either way) — it's the only thing that
+  // makes the failure debuggable at all.
+  const onError = (error: unknown) =>
+    logger.error(
+      `Uncaught error rendering "${pageCtx.url.pathname}" (${getPageTree(Target)?.filePath})`,
+      error,
+    )
+
   return renderToResponse(
     element,
-    document === undefined ? {} : {
+    document === undefined ? { onError } : {
+      onError,
       initialState: document.initialState,
       nonce: document.nonce,
       cssHrefs: document.cssHrefs,

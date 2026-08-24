@@ -1,3 +1,4 @@
+import { InternalError } from '@zanix/errors'
 import { isDevClientEnabled } from '../dev/dev-client-registry.ts'
 import { resolveDevCssHrefs, resolveDevPageCssHrefs } from '../dev/dev-css-hrefs.ts'
 import { normalizeSourceKey } from '../comets/comet-manifest.ts'
@@ -31,11 +32,14 @@ export type StylesheetRef = string | { href: string; media?: string }
  * already uses — see `comet-manifest.ts`), is that comet's OWN CSS (its `.module.css` imports,
  * correlated at build time via each comet's own forced chunk — see `cssPlugin`'s own doc for how).
  * Deliberately NOT flattened into `global`: a comet's CSS must only ever reach the client when that
- * comet is actually used on the current page (`getCometCssHrefs`), never unconditionally on every
- * page — the fix for a real, confirmed bug where it used to. */
+ * comet is actually used on the current page (`getCometCssHrefs`) — bundling it into `global`
+ * instead would ship every comet's styles to every page, used or not. */
 export interface CssManifest {
+  /** Every app-wide stylesheet, applied to every page. */
   global: StylesheetRef[]
+  /** Per-page stylesheets, keyed by the page's own route. */
   pages?: Record<string, StylesheetRef[]>
+  /** Per-comet stylesheets, keyed by the comet's own `sourceUrl` identity. */
   comets?: Record<string, StylesheetRef[]>
 }
 
@@ -58,7 +62,12 @@ export async function loadCssManifest(path: string): Promise<void> {
     manifest = JSON.parse(await Deno.readTextFile(path))
   } catch (error) {
     if (error instanceof Deno.errors.NotFound) return
-    throw error
+    // Boot-time-only — see `comet-manifest.ts`'s own `loadCometManifest` for why no `code`/
+    // `userMessage` here, matching `WebServerManager`'s `readSslFile` precedent.
+    throw new InternalError(`Failed to load the CSS manifest from "${path}".`, {
+      cause: error,
+      meta: { source: 'zanix', method: 'loadCssManifest', path },
+    })
   }
 }
 
@@ -78,7 +87,7 @@ export function getCssManifest(): CssManifest | undefined {
 
 /**
  * Hard-sets (or clears, via `undefined`) the declared global stylesheet paths, discarding whatever
- * was there before — the one primitive that does NOT compose with a previously-activated app's own
+ * was there before — the one primitive that does NOT compose with an already-activated app's own
  * `globalCss` (see {@linkcode addGlobalCssPaths} for the one `defineSpaceApp()` itself actually
  * calls). Exported for callers that genuinely want an exact, unconditional value — tests resetting
  * state between runs, or an advanced caller replacing the whole list on purpose.

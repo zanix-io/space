@@ -6,24 +6,25 @@ import type { RendererKind } from '../router/active-renderer.ts'
  * The one `createElement` `defineComet` builds its boundary markup with, resolved per active
  * renderer at render time.
  *
- * This registry exists because of a real, shipped defect: `define-comet` used to build that markup
- * with JSX, and this package's `jsxImportSource` is fixed to `'react'` at the `deno.jsonc` level,
- * independent of which renderer an app actually runs. Every element `CometBoundary` produced was
- * therefore React-shaped — including the `<Component />` invocation itself — and
- * `preact-render-to-string` silently discards a React-shaped element (it is not a Preact vnode;
- * the renderer returns `""` without throwing, warning, or ever calling the component). The result
- * under `--renderer=preact` was a Comet that vanished entirely from the response: no marker, no
- * content, and a well-formed 200 hiding it. See `define-comet-preact.test.ts` for the regression
- * suite that now pins this shut.
+ * This registry exists because `defineComet` builds its boundary markup with JSX, and this
+ * package's `jsxImportSource` is fixed to `'react'` at the `deno.jsonc` level, independent of which
+ * renderer an app actually runs. Every element `CometBoundary` produces is therefore React-shaped —
+ * including the `<Component />` invocation itself — and `preact-render-to-string` silently discards
+ * a React-shaped element (it is not a Preact vnode; the renderer returns `""` without throwing,
+ * warning, or ever calling the component). Under `--renderer=preact`, that would make a Comet
+ * vanish entirely from the response: no marker, no content, and a well-formed 200 hiding it.
+ * Resolving `createElement` per active renderer through this registry, instead of a single
+ * statically-imported one, is what keeps that element Preact-shaped under `--renderer=preact` and
+ * React-shaped under `--renderer=react`. See `define-comet-preact.test.ts` for the test coverage of
+ * this behavior.
  *
  * The shape follows this package's existing renderer seams (`page-renderer-registry.ts`,
- * `active-renderer.ts`) rather than inventing a new one — and, since the entry-point split, it
- * follows them completely: there is no eager React default here any more. React's own
- * `createElement` used to be imported statically as the default, which is precisely what made
- * `defineComet` — a renderer-agnostic API at runtime — drag React into every app that imported
- * `@zanix/space`, Preact projects included. Both renderers now register through the same seam,
- * from `@zanix/space/react` and `@zanix/space/preact` respectively (see
- * `router/renderer-runtime.ts`), so the core names neither.
+ * `active-renderer.ts`) rather than inventing a new one. There is no eager React default here:
+ * importing React's own `createElement` statically as the default would make `defineComet` — a
+ * renderer-agnostic API at runtime — drag React into every app that imports `@zanix/space`, Preact
+ * projects included. Both renderers instead register through the same seam, from
+ * `@zanix/space/react` and `@zanix/space/preact` respectively (see `router/renderer-runtime.ts`),
+ * so the core names neither.
  *
  * @module
  */
@@ -70,10 +71,10 @@ export function setCometElementFactory(kind: RendererKind, factory: CometElement
  *
  * @returns The registered factory for `getActiveRenderer()`'s current value.
  * @throws {InternalError} If that renderer's factory was never registered — i.e. a Comet is being
- * rendered without this project's own renderer entry point having been imported. This case used to
- * produce silently empty markup under Preact, which is exactly how the original defect survived a
- * full test suite and an architecture audit; failing loudly here is the point. It now applies
- * symmetrically to both renderers, because neither is this package's implicit default any more.
+ * rendered without this project's own renderer entry point having been imported. Failing loudly
+ * here matters: the alternative is a boundary that silently renders as nothing, with no marker, no
+ * content, and no error to explain why. This check applies symmetrically to both renderers — neither
+ * React nor Preact is this package's implicit default.
  */
 export function getCometElementFactory(): CometElementFactory {
   const renderer = getActiveRenderer()

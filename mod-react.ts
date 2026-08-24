@@ -64,5 +64,8 @@ installReactRuntime()
 
 export { renderToResponse } from 'modules/render/render-to-response.tsx'
 export type { RenderToResponseOptions } from 'modules/render/render-to-response.tsx'
+// `RenderToResponseOptions.devClient`'s own type — same "every type reachable from a public export
+// must itself be public" doc-lint rule `@zanix/space`'s own root `mod.ts` already follows.
+export type { DevClientScriptOptions } from 'modules/dev/dev-client-script.ts'
 export { RequestCacheProvider, useRequestCache } from 'modules/render/request-cache.tsx'
 export type { RequestCache } from 'modules/render/request-cache.tsx'

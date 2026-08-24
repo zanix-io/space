@@ -1,4 +1,4 @@
-import { assert, assertEquals } from '@std/assert'
+import { assert, assertEquals, assertThrows } from '@std/assert'
 import type { GuardContext } from '@zanix/server'
 import { langGuard } from 'modules/middleware/lang-guard.ts'
 
@@ -45,6 +45,9 @@ Deno.test(
 
     assert(headers?.['Set-Cookie']?.includes('X-Znx-Lang=es'))
     assert(headers?.['Set-Cookie']?.includes('SameSite=Lax'))
+    // Regression guard: this cookie used to hand-roll 'Path=/; SameSite=Lax' with no `Secure` —
+    // the only cookie in the whole ecosystem missing it. Now built from `PUBLIC_COOKIE_ATTRIBUTES`.
+    assert(headers?.['Set-Cookie']?.includes('Secure'))
     assertEquals(headers?.['Set-Cookie']?.includes('HttpOnly'), false)
   },
 )
@@ -68,4 +71,10 @@ Deno.test('langGuard: a custom paramName/cookieName is respected', async () => {
   const { headers } = await langGuard({ paramName: 'locale', cookieName: 'X-Znx-Locale' })(ctx)
 
   assert(headers?.['Set-Cookie']?.includes('X-Znx-Locale=fr'))
+})
+
+// See `csrf-guard.test.ts`'s identical comment for why `.code`, not `instanceof`, is asserted.
+Deno.test('langGuard: a cookieName missing the X-Znx- prefix throws at construction', () => {
+  const error = assertThrows(() => langGuard({ cookieName: 'locale' })) as { code?: string }
+  assertEquals(error.code, 'UTILS_COOKIES_INVALID_PREFIX')
 })

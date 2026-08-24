@@ -117,6 +117,47 @@ Deno.test(
   },
 )
 
+/**
+ * Regression coverage for a confirmed raw-native-error leak: `registerFileRoute` used to rethrow
+ * any non-`NotFound` `Deno.errors.*` completely unwrapped — whose `.message` routinely embeds the
+ * real, absolute `filePath` on disk (confirmed via a real repro: `Deno.readFile()` on a directory
+ * throws `Is a directory (os error 21): readfile '<the real path>'`). `@zanix/server`'s own
+ * `getPublicErrorResponse` allowlists `message` by default, so that raw path used to reach any
+ * real HTTP client hitting this route. Fixed by wrapping into `InternalError` — this proves the
+ * response actually carries the new, safe `code` and never the real filesystem path, not just
+ * that "some error" is thrown.
+ */
+Deno.test(
+  'registerPwa: a non-NotFound native read failure on a served file responds 500 with the wrapped code, never the raw filesystem path',
+  async () => {
+    const root = await Deno.makeTempDir({ dir: TMP_ROOT })
+    try {
+      // A directory where the icon file is expected — a real, deterministic, cross-platform way
+      // to trigger `Deno.errors.IsADirectory` (never `NotFound`, which already 404s correctly).
+      await Deno.mkdir(`${root}/icons/icon-192.png`, { recursive: true })
+      setPwaBuildOutput(root)
+
+      registerPwa({ name: 'Broken Icon App', icon: './icon-source.png', iconSizes: [192] })
+
+      const servers = await bootstrapServers({ ssr: { port: 20904 } })
+      try {
+        const res = await fetch(`http://localhost:20904${iconRoute(192)}`)
+        assertEquals(res.status, 500)
+        const body = await res.json()
+        assertEquals(body.code, 'SPACE_PWA_FILE_READ_FAILED')
+        // The real absolute path (`root`, part of a Deno temp dir) must never appear in what the
+        // client receives — only in `meta`/`cause`, neither of which is exposed by default.
+        assertEquals(JSON.stringify(body).includes(root), false)
+      } finally {
+        await webServerManager.stop(servers)
+      }
+    } finally {
+      setPwaBuildOutput(undefined)
+      await Deno.remove(root, { recursive: true })
+    }
+  },
+)
+
 Deno.test(
   'registerPwa: with no build output registered at all, neither icon nor sw.js routes exist',
   async () => {

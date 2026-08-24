@@ -8,8 +8,15 @@ import { setExtendedSerialization } from 'modules/render/serialization-registry.
 import { registerPwa, setPwaConfig } from 'modules/pwa/mod.ts'
 import { addGlobalCssPaths } from 'modules/render/css-manifest.ts'
 import { scanAssets } from 'modules/assets/scan-assets.ts'
-import { setAssetsDirConfig, setResolvedAssets } from 'modules/assets/asset-registry.ts'
+import {
+  setAssetsDirConfig,
+  setMediaConfig,
+  setOptimizeConfig,
+  setResolvedAssets,
+} from 'modules/assets/asset-registry.ts'
 import { registerAssets } from 'modules/assets/register-assets.ts'
+import { createAssetsController } from 'modules/assets-api/controllers/assets.controller.ts'
+import { createLogApiController } from 'modules/log-api/controllers/log.controller.ts'
 import { setMessagesDir } from 'modules/i18n/messages-registry.ts'
 import { registerSitemap } from 'modules/seo/sitemap.ts'
 import { registerRobots } from 'modules/seo/robots.ts'
@@ -87,6 +94,10 @@ export function defineSpaceApp(config: SpaceAppConfig): ZanixAppDefinition {
     renderer,
     serialization,
     validation,
+    optimize,
+    media,
+    assetsApi,
+    logApi,
     setup,
   } = config
 
@@ -117,6 +128,13 @@ export function defineSpaceApp(config: SpaceAppConfig): ZanixAppDefinition {
   // `setResolvedAssets`/`registerAssets` inside `setup()` below — those still only run there, since
   // scanning the directory is real, async filesystem work with no reason to run twice.
   if (assetsDir !== undefined) setAssetsDirConfig(assetsDir)
+  // Eager, same timing/reasoning as `assetsDir` immediately above — this is the config half of
+  // the SAME feature (`assetsPlugin({ assetsDir, optimize })`), read back by `buildSpaceClient()`
+  // via `getOptimizeConfig()`, without needing `activateApps()` to have run either.
+  if (optimize !== undefined) setOptimizeConfig(optimize)
+  // Eager, same timing/reasoning as `optimize` immediately above — the config half of
+  // `mediaPlugin`'s own feature, read back by `buildSpaceClient()` via `getMediaConfig()`.
+  if (media !== undefined) setMediaConfig(media)
   // Eager, same reasoning as `renderer`/`assetsDir` above: `zanix space build` imports this module
   // to learn what the app declared and never calls `activateApps()`, so a value only readable from
   // inside `setup()` would be invisible to the very command that needs it.
@@ -195,6 +213,33 @@ export function defineSpaceApp(config: SpaceAppConfig): ZanixAppDefinition {
       // own `Sitemap:` auto-append (`buildRobotsTxt`'s own doc) reflects this app's real state.
       if (sitemap !== undefined) registerSitemap(sitemap)
       if (robots !== undefined) registerRobots(robots, sitemap !== undefined)
+      // Same "route registration only works inside this composition scope" reasoning as
+      // `pwa`/`assetsDir`/`sitemap`/`robots` above. `createAssetsController` itself IS the
+      // registration (its `@Controller`/`@Post`/`@Get` decorators apply the moment it's called) —
+      // nothing further to do with its return value, same as `registerAssets()`'s own
+      // fire-and-forget shape. `assetsApi.service` was built entirely outside this package (see
+      // `SpaceAppConfig.assetsApi`'s own doc) — this line only activates HTTP routes over it.
+      if (assetsApi !== undefined) createAssetsController(assetsApi)
+      // Always on, unlike `assetsApi` immediately above — this is core observability plumbing
+      // (the backend half of `modules/client/client-logger.ts`'s browser relay), not an optional
+      // feature an app opts into. There is no infrastructure to compose (unlike `assetsApi`'s own
+      // `service`, this route only ever calls the already-configured `@zanix/logger` default
+      // instance), so there's no real "off" state worth offering — every `@zanix/space` app's
+      // client bundle already imports a Comet-hydration module that logs through the shared
+      // client logger (see that module's own doc), so `POST /api/log` needs to exist for every
+      // app the same way its own routes/PWA icons do. `logApi` (unlike `assetsApi`) is never
+      // `undefined`-checked here — `createLogApiController` itself defaults a missing/undefined
+      // `logApi` to `{}`, which still registers its own mandatory default `rateLimitGuard`; there
+      // is no "no config passed" state that means "no guard at all" for this endpoint.
+      //
+      // Registered exactly once per real Application, same as `createAssetsController` above — a
+      // genuine second registration under the SAME application id is a real bug (two apps
+      // colliding, or a caller re-running `setup()` on purpose) and must surface as the same
+      // "duplicate route" `InternalError` `createAssetsController` would give, not be swallowed.
+      // A test that needs to call `setup()` more than once gives each call its own
+      // `ProgramModule.defineApplication(...)` scope (see `define-space-app.test.tsx`) instead of
+      // relying on this line to tolerate a shared one.
+      createLogApiController(logApi)
       await setup?.(ctx)
     },
   })

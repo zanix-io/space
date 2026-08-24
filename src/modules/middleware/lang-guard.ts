@@ -1,4 +1,5 @@
 import type { GuardContext, MiddlewareGuard } from '@zanix/server'
+import { assertZnxCookieName, PUBLIC_COOKIE_ATTRIBUTES } from '@zanix/helpers'
 
 /** Options for {@linkcode langGuard}. */
 export type LangGuardOptions = {
@@ -7,7 +8,8 @@ export type LangGuardOptions = {
   paramName?: string
   /** Name of the cookie kept in sync with the matched route's language. **Must be the same
    * `cookieName` passed to `langPreHandler`** — this guard only ever reads/writes it, it never
-   * resolves a language on its own. @default 'X-Znx-Lang' */
+   * resolves a language on its own. **Must start with `X-Znx-`**, enforced at construction via
+   * `@zanix/utils`'s `assertZnxCookieName` (throws `ApplicationError`). @default 'X-Znx-Lang' */
   cookieName?: string
 }
 
@@ -42,6 +44,7 @@ export type LangGuardOptions = {
 export function langGuard(options: LangGuardOptions = {}): MiddlewareGuard {
   const paramName = options.paramName ?? 'lang'
   const cookieName = options.cookieName ?? 'X-Znx-Lang'
+  assertZnxCookieName(cookieName, 'langGuard')
 
   return (ctx: GuardContext) => {
     const params = ctx.payload.params as Record<string, string> | undefined
@@ -50,7 +53,7 @@ export function langGuard(options: LangGuardOptions = {}): MiddlewareGuard {
 
     return {
       headers: {
-        'Set-Cookie': `${cookieName}=${current}; Path=/; SameSite=Lax`,
+        'Set-Cookie': `${cookieName}=${current}; ${PUBLIC_COOKIE_ATTRIBUTES}`,
       },
     }
   }

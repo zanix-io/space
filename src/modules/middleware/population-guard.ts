@@ -1,4 +1,5 @@
 import type { GuardContext, MiddlewareGuard } from '@zanix/server'
+import { assertZnxCookieName, PUBLIC_COOKIE_ATTRIBUTES } from '@zanix/helpers'
 
 /** The `ctx.locals` key {@linkcode populationGuard} stashes the resolved population id under —
  * `SpacePageController` reads this back into `PageContext.population` automatically. */
@@ -11,12 +12,14 @@ export type PopulationGuardOptions = {
   /**
    * Name of the cookie the resolved population persists to, so a later visit with neither the
    * route param nor the query string still gets the right population from the very first SSR
-   * response. **Must start with `X-Znx-`** — `@zanix/server`'s own `cookiesGuard` populates
-   * `ctx.cookies` with only cookies matching that prefix, filtering everything else out before any
-   * guard (this one included) ever runs; a cookie name outside that prefix would silently never be
-   * visible to `ctx.cookies`, no matter what's actually on the wire. Deliberately NOT `HttpOnly`,
-   * unlike `csrfGuard`'s own cookie — client-side code is expected to read this one too (e.g. to
-   * lazily re-fetch population-specific content after hydration without a full navigation).
+   * response. **Must start with `X-Znx-`**, enforced at construction via `@zanix/utils`'s
+   * `assertZnxCookieName` (throws `ApplicationError`) — `@zanix/server`'s own `cookiesGuard`
+   * populates `ctx.cookies` with only cookies matching that prefix, filtering everything else out
+   * before any guard (this one included) ever runs; a cookie name outside that prefix would
+   * silently never be visible to `ctx.cookies`, no matter what's actually on the wire. Deliberately
+   * NOT `HttpOnly`, unlike `csrfGuard`'s own cookie — client-side code is expected to read this one
+   * too (e.g. to lazily re-fetch population-specific content after hydration without a full
+   * navigation).
    * @default 'X-Znx-Population'
    */
   cookieName?: string
@@ -29,8 +32,7 @@ export type PopulationGuardOptions = {
  * automatically into `PageContext.population`, so a page's `loader` can use it to pick the right
  * content override.
  *
- * Read on the server, unlike the legacy component this replaces (whose cookie fallback only ever
- * ran client-side): `@zanix/space` is SSR-first specifically to avoid a client-side-only
+ * Resolved on the server: `@zanix/space` is SSR-first specifically to avoid a client-side-only
  * personalization step causing a flash of the wrong content after hydration, so leaving population
  * resolution to the client would defeat the entire point of persisting it in a cookie at all. This
  * does mean a population-aware page's SSR response varies per visitor cookie — if a shared HTTP
@@ -38,9 +40,8 @@ export type PopulationGuardOptions = {
  * `@zanix/space` itself assumes a shared cache exists today.
  *
  * When the resolved value came from the route param or query string and doesn't already match the
- * cookie, the response also sets that cookie (`Set-Cookie`) — closing a gap the legacy version of
- * this left open (there, nothing in that repo ever wrote the cookie its own read side depended on;
- * confirmed by inspection, not assumed).
+ * cookie, the response also sets that cookie (`Set-Cookie`), so a later visit with neither the
+ * route param nor the query string still resolves to the same population from the cookie alone.
  *
  * Purely additive — never rejects a request, unlike `csrfGuard`. Not applied by default by
  * `Page()`; opt in via `@Guard(populationGuard())` on a page, or `defineMiddleware([populationGuard()])`
@@ -54,6 +55,7 @@ export type PopulationGuardOptions = {
 export function populationGuard(options: PopulationGuardOptions = {}): MiddlewareGuard {
   const paramName = options.paramName ?? 'population'
   const cookieName = options.cookieName ?? 'X-Znx-Population'
+  assertZnxCookieName(cookieName, 'populationGuard')
 
   return (ctx: GuardContext) => {
     const params = ctx.payload.params as Record<string, string> | undefined
@@ -71,7 +73,7 @@ export function populationGuard(options: PopulationGuardOptions = {}): Middlewar
 
     return {
       headers: {
-        'Set-Cookie': `${cookieName}=${resolved}; Path=/; SameSite=Lax`,
+        'Set-Cookie': `${cookieName}=${resolved}; ${PUBLIC_COOKIE_ATTRIBUTES}`,
       },
     }
   }

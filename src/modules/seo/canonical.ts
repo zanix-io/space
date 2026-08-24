@@ -12,16 +12,13 @@ export type BuildCanonicalLinkOptions = {
 }
 
 /**
- * Builds a `<link rel="canonical">` tag for the current page — genuinely new, not a port: the
- * legacy component this replaces had no canonical-link mechanism at all (confirmed by reading its
- * source, not assumed — grepped the entire repo for "canonical", zero matches outside unrelated
- * route-naming comments).
+ * Builds a `<link rel="canonical">` tag for the current page.
  *
  * Strips the query string by default (`keepParams` opts specific params back in) and always uses
- * `url.origin` — never a separately-configured/env-sourced domain, unlike common legacy patterns
- * that read a `SITE_DOMAIN` env var independently at every call site (fragile: unset/misconfigured
- * in one spot but not another silently drifts). `ctx.url` already carries the real request origin,
- * so there's nothing else to configure.
+ * `url.origin` — never a separately-configured/env-sourced domain. Reading a `SITE_DOMAIN`-style
+ * env var independently at every call site is fragile: unset/misconfigured in one spot but not
+ * another silently drifts. `ctx.url` already carries the real request origin, so there's nothing
+ * else to configure.
  *
  * Pure — no React/Preact dependency. Called from `loader` (which receives `ctx.url`), same reason
  * `buildHreflangLinks` is — `SpacePageController.head`'s own function form only ever receives

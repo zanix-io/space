@@ -39,8 +39,8 @@ export function RequestCacheProvider(
  * exists to solve one specific problem: several components, anywhere in the tree, independently
  * wanting the same in-flight request without re-triggering it — a problem `use()`/`Suspense`
  * creates by letting a component suspend mid-render in the first place. Preact core has no
- * `use()`/`Suspense` (this package's own decision spike, confirmed independently by
- * `load-routes.ts`'s own `loading.tsx` rejection under `--renderer=preact`), so no Preact
+ * `use()`/`Suspense` — the same reason `load-routes.ts` rejects `loading.tsx` under
+ * `--renderer=preact` — so no Preact
  * component can ever suspend — or do ANY async work — mid-render; every prop it receives must
  * already be a resolved, synchronous value by the time `preact-render-to-string` reaches it. That
  * removes the precondition for this problem to occur at all under Preact, not just the mechanism
@@ -72,11 +72,11 @@ export function RequestCacheProvider(
 export function useRequestCache<T>(key: string, fetcher: () => Promise<T>): T {
   // Checked BEFORE `useContext` below, not after — `useContext` is a real React hook; calling it
   // during a Preact render (no React render in progress at all) doesn't fail with a message this
-  // package controls, it fails with React's own generic "Invalid hook call" (confirmed via a real,
-  // disposable spike: `TypeError: Cannot read properties of null (reading 'useContext')`, pointing
-  // at React's own troubleshooting docs, not this framework's). This is the one deliberate,
+  // package controls, it fails with React's own generic "Invalid hook call"
+  // (`TypeError: Cannot read properties of null (reading 'useContext')`, pointing at React's own
+  // troubleshooting docs, not this framework's). This is the one deliberate,
   // isolated exception to keeping renderer checks out of shared code — `useRequestCache` is
-  // inherently React-only by contract (this package's own decision spike, §8.1), not a capability
+  // inherently React-only by contract, not a capability
   // that could work for Preact with more effort, so this is a boundary check on that contract, not
   // a behavior branch inside otherwise-shared rendering logic (nothing else in this file, or
   // called from it, is renderer-aware).
@@ -85,7 +85,7 @@ export function useRequestCache<T>(key: string, fetcher: () => Promise<T>): T {
       'useRequestCache() is not available under --renderer=preact: Preact core has no ' +
         'Suspense/use(), so there is no way to suspend this render for the requested data. ' +
         "Resolve it inside this page's loader and pass it down as a prop instead.",
-      { meta: { key } },
+      { code: 'SPACE_RENDER_REQUEST_CACHE_UNAVAILABLE_PREACT', meta: { key } },
     )
   }
 
@@ -93,6 +93,7 @@ export function useRequestCache<T>(key: string, fetcher: () => Promise<T>): T {
   if (!cache) {
     throw new InternalError(
       'useRequestCache() was called outside a tree rendered by renderToResponse()',
+      { code: 'SPACE_RENDER_REQUEST_CACHE_OUTSIDE_TREE' },
     )
   }
 

@@ -183,17 +183,25 @@ Deno.test(
     const reactTree = ReactLayout({
       children: reactElement('span', null, 'react-child'),
       params: { id: '1' },
+      data: undefined,
     })
     const preactTree = PreactLayout({
       children: preactElement('span', null, 'preact-child'),
       params: { id: '1' },
+      data: undefined,
     })
     assertEquals(typeof reactTree, 'object')
     assertEquals(typeof preactTree, 'object')
 
-    // The renderer-bound forms still work — what this package's own boundaries use.
-    const reactBound: LayoutProps<ReactNode> = { children: reactTree, params: {} }
-    const preactBound: LayoutProps<ComponentChildren> = { children: preactTree, params: {} }
+    // The renderer-bound forms still work — what this package's own boundaries use. `data` is
+    // always a present key, never an absent prop, exactly like a real layout with no `loader`
+    // receives at runtime (see `LayoutProps.data`'s own doc, `typings/page.ts`).
+    const reactBound: LayoutProps<ReactNode> = { children: reactTree, params: {}, data: undefined }
+    const preactBound: LayoutProps<ComponentChildren> = {
+      children: preactTree,
+      params: {},
+      data: undefined,
+    }
     assertEquals(reactBound.params, {})
     assertEquals(preactBound.params, {})
   },

@@ -160,4 +160,4 @@ The two real exemptions need nothing declared on the page:
 ## See also
 
 - [`docs/theming.md`](./theming.md) — design tokens and per-request theme resolution.
-- [`docs/see-more.md`](./see-more.md) — additional notes.
+- [`docs/seo.md`](./seo.md) — canonical links, hreflang alternates, `robots.txt`/`sitemap.xml`.

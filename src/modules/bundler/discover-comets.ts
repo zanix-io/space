@@ -1,4 +1,5 @@
 import { join } from '@std/path'
+import { InternalError } from '@zanix/errors'
 import { USE_COMET_DIRECTIVE } from './comet-directive.ts'
 
 const IGNORED_DIR_NAMES = new Set([
@@ -41,7 +42,13 @@ export async function discoverComets(root: string): Promise<string[]> {
       for await (const entry of Deno.readDir(dir)) entries.push(entry)
     } catch (error) {
       if (error instanceof Deno.errors.NotFound) return
-      throw error
+      // Build-time-only (never runs per-request) — see `comet-manifest.ts`'s own
+      // `loadCometManifest` for why no `code`/`userMessage` here, matching `WebServerManager`'s
+      // `readSslFile` precedent.
+      throw new InternalError(`Failed to scan directory "${dir}" for comets.`, {
+        cause: error,
+        meta: { source: 'zanix', method: 'discoverComets', dir },
+      })
     }
 
     await Promise.all(entries.map(async (entry) => {

@@ -1,7 +1,8 @@
-import { assertEquals } from '@std/assert'
+import { assertEquals, assertRejects } from '@std/assert'
 import { dirname, join } from '@std/path'
 import logger from '@zanix/logger'
 import { getTemporaryFolder } from '@zanix/helpers'
+import { InternalError } from '@zanix/errors'
 import { setDevClientEnabled } from 'modules/dev/dev-client-registry.ts'
 import { loadMessages, resetMessagesCache } from 'modules/i18n/load-messages.ts'
 import { resetMessagesDir, setMessagesDir } from 'modules/i18n/messages-registry.ts'
@@ -390,6 +391,41 @@ Deno.test(
       // The override (still a raw ICU string) wins over the compiled base — ordinary shallow-merge
       // precedence, exactly as if both were plain strings.
       assertEquals(messages, { greet: 'Hello, {name}!' })
+    } finally {
+      await cleanup(dir)
+    }
+  },
+)
+
+/**
+ * Regression coverage for a confirmed raw-native-error leak: `readJsonObject` used to rethrow any
+ * non-`NotFound` `Deno.errors.*` completely unwrapped — whose `.message` routinely embeds the
+ * real, absolute on-disk path (confirmed via a real repro: `Deno.readTextFile()` on a directory
+ * throws `Is a directory (os error 21): readfile '<the real path>'`). `loadMessages()` is called
+ * from a page's own `loader`, so an unwrapped native error thrown here is caught by
+ * `@zanix/server`'s `routerInterceptor` and turned straight into an HTTP error response via
+ * `getPublicErrorResponse`, which allowlists `message` by default — never reaching `error.tsx`'s
+ * fallback (that boundary only catches RENDER errors, not a `loader` throw). Fixed by wrapping
+ * into `InternalError` — this proves the specific class + `code`, not a generic `Error`/message
+ * substring.
+ */
+Deno.test(
+  'loadMessages: a non-NotFound native read failure is wrapped into InternalError, never rethrown raw',
+  async () => {
+    reset()
+    const dir = await Deno.makeTempDir({ dir: TMP_ROOT })
+    try {
+      // A directory where the base catalog file is expected — a real, deterministic,
+      // cross-platform way to trigger `Deno.errors.IsADirectory` (never `NotFound`).
+      await Deno.mkdir(join(dir, 'en', 'index.json'), { recursive: true })
+      setMessagesDir(dir)
+
+      const error = await assertRejects(
+        () => loadMessages({ lang: 'en' }),
+        InternalError,
+      )
+      assertEquals(error.code, 'SPACE_I18N_MESSAGES_READ_FAILED')
+      assertEquals(error.cause instanceof Deno.errors.IsADirectory, true)
     } finally {
       await cleanup(dir)
     }

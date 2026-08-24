@@ -46,6 +46,8 @@ export {
   viewportBlocksZoom,
 } from './validate-html.ts'
 export type { RenderedPageInput } from './validate-html.ts'
+export type { DocumentSemantics } from '../render/document-model.ts'
+export type { ResolvedHead } from '../router/head-descriptor.ts'
 export { formatDiagnostic, formatDiagnostics } from './format.ts'
 export type { FormatOptions } from './format.ts'
 export {

@@ -3,13 +3,13 @@
  * is, and what a component is — stated structurally, so that neither `--renderer=react` nor
  * `--renderer=preact` is the one this package's shared types are written against.
  *
- * **Why this module exists.** `LayoutProps` used to default its `children` to React's `ReactNode`,
- * and `SpacePageController` used to default its `component` to React's `ComponentType<any>`. Both
- * were deliberate ergonomic choices at the time (a React app never had to know the type parameter
- * existed), and both had the same architectural cost: the DEFAULT meaning of a shared, conceptually
- * renderer-agnostic type was one specific renderer's, so `--renderer=preact` was expressible only
- * by opting out of the default, and `typings/page.ts` — a module about pages, not about React —
- * imported React.
+ * **Why this module exists.** A shared, conceptually renderer-agnostic type whose default points
+ * at one specific renderer's own type carries a real architectural cost: the DEFAULT meaning of
+ * the shared type becomes that one renderer's, so `--renderer=preact` is expressible only by
+ * opting out of the default, and a module about pages, not about React (`typings/page.ts`), ends
+ * up importing React just to state it. `LayoutProps`'s `children` and `SpacePageController`'s
+ * `component` avoid that entirely by defaulting to this module's own renderer-neutral types
+ * instead of to React's `ReactNode`/`ComponentType<any>`.
  *
  * **What makes these types renderer-agnostic rather than merely React-free.** They are not `any`,
  * not `unknown`, and not a union of both renderers' types (which would put both renderers into
@@ -110,10 +110,10 @@ export type SpaceChildren =
  * This is the shared concept behind `SpacePageController`'s own `component`, a `layout.tsx`'s
  * default export and a Comet's wrapped component (see {@linkcode CometComponent}, which is this
  * type under its Comet-facing name). React's `ComponentType` and Preact's are nominally
- * incompatible — a value of one is not assignable to the other (confirmed empirically, and the
- * reason `PageRenderer`/`app-shell-registry.ts` hold components as `unknown` at the registry
- * seam) — but both satisfy this structure, and this structure is assignable back to either, so it
- * needs no cast in either direction.
+ * incompatible — a value of one is not assignable to the other (which is why
+ * `PageRenderer`/`app-shell-registry.ts` hold components as `unknown` at the registry seam) — but
+ * both satisfy this structure, and this structure is assignable back to either, so it needs no
+ * cast in either direction.
  *
  * **What it checks**: that the value is callable or constructible, and — when `P` is named — that
  * it accepts those props. `component = 42`, `component = { render() {} }` and a component whose

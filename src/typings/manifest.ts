@@ -24,6 +24,10 @@ import type { ThemeResolver } from 'modules/theme/theme-registry.ts'
 import type { StylesheetRef } from 'modules/render/css-manifest.ts'
 import type { PwaConfig } from './pwa.ts'
 import type { ValidationConfig } from 'modules/validation/engine.ts'
+import type { AssetsOptimizeOptions } from 'modules/bundler/assets-plugin.ts'
+import type { MediaOptimizeOptions } from 'modules/bundler/media-plugin.ts'
+import type { AssetsControllerOptions } from 'modules/assets-api/controllers/assets.controller.ts'
+import type { LogApiControllerOptions } from 'modules/log-api/controllers/log.controller.ts'
 
 // Re-exported (not just imported) because `SpaceAppConfig.setup` below references
 // `AppSetupContext`, which extends `RuntimeContext`, which in turn holds a `ConfigAccessor` —
@@ -117,6 +121,53 @@ export interface SpaceAppConfig {
    * different `Map` entries if both genuinely exist on disk, exactly as a real filesystem would.
    */
   assetsDir?: string | string[]
+  /**
+   * Opt-in `assetsPlugin({ optimize })` policy for whatever `assetsDir` above resolves —
+   * responsive breakpoints/alternate formats for raster images, `.svg` minification, and a
+   * cross-build transform cache (`cacheDir`), exactly the same `AssetsOptimizeOptions` shape a
+   * hand-written `vite.config.ts` calling `assetsPlugin` directly already accepts (see that
+   * function's own doc for the full contract — this field changes nothing about WHAT it does,
+   * only WHERE the decision to enable it is declared).
+   *
+   * **Omitted entirely by default — no optimization runs, `assetsPlugin`'s own pre-existing
+   * hash-and-emit behavior stays completely unchanged**, same convention as `assetsDir` itself:
+   * declaring `optimize` without also declaring `assetsDir` does nothing (there is nothing to
+   * optimize), and `assetsPlugin` is never even added to the build's own plugin list unless
+   * `assetsDir` resolves to something.
+   *
+   * Stored eagerly, same timing as `assetsDir` (see `defineSpaceApp`'s own doc) — `zanix space
+   * build` reads it back via `getOptimizeConfig()` without needing `activateApps()` to have run,
+   * the same real gap `assetsDir` itself already needed fixing for.
+   *
+   * A build script that calls `assetsPlugin` directly (never through `defineSpaceApp`/
+   * `buildSpaceClient` at all) is entirely unaffected by this field — it keeps passing its own
+   * `optimize` object straight to `assetsPlugin`, exactly as before.
+   */
+  optimize?: AssetsOptimizeOptions
+  /**
+   * Opt-in `mediaPlugin({ optimize })` policy for whatever `assetsDir` above resolves — video
+   * breakpoint/format variants and thumbnail extraction, exactly the same `MediaOptimizeOptions`
+   * shape a hand-written `vite.config.ts` calling `mediaPlugin` directly already accepts (see that
+   * function's own doc for the full contract).
+   *
+   * A deliberate SIBLING to `optimize` above, never folded into it — `assetsPlugin`/`mediaPlugin`
+   * are two independent plugins sharing one manifest (see `AssetManifestRegistry`'s own doc), so
+   * their own config surfaces stay independent too.
+   *
+   * **Omitted entirely by default — `mediaPlugin` never even runs, at zero cost** — same
+   * convention `optimize`/`assetsDir` themselves already establish: declaring `media` without also
+   * declaring `assetsDir` does nothing (there's nothing to scan), and a project with no video
+   * assets at all pays nothing either way.
+   *
+   * Stored eagerly, same timing as `assetsDir`/`optimize` (see `defineSpaceApp`'s own doc) —
+   * `zanix space build` reads it back via `getMediaConfig()` without needing `activateApps()` to
+   * have run.
+   *
+   * A build script that calls `mediaPlugin` directly (never through `defineSpaceApp`/
+   * `buildSpaceClient` at all) is entirely unaffected by this field — it keeps passing its own
+   * `optimize` object straight to `mediaPlugin`, exactly as before.
+   */
+  media?: MediaOptimizeOptions
   /**
    * Root directory (or directories) of i18n message catalogs this app resolves via `loadMessages()`
    * — e.g. `messagesDir: './messages'` with `./messages/en/index.json` resolves `loadMessages({
@@ -255,8 +306,8 @@ export interface SpaceAppConfig {
    */
   serialization?: { extendedTypes?: boolean }
   /**
-   * PWA support — the Web App Manifest, icon routes, and (when `swPath` is set) a generated
-   * service worker, all registered as part of this app's own `setup(ctx)`, same timing as
+   * PWA support — the Web App Manifest, icon routes, and (once `loadPwaBuildOutput` has run) a
+   * generated service worker, all registered as part of this app's own `setup(ctx)`, same timing as
    * `loadRoutes()`. Unlike CSS's build-only config, this genuinely drives runtime behavior (the
    * routes themselves, and the `<link rel="manifest">`/theme-color `<meta>`/service-worker
    * registration script every full-document response gets) — see `PwaConfig`'s own doc for why
@@ -265,35 +316,98 @@ export interface SpaceAppConfig {
   pwa?: PwaConfig | false
   /**
    * `sitemap.xml`, registered as a real route (`GET /sitemap.xml`), not a build-time static file —
-   * a genuine departure from the legacy component this replaces (a Node CLI generator writing a
-   * static file to disk, see `modules/seo/sitemap.ts`'s own doc), chosen specifically so this stays
-   * SSR-native/edge-friendly, no build step required. A plain array is resolved once, at zero
-   * per-request cost; a function runs fresh on EVERY request instead, so it always reflects
-   * whatever's actually live (a product catalog, a CMS) — an app that wants its own caching owns
-   * that itself, this package doesn't impose one. **Omitted entirely by default — no route
+   * this stays SSR-native/edge-friendly, with no build step required. A plain array is resolved
+   * once, at zero per-request cost; a function runs fresh on EVERY request instead, so it always
+   * reflects whatever's actually live (a product catalog, a CMS) — an app that wants its own caching
+   * owns that itself, this package doesn't impose one. **Omitted entirely by default — no route
    * registered, at zero cost**, same convention as `assetsDir`/`messagesDir`. See
-   * `buildSitemapXml`'s own doc (`modules/seo/sitemap.ts`) for the exact XML contract and the real
-   * bugs this fixes over the legacy version (unescaped XML, non-standard tags mixed into the
-   * `urlset`, broken per-language cross-referencing).
+   * `buildSitemapXml`'s own doc (`modules/seo/sitemap.ts`) for the exact XML contract: proper
+   * escaping, only standard tags in the `urlset`, and correct per-language cross-referencing.
    */
   sitemap?: SitemapSource
   /**
-   * `robots.txt`, registered as a real route (`GET /robots.txt`) — genuinely new, not a port: the
-   * legacy component this replaces had no `robots.txt` mechanism at all (confirmed by reading its
-   * source; every "robots" hit there was its unrelated per-page `<meta name="robots">` tag
-   * convention). A raw `string` is served byte-for-byte, no processing; a structured
-   * `{ rules, includeSitemap? }` config auto-appends a `Sitemap:` line when `sitemap` (above) is
-   * also configured. **Omitted entirely by default — no route registered, at zero cost.** See
-   * `buildRobotsTxt`'s own doc (`modules/seo/robots.ts`).
+   * `robots.txt`, registered as a real route (`GET /robots.txt`). A raw `string` is served
+   * byte-for-byte, no processing; a structured `{ rules, includeSitemap? }` config auto-appends a
+   * `Sitemap:` line when `sitemap` (above) is also configured. **Omitted entirely by default — no
+   * route registered, at zero cost.** See `buildRobotsTxt`'s own doc (`modules/seo/robots.ts`).
    */
   robots?: SpaceRobotsConfig
+  /**
+   * Activates the Asset API (`POST /assets/audio|image|video`, `GET /assets/:id[/status|/download]`)
+   * — registered as a real `ZanixController` (`createAssetsController`, `modules/assets-api/`), as
+   * part of this app's own `setup(ctx)`, same timing as `loadRoutes()`/`registerPwa()`. **Not the
+   * same feature as `assetsDir`/`optimize`/`media` above** — those cover STATIC, build-time,
+   * Vite-bundled files (images/fonts hashed and served from a directory this app ships with); this
+   * is the DYNAMIC upload/transform/store API (`AssetService`), backed by whatever `AssetStorage`/
+   * `AssetRepository` the caller composed — the two are unrelated features that happen to share the
+   * word "asset."
+   *
+   * `service` is the one required field — an already-built `AssetService` (`createAssetService`,
+   * `modules/assets-api/`), composed by the CALLER from real infrastructure. This package never
+   * builds that infrastructure itself: `@zanix/space` has no dependency on `@zanix/datamaster` (or
+   * any other storage/database package) anywhere in its own runtime, and this field doesn't change
+   * that — it only activates HTTP routes over a service object handed to it already assembled. A
+   * real composition (S3-backed storage, a Mongo-backed file registry, key rotation, ...) lives in
+   * the consuming application's own bootstrap, wiring `@zanix/datamaster`'s `S3ObjectStorage`/
+   * `MongoFileRepository` into `createAssetService({ storage, repository })` before ever reaching
+   * this field. `prefix`/`guards` forward as-is to `createAssetsController` — see
+   * `AssetsControllerOptions`'s own doc, in particular why every route denies-by-default until real
+   * `guards` are passed.
+   *
+   * **Omitted entirely by default — no route registered, at zero cost**, same convention every
+   * other opt-in feature in this manifest already follows.
+   *
+   * @example
+   * ```ts
+   * import { createAssetService } from '@zanix/space/assets-api'
+   * // Composed elsewhere, from real infrastructure this package never imports:
+   * // const storage = new S3ObjectStorage({ ... })          // @zanix/datamaster
+   * // const repository = new MongoFileRepository(...)              // @zanix/datamaster (adapted)
+   *
+   * export default defineSpaceApp({
+   *   name: 'storefront',
+   *   assetsApi: {
+   *     service: createAssetService({ storage, repository }),
+   *     guards: { write: [authGuard], read: [authGuard] },
+   *   },
+   * })
+   * ```
+   */
+  assetsApi?: AssetsControllerOptions
+  /**
+   * Extra configuration for the ALWAYS-ON Log API (`POST /api/log`, `modules/log-api/`) — unlike
+   * `assetsApi` above, this isn't an opt-in feature (there's no "off" state; every `@zanix/space`
+   * app registers this route, see `createLogApiController`'s own doc for why), so this field only
+   * ever forwards `guards`/`rateLimit`, two DIFFERENT knobs over the same default guard:
+   * - `guards` — extra guards appended AFTER the default `rateLimitGuard`, never replacing it. See
+   *   `LogApiControllerOptions.guards`'s own doc for the full composition contract (deliberately
+   *   additive-only, unlike `assetsApi.guards` above — it can only tighten, never loosen).
+   * - `rateLimit` — overrides the default guard's own `anonymousLimit`/`windowSeconds`/
+   *   `trustProxyHeader` outright. See `LogApiRateLimitOptions`'s own doc — this is the real
+   *   "change the floor" surface for an app whose traffic profile or deployment topology (whether
+   *   it genuinely sits behind a trusted reverse proxy) differs from the framework's own default.
+   *
+   * **Omitted entirely by default** — the route still registers with just its own default rate
+   * limit, no extra guards.
+   *
+   * @example
+   * ```ts
+   * export default defineSpaceApp({
+   *   name: 'storefront',
+   *   logApi: {
+   *     rateLimit: { anonymousLimit: 60 },
+   *     guards: [myExtraAbuseCheckGuard],
+   *   },
+   * })
+   * ```
+   */
+  logApi?: Pick<LogApiControllerOptions, 'guards' | 'rateLimit'>
   /** Escape hatch for registration that doesn't fit a declarative field yet — forwarded to
    * `defineZanixApp({ setup })`, run AFTER this app's routes have already loaded. */
   setup?: (ctx: AppSetupContext) => void | Promise<void>
   /**
-   * Which renderer this app's pages/Comets are authored against. Defaults to `'react'` — omitting
-   * this field, or passing `'react'` explicitly, are identical in every respect to this package's
-   * behavior before this option existed.
+   * Which renderer this app's pages/Comets are authored against. Defaults to `'react'` — the same
+   * behavior as omitting this field entirely.
    *
    * `'preact'` selects Preact **core** (never `preact/compat`) for the whole app, at both the
    * runtime layer (this field) and the build layer (`spacePlugin({ renderer: 'preact' })`, set
@@ -301,7 +415,7 @@ export interface SpaceAppConfig {
    * has for a build-vs-runtime concern). It is a deliberately smaller, specialized renderer, not a
    * drop-in replacement for `'react'` — a page using `loading.tsx` or `useRequestCache` fails
    * explicitly under it (at route-registration time for the former, at first call for the latter)
-   * rather than silently degrading; see this package's own decision spike for the full contract.
+   * rather than silently degrading: Preact core has no `Suspense`/`use()` to back either capability.
    */
   renderer?: 'react' | 'preact'
   /**

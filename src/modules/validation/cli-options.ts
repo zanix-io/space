@@ -15,6 +15,7 @@
  */
 import type { DiagnosticCategory } from './diagnostic.ts'
 import type { ValidationConfig } from './engine.ts'
+import { InternalError } from '@zanix/errors'
 
 /** The flags, as a command parser hands them over. */
 export type ValidationFlags = {
@@ -71,9 +72,9 @@ const VALID_CATEGORIES: ReadonlySet<string> = new Set<DiagnosticCategory>([
  * 3. `--validation-strict` and `--validation-category` shape the run. Both are meaningless with
  *    validation off, which case 1 already handled.
  *
- * @throws {Error} If `--validation` names an unknown mode, or `--validation-category` names an
- * unknown category. Both fail loudly rather than being ignored: a typo'd category that silently
- * matched nothing would report a clean run over an empty rule set.
+ * @throws {InternalError} If `--validation` names an unknown mode, or `--validation-category`
+ * names an unknown category. Both fail loudly rather than being ignored: a typo'd category that
+ * silently matched nothing would report a clean run over an empty rule set.
  */
 export function resolveValidationFlags(flags: ValidationFlags): ResolvedValidationFlags {
   if (flags.noValidation === true) {
@@ -84,8 +85,9 @@ export function resolveValidationFlags(flags: ValidationFlags): ResolvedValidati
   if (typeof flags.validation === 'string') {
     if (flags.validation === 'render') render = true
     else if (flags.validation !== 'static') {
-      throw new Error(
+      throw new InternalError(
         `Unknown --validation mode '${flags.validation}'. Valid modes: 'static' (default), 'render'.`,
+        { code: 'SPACE_VALIDATION_UNKNOWN_MODE', meta: { mode: flags.validation } },
       )
     }
   }
@@ -100,10 +102,11 @@ export function resolveValidationFlags(flags: ValidationFlags): ResolvedValidati
       .filter((entry) => entry.length > 0)
     const unknown = categories.filter((entry) => !VALID_CATEGORIES.has(entry))
     if (unknown.length > 0) {
-      throw new Error(
+      throw new InternalError(
         `Unknown --validation-category value(s): ${unknown.join(', ')}. Valid categories: ${
           [...VALID_CATEGORIES].join(', ')
         }.`,
+        { code: 'SPACE_VALIDATION_UNKNOWN_CATEGORY', meta: { unknown } },
       )
     }
     config.categories = categories as DiagnosticCategory[]

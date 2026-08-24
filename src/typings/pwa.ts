@@ -2,8 +2,8 @@
  * PWA manifest/config types — a `@zanix/space` app declares these once via `defineSpaceApp({ pwa
  * })`. Unlike CSS's build-only toggles, this genuinely drives runtime behavior (the
  * `manifest.webmanifest`/icon routes `registerPwa` registers, and the `<link rel="manifest">`/
- * theme-color `<meta>` every full-document response gets) — see this package's own design doc
- * for why that split isn't the same as CSS's.
+ * theme-color `<meta>` every full-document response gets), unlike CSS's build-only toggles, which
+ * never affect a response beyond the bytes Vite already emitted at build time.
  *
  * @module
  */

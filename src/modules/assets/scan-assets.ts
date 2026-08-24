@@ -1,4 +1,5 @@
 import { join } from '@std/path'
+import { InternalError } from '@zanix/errors'
 
 /**
  * Walks a SINGLE directory recursively, mapping every file found to its own relative path (POSIX
@@ -19,7 +20,13 @@ async function walkOneAssetsDir(dir: string): Promise<Map<string, string>> {
       for await (const entry of Deno.readDir(currentDir)) entries.push(entry)
     } catch (error) {
       if (error instanceof Deno.errors.NotFound) return
-      throw error
+      // Build/composition-time-only (never runs per-request) — see `comet-manifest.ts`'s own
+      // `loadCometManifest` for why no `code`/`userMessage` here, matching `WebServerManager`'s
+      // `readSslFile` precedent.
+      throw new InternalError(`Failed to scan assets directory "${currentDir}".`, {
+        cause: error,
+        meta: { source: 'zanix', method: 'scanAssets', dir: currentDir },
+      })
     }
 
     // Subdirectories are walked in parallel — each branch is independent, same reasoning

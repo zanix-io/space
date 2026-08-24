@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertFalse } from '@std/assert'
-import logger from '@zanix/logger'
+import logger from 'modules/client/client-logger.ts'
 // Imported through the Preact client barrel (not the module directly) so this test also exercises
 // `mod-preact.ts` — both were entirely invisible in coverage before this file existed, since
 // nothing imported either one. Same renderer-agnostic marker protocol as `hydrate-comets.ts`'s own

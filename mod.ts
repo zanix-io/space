@@ -33,6 +33,45 @@ export type {
   SpaceAppConfig,
 } from 'typings/manifest.ts'
 export type { PwaConfig, PwaShortcut } from 'typings/pwa.ts'
+// Re-exported (type-only — zero runtime cost, confirmed via the same real code-only-edge BFS
+// `assets-api/dependency-boundary.test.ts` uses: root `mod.ts` does NOT code-reach ffmpeg/sharp
+// through this) because `SpaceAppConfig.assetsApi` references `AssetsControllerOptions`, and
+// `AssetsControllerOptions.service` references `AssetService` — same "every type reachable from a
+// public export must itself be public" doc-lint rule this file's own `AppSetupContext`/
+// `ConfigAccessor`/`RuntimeContext` re-export above already exists for.
+export type { AssetsControllerOptions } from 'modules/assets-api/controllers/assets.controller.ts'
+export type { AssetService, CreateAssetCommand } from 'modules/assets-api/asset-service.ts'
+// Same "every type reachable from a public export must itself be public" rule, for
+// `SpaceAppConfig.logApi` — type-only, no code edge into `modules/log-api/` (this module never
+// imports `@zanix/auth`/`@zanix/logger` itself, so this adds none either).
+export type {
+  LogApiControllerOptions,
+  LogApiRateLimitOptions,
+} from 'modules/log-api/controllers/log.controller.ts'
+// Same "every type reachable from a public export must itself be public" rule, for
+// `SpaceAppConfig.optimize`/`SpaceAppConfig.media` below — type-only (`export type`), so this adds
+// no code edge into `modules/bundler/` (verified the same way as `AssetsControllerOptions` above:
+// `deno info --json` shows only a `type` dependency, never a `code` one).
+export type { AssetsOptimizeOptions } from 'modules/bundler/assets-plugin.ts'
+export type { MediaOptimizeOptions } from 'modules/bundler/media-plugin.ts'
+export type {
+  AssetKind,
+  AssetRecord,
+  AssetStatus,
+  AssetTransformRequest,
+  AssetVariant,
+  AssetVariantBase,
+  AudioAssetVariant,
+  ImageAssetVariant,
+  ThumbnailAssetVariant,
+  VideoAssetVariant,
+} from 'modules/assets-api/typings.ts'
+export type { UploadedAsset } from 'modules/assets-api/upload.ts'
+export type {
+  VoiceAudioFormat,
+  VoiceAudioTransformOptions,
+} from 'modules/media/audio/policies/voice.ts'
+export type { VideoBreakpointName } from 'modules/media/video-breakpoints.ts'
 
 export {
   addGlobalCssPaths,
@@ -68,8 +107,10 @@ export type {
   DiagnosticCategory,
   DiagnosticPhase,
   DiagnosticSeverity,
+  DocumentSemantics,
   FormatOptions,
   RenderedPageInput,
+  ResolvedHead,
   ResolvedValidationFlags,
   RuleBasis,
   RuleDefinition,
@@ -83,6 +124,8 @@ export type {
 
 export {
   createNotFoundHandler,
+  getActionFieldError,
+  getActionFieldValue,
   getActiveRenderer,
   getDefaultPageHeaders,
   loadRoutes,
@@ -116,11 +159,15 @@ export type {
   ZanixInteractorClass,
   ZanixInteractorGeneric,
 } from 'modules/router/mod.ts'
+/** Re-exported because `PageOptions.action` (above) references it — see `@zanix/server`'s own
+ * `mod.ts` for the same reasoning applied to its own RTO-based validation options. */
+export type { RtoTypes } from '@zanix/types'
 export type {
   ErrorBoundaryProps,
   LayoutProps,
   PageActionContext,
   PageContext,
+  PageFieldErrors,
   RedirectConfig,
 } from 'typings/page.ts'
 // The renderer-neutral vocabulary `LayoutProps`/`SpacePageController` are now written in — public
@@ -183,6 +230,9 @@ export {
   ZanixWebSocket,
 } from 'modules/dev/mod.ts'
 export type { SocketPrototype } from 'modules/dev/mod.ts'
+// `broadcastSsrModuleChanged`'s own parameter type — same "every type reachable from a public
+// export must itself be public" rule as `AssetsOptimizeOptions`/`MediaOptimizeOptions` above.
+export type { SsrModuleChangedEvent } from 'modules/dev/mod.ts'
 
 export { loadMessages } from 'modules/i18n/load-messages.ts'
 export type { LoadMessagesOptions, Messages } from 'modules/i18n/load-messages.ts'
@@ -216,7 +266,39 @@ export { getThemeResolver, setThemeResolver } from 'modules/theme/mod.ts'
 export type { ThemeResolveContext, ThemeResolver } from 'modules/theme/mod.ts'
 
 export {
+  /** Tells the runtime WHERE `assetsPlugin` wrote the hashed asset files — the client build's own
+   * output directory. Call this, alongside `loadAssetsManifest`, before serving any requests. */
   loadAssetsBuildOutput,
+  /** Loads the manifest `assetsPlugin` writes during a production client build, correlating each
+   * asset's stable path to its real, content-hashed build URL. Call this once, before serving any
+   * requests; a missing file is not an error (dev, or no `assetsDir` declared). */
   loadAssetsManifest,
+  /** Resolves an asset's stable path (`'logo.svg'`) to its real, content-hashed build URL
+   * (`/assets/logo-a1b2c3.svg`) when a manifest was loaded — falls back to the stable, unhashed
+   * path otherwise; never throws. */
   resolveAssetHref,
 } from 'modules/assets/assets-manifest.ts'
+
+export {
+  /** Builds the real provider embed URL (YouTube/Vimeo `iframe src`) for a `'provider'`
+   * `DetectedVideoSource`, applying `autoplay`/`muted`/`loop`/`controls` as that provider's own
+   * query parameters. */
+  buildProviderEmbedUrl,
+  /** Classifies a `src` string into a `DetectedVideoSource` — YouTube/Vimeo with id extraction, a
+   * generic-URL fallback for any other embeddable host, or a file-extension fallback for a
+   * local/CDN video file. Pure, synchronous, never throws. */
+  detectVideoSource,
+} from 'modules/assets/video-source.ts'
+export type {
+  /** The result of classifying a `src` string — a discriminated union on `type`: `'provider'`
+   * (YouTube/Vimeo, id extracted), `'iframe'` (any other embeddable URL), `'file'` (a recognized
+   * video container), or `'unknown'`. */
+  DetectedVideoSource,
+  /** A video provider `@zanix/space` gives first-class embed support to: `'youtube'` or
+   * `'vimeo'`. */
+  VideoProvider,
+  /** `buildProviderEmbedUrl` options for a Vimeo provider source. */
+  VimeoEmbedOptions,
+  /** `buildProviderEmbedUrl` options for a YouTube provider source. */
+  YoutubeEmbedOptions,
+} from 'modules/assets/video-source.ts'

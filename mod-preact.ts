@@ -8,8 +8,8 @@
  * the two agree, failing loudly when a project declares one renderer and imports the other's entry
  * point.
  *
- * Preact CORE, never `preact/compat` — this package's own decision spike. Two capabilities are
- * therefore absent by contract rather than by omission, and both fail loudly rather than silently:
+ * Preact CORE, never `preact/compat`. Two capabilities are therefore absent by contract rather
+ * than by omission, and both fail loudly rather than silently:
  * `loading.tsx` (rejected by `loadRoutes`) and `useRequestCache` (which does not exist on this entry
  * point at all, because Preact core has no `use()`/`Suspense` to suspend a render with — resolve the
  * data in the page's own `loader` instead). Everything else — routing, layouts, Comets, head/SEO/PWA,
@@ -51,3 +51,13 @@ installPreactRuntime()
 
 export { renderToResponse } from 'modules/render/render-to-response-preact.ts'
 export type { RenderToResponsePreactOptions } from 'modules/render/render-to-response-preact.ts'
+// `RenderToResponsePreactOptions.devClient`'s own type — same "every type reachable from a public
+// export must itself be public" doc-lint rule `@zanix/space`'s own root `mod.ts` already follows.
+export type {
+  /** Options for `buildDevClientScript`. */
+  DevClientScriptOptions,
+} from 'modules/dev/dev-client-script.ts'
+// `renderToResponse`'s own `element: VNode<any>` parameter references `preact`'s own `VNode` —
+// not re-exported here, same accepted `deno doc --lint` finding as `spacePlugin`'s/`cometPlugin`'s
+// own `vite`-owned `Plugin`/`PluginOption` (see `bundler/comet-plugin.ts`'s own doc): a third-party
+// renderer type this package doesn't own and has no business re-publishing as its own API surface.

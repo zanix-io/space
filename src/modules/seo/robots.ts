@@ -19,10 +19,8 @@ export type RobotsConfig = {
   includeSitemap?: boolean
 }
 
-/** `defineSpaceApp({ robots })`'s own accepted shape. Genuinely new, not a port — the legacy
- * component this replaces had no `robots.txt` mechanism at all (confirmed by reading its source,
- * not assumed — grepped the entire repo broadly for "robots", every hit was its unrelated
- * per-page `<meta name="robots">` tag convention, never a `robots.txt` file). */
+/** `defineSpaceApp({ robots })`'s own accepted shape — either a raw string or a structured
+ * {@linkcode RobotsConfig}. */
 export type SpaceRobotsConfig = string | RobotsConfig
 
 function buildRuleBlock(rule: RobotsRule): string {

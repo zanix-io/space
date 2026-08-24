@@ -5,11 +5,11 @@ import { getSharedLoader } from './deno-loader.ts'
 import { resolveBareSpecifierCanonically } from './bare-specifier-resolve.ts'
 
 /**
- * Fixes a real, confirmed `zanix space dev` blocker that is entirely separate from
- * {@linkcode RealImportEvaluator}'s own decorator fix (`ssr-module-evaluator.ts`): `react` and
- * `react-dom` are CommonJS at their real npm entry files, and Vite's SSR pipeline never transforms
- * CJS to ESM on its own — reproduced with Vite's own untouched default evaluator too, so this is
- * pre-existing, not a regression this package introduced. Left unfixed, this blocks the one case
+ * Fixes a `zanix space dev` blocker that is entirely separate from {@linkcode RealImportEvaluator}'s
+ * own decorator fix (`ssr-module-evaluator.ts`): `react` and `react-dom` are CommonJS at their real
+ * npm entry files, and Vite's SSR pipeline never transforms CJS to ESM on its own — reproducible
+ * with Vite's own untouched default evaluator too, so this is a pre-existing Vite/CJS gap, not
+ * something this package's own pipeline introduces. Left unfixed, this blocks the one case
  * `zanix space dev` structurally can't avoid: a real JSX + React page.
  *
  * This module owns none of the module graph, resolution/invalidation, or HMR — those stay
@@ -19,9 +19,9 @@ import { resolveBareSpecifierCanonically } from './bare-specifier-resolve.ts'
  * ## Why the CJS subtree is bundled by hand, not routed through Vite's own module graph
  *
  * A relative `require('./foo')` inside a CJS file cannot simply be resolved to an absolute path
- * and left for Vite to load on its own: confirmed empirically that an absolute, already-resolved
- * path is treated by `@deno/vite-plugin`'s own internal routing as "inside project root, already
- * resolved" and read through Vite's native filesystem loader instead of this plugin's own `onLoad`
+ * and left for Vite to load on its own: an absolute, already-resolved path is treated by
+ * `@deno/vite-plugin`'s own internal routing as "inside project root, already resolved" and read
+ * through Vite's native filesystem loader instead of this plugin's own `onLoad`
  * — the sub-file's raw, un-transformed CJS content would reach the evaluator unprocessed. Nor can
  * the sub-request be routed by re-encoding `@deno/vite-plugin`'s own private virtual-id scheme
  * (`\0deno::...#deno`) — that format is undocumented, internal, and not guaranteed stable across
@@ -37,16 +37,16 @@ import { resolveBareSpecifierCanonically } from './bare-specifier-resolve.ts'
  * a module already loaded through the page's own `import 'react'` is reused, never duplicated —
  * PROVIDED both resolve to the same id in the first place, which is
  * {@linkcode bare-specifier-resolve.ts!canonicalBareSpecifierResolvePlugin}'s own job, not this
- * file's (see that file's own doc for the identity bug it fixes and the real spike that validated
- * it).
+ * file's (see that file's own doc for the identity bug it fixes).
  *
  * ## Why every factory function — and the top-level bare-specifier fetch — must stay synchronous
  *
- * An earlier version made every CJS factory `async` so it could `await __cjsRequire__(...)`/
- * `await __vite_ssr_import__(...)` inline. That failed Rolldown's own parser with `` `await` is
- * only allowed within async functions and at the top levels of modules `` — traced to react's own
- * source wrapping its entire dev-mode implementation in a plain, non-async IIFE (`"production" !==
- * process.env.NODE_ENV && (function () { ... var React = require("react") ... })();`). `await`
+ * Every CJS factory function must stay synchronous. Making a factory `async` so it could
+ * `await __cjsRequire__(...)`/`await __vite_ssr_import__(...)` inline fails Rolldown's own parser
+ * with `` `await` is only allowed within async functions and at the top levels of modules `` —
+ * react's own source wraps its entire dev-mode implementation in a plain, non-async IIFE
+ * (`"production" !== process.env.NODE_ENV && (function () { ... var React = require("react") ...
+ * })();`). `await`
  * inside a nested, non-async closure is invalid regardless of how any OUTER function is declared —
  * marking an outer wrapper `async` does not make an inner, separately-declared function awaitable.
  * The fix: every relative-require lookup is fully synchronous (`__cjsRequire__(id)`), since the
@@ -63,16 +63,16 @@ import { resolveBareSpecifierCanonically } from './bare-specifier-resolve.ts'
  * `plugins` — a bare specifier called from inside THIS file's own hand-written bundle text goes
  * through Vite's own module-runner `fetchModule`, which has a fast path (a bare string + a known
  * importer) that resolves it via Vite's plain Node resolution and never consults any plugin's
- * `resolveId` at all (confirmed empirically; see `resolveBareSpecifierCanonically`'s own doc for
- * the full finding). Resolving here first, and handing `__vite_ssr_import__` an already-resolved
+ * `resolveId` at all (see `resolveBareSpecifierCanonically`'s own doc for the full finding).
+ * Resolving here first, and handing `__vite_ssr_import__` an already-resolved
  * absolute path, is what makes it skip that fast path — the same canonical resolution
  * `bare-specifier-resolve.ts`'s `resolveId` hook already applies to a normal import statement.
  *
  * Whatever the CJS module's own bare requires resolve to (a plain CJS `.js`, a real ESM module with
  * no `default` export at all, ...), the fetched value is used as-is — the WHOLE namespace object,
- * never narrowed to `.default` (an earlier version did, which happened to work by accident for a
- * CJS target — its own synthesized `default` equals the whole `exports` object — and silently
- * returned `undefined` for a real ESM dependency with no `default` export; confirmed empirically).
+ * never narrowed to `.default`. Narrowing to `.default` happens to work for a CJS target — its own
+ * synthesized `default` equals the whole `exports` object — but silently returns `undefined` for a
+ * real ESM dependency with no `default` export, so the whole namespace object is kept instead.
  */
 
 const REQUIRE_RE = /require\(\s*(['"])([^'"]+)\1\s*\)/g
@@ -254,7 +254,7 @@ if (!__cjsResultKeys__.includes('default')) {
  * site (`deno({ onLoad: denoOnLoadCjsInterop(options.root) })`) instead. `root` is what makes
  * `wrapCjsIfNeeded`'s own bare-specifier resolution agree with the SAME project's real, on-disk
  * `node_modules` Vite's own SSR fast path resolves against — see `resolveBareSpecifierCanonically`'s
- * own doc for the regression this fixes.
+ * own doc for the module-identity failure this fixes.
  *
  * The returned function is passed as `deno()`'s own `onLoad` option — the primary integration
  * point, run right after `@deno/loader` transpiles a module `@deno/vite-plugin` itself resolved.

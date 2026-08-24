@@ -1,0 +1,98 @@
+import { assert, assertEquals } from '@std/assert'
+import { bootstrapServers, ProgramModule, webServerManager } from '@zanix/server'
+import { createAssetsController } from 'modules/assets-api/controllers/assets.controller.ts'
+import { createAssetService } from 'modules/assets-api/asset-service.ts'
+import { createInMemoryAssetRepository } from 'modules/assets-api/adapters/in-memory-asset-repository.ts'
+import { resolveAssetStorage } from '../../support/resolve-asset-storage.ts'
+import { gradientJpeg } from './image-fixtures.ts'
+
+/**
+ * The never-worsened counterpart to `image-upload-s3.test.ts` — split into its OWN file (not a
+ * second `Deno.test` block in that same file) per the "its own file, one real server boot"
+ * convention `voice-upload-deny.test.ts` already establishes: `deno test` runs each file in its
+ * own isolated worker, so two server boots sharing one process (and one `webServerManager`/port
+ * 8000) never interfere. Confirmed the hard way — a first attempt at putting both cases in one
+ * file produced a real, reproducible `Connection refused` on the second server boot, not a bug in
+ * the product.
+ *
+ * Proves the never-worsened guardrail survives the FULL HTTP+S3 round trip: nothing in this repo
+ * tested that before — `optimizeImageAsset`'s own "no improvement keeps the original bytes
+ * exactly" case was previously only proven directly against the transformer
+ * (`image-optimize.test.ts`), never through `AssetService`/HTTP/S3.
+ */
+const runS3 = Deno.env.get('RUN_S3_TESTS') === 'true'
+
+const allowAllGuard = () => Promise.resolve({})
+
+Deno.test({
+  sanitizeOps: false,
+  sanitizeResources: false,
+  ignore: !runS3,
+  name: 'AssetsController: image upload — the never-worsened guardrail holds through the REAL ' +
+    'HTTP+S3 path: an already-low-quality source is stored byte-identical, never re-inflated',
+  fn: async () => {
+    Deno.env.set(
+      'S3_ENDPOINT',
+      Deno.env.get('S3_ENDPOINT') || 'http://localhost:8333',
+    )
+    await import('datamaster-internal/core.ts?case=image-upload-s3-never-worsened')
+
+    const dir = await Deno.makeTempDir()
+    // A source already encoded at LOW quality (15) — re-encoding at the pipeline's own higher
+    // default quality reliably produces a LARGER result (same fixture/reasoning
+    // `image-optimize.test.ts`'s own "no improvement keeps the original bytes exactly" case
+    // already verified for the transformer directly; this proves the SAME guardrail survives the
+    // full HTTP+S3 round trip, which nothing in this repo tested before).
+    const sourceBytes = await gradientJpeg(200, 150, 15)
+
+    const service = createAssetService({
+      storage: resolveAssetStorage(dir),
+      repository: createInMemoryAssetRepository(),
+    })
+
+    await ProgramModule.defineApplication('assets-api-image-s3-never-worsened-test', () => {
+      createAssetsController({
+        prefix: 'assets',
+        service,
+        guards: { write: [allowAllGuard], read: [allowAllGuard] },
+      })
+    })
+    const [serverId] = await bootstrapServers({
+      rest: {
+        application: 'assets-api-image-s3-never-worsened-test',
+        id: 'assets-api-image-s3-never-worsened-test',
+      },
+    })
+    assert(serverId, 'the server should have been started')
+    try {
+      const info = webServerManager.info(serverId)
+      assert(info.addr, 'the started server should be listening')
+      const baseUrl = `http://${info.addr.hostname}:${info.addr.port}/${serverId}`
+
+      const created = await fetch(`${baseUrl}/assets/image`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'image/jpeg', 'X-Znx-Asset-Filename': 'low-quality.jpg' },
+        body: sourceBytes,
+      })
+      assertEquals(created.status, 200)
+      const record = await created.json()
+      assertEquals(record.status, 'completed')
+      const variant = record.variants[0]
+
+      const variantDownload = await fetch(
+        `${baseUrl}/assets/${record.id}/download?variant=${variant.variantId}`,
+      )
+      assertEquals(variantDownload.status, 200)
+      const variantBytes = new Uint8Array(await variantDownload.arrayBuffer())
+      assertEquals(
+        variantBytes,
+        sourceBytes,
+        'expected the never-worsened guardrail to keep the ORIGINAL bytes, byte-for-byte, once ' +
+          'a real re-encode at the pipeline default quality would have made the file bigger',
+      )
+    } finally {
+      await webServerManager.stop([serverId])
+      await Deno.remove(dir, { recursive: true })
+    }
+  },
+})

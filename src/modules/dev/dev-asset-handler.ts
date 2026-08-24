@@ -16,18 +16,17 @@ const ASSET_EXTENSIONS = [
 
 /** Vite's own special request paths — none of them carry a recognizable file extension
  * (`/@vite/client`), or live outside the project root entirely (`/@fs/...`, for Vite's own
- * client runtime files, confirmed real during this mechanism's own spike), so
- * {@linkcode ASSET_EXTENSIONS} alone would miss them. `/.vite/` covers the dependency
- * pre-optimizer's own output (`/.vite/deps/react.js?v=...`), which a Comet's transformed code
- * imports directly. Real path PREFIXES only — each one owns everything beneath it. */
+ * client runtime files), so {@linkcode ASSET_EXTENSIONS} alone would miss them. `/.vite/` covers
+ * the dependency pre-optimizer's own output (`/.vite/deps/react.js?v=...`), which a Comet's
+ * transformed code imports directly. Real path PREFIXES only — each one owns everything beneath
+ * it. */
 const VITE_SPECIAL_PREFIXES = ['/@vite/', '/@fs/', '/@id/', '/.vite/']
 
 /** Vite's own single-file virtual modules — exact matches, never a prefix (unlike
  * {@linkcode VITE_SPECIAL_PREFIXES}: each of these is one fixed path with nothing beneath it, so
  * `startsWith` would risk matching an unrelated longer path by accident). `/@react-refresh` is
  * `@vitejs/plugin-react`'s own React Fast Refresh runtime — every Comet transformed with
- * `spacePlugin()`'s own `react()` wired in imports it by this exact specifier (confirmed via a
- * real, disposable spike reading the actual transform output before this was relied on here). */
+ * `spacePlugin()`'s own `react()` wired in imports it by this exact specifier. */
 const VITE_EXACT_VIRTUAL_MODULES = ['/@react-refresh']
 
 /**
@@ -53,8 +52,8 @@ export function looksLikeDevAssetRequest(pathname: string): boolean {
  * real SSR/`@zanix/server` request handling when it returns `null` — this function never touches
  * `@zanix/server`'s own route table, registers nothing, and is never reachable from any production
  * request path (see this module's own `mod.ts` — nothing under `modules/dev/` is imported by
- * `modules/render/`/`modules/router/`, on purpose, the same discipline that fixed a real
- * `@Socket`-decorator-leaking-into-production regression earlier in this framework's own history).
+ * `modules/render/`/`modules/router/`, by design, so dev-only constructs, including anything
+ * decorator-based like `@Socket`, can never leak into a production request path).
  *
  * A syntax/transform error (a real bug in the requested source file, not "file doesn't exist")
  * responds `500` with the error's own message as plain text — deliberately verbose: this only ever

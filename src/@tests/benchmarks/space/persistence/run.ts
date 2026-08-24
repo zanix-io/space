@@ -62,7 +62,7 @@
  * ## Design notes that matter for trusting the result
  *
  * - Pages are real `SpacePageController`s rendered through the REAL page renderer, so the outlet
- *   marker, the fragment path and the `x-space-navigate` protocol are the production ones.
+ *   marker, the fragment path and the `X-Znx-Space-Navigate` protocol are the production ones.
  * - Two identical counters differ ONLY in whether their call site passes `persist`. That is the
  *   single variable; the un-persisted one is the control.
  * - Both renderers run the same script, the same assertions and the same page objects.

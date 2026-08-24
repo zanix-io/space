@@ -8,8 +8,12 @@
 
 /** Sent by Orbit's client runtime on every intercepted navigation — a page's own `handleGet`
  * checks for this to decide whether to render the full document or just the fragment Orbit swaps
- * into the DOM. Never something an app author sets by hand. */
-export const ORBIT_FRAGMENT_HEADER = 'x-space-navigate'
+ * into the DOM. Never something an app author sets by hand.
+ *
+ * `X-Znx-`-prefixed, same as every other framework-owned header/cookie across the Zanix
+ * ecosystem (`X-Znx-Authorization`, `X-Znx-Admin-Protocol`, ...) — keeps a request header this
+ * package invents from colliding with a third-party proxy/CDN header of the same name. */
+export const ORBIT_FRAGMENT_HEADER = 'X-Znx-Space-Navigate'
 
 /**
  * Marks the DOM element Orbit swaps on navigation — everything *inside* the root layout (nested

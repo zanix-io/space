@@ -18,6 +18,7 @@ import type { SecurityHeadersOptions } from '../middleware/security-headers-guar
 import { CSRF_TOKEN_LOCALS_KEY } from '../middleware/csrf-guard.ts'
 import { POPULATION_LOCALS_KEY } from '../middleware/population-guard.ts'
 import { getThemeResolver } from '../theme/theme-registry.ts'
+import { createDedupeCache } from './request-dedupe.ts'
 
 /** `Page()`'s combined header options — `SecurityHeadersOptions`'s own flat fields (`frameOptions`,
  * `referrerPolicy`, ...) plus `csp`, all under one `headers` option. `csp` is kept as its own field
@@ -59,6 +60,15 @@ function toPageContext<Params>(ctx: HandlerContext): PageContext<Params> {
     url: ctx.url,
     csrfToken: ctx.locals[CSRF_TOKEN_LOCALS_KEY] as string | undefined,
     population: ctx.locals[POPULATION_LOCALS_KEY] as string | undefined,
+    // One fresh cache per `toPageContext` call — this function runs exactly once per request
+    // (`handleGet` for a GET, `handlePost` for a POST — `renderInvalidAction` does NOT call this
+    // again; it spreads `handlePost`'s own already-built context, `{ ...actionCtx, fieldErrors,
+    // submitted }`, which copies this SAME `dedupe` closure by reference into that new object), so
+    // this stays scoped to a single request even though the resulting closure is what threads into
+    // every segment's own `loader` too (`resolveSegmentData`, `segment-loader.ts`), which is what
+    // makes dedup across them possible at all — see `PageContext.dedupe`'s own doc for the full
+    // contract.
+    dedupe: createDedupeCache(),
   }
 }
 
@@ -198,6 +208,8 @@ export abstract class SpacePageController<
    */
   public static actionRto?: { Body?: RtoTypes['Body'] }
 
+  /** Per-page response header overrides — `false` disables the framework's own default headers
+   * for this page entirely. Unset inherits {@linkcode getDefaultPageHeaders}. */
   public static headers?: PageHeaderOptions | false
   /**
    * This page's own `<title>`/`<meta>`/`<link>` declaration — a plain {@linkcode HeadDescriptor},
@@ -237,7 +249,7 @@ export abstract class SpacePageController<
   // deno-lint-ignore no-explicit-any
   public static head?: HeadDescriptor | ((data: any) => HeadDescriptor)
   /**
-   * This page's own stylesheet(s) (P2-12b) — e.g. `['./product.css', {href:
+   * This page's own stylesheet(s) — e.g. `['./product.css', {href:
    * './product-mobile.css', media: '(max-width: 599px)'}]`, resolved relative to THIS page's OWN
    * file (co-located, the same convention a Comet's real `import './x.module.css'` already
    * resolves by — deliberately different from `defineSpaceApp({ globalCss })`'s own root-relative
@@ -248,15 +260,14 @@ export abstract class SpacePageController<
    * entries can override earlier ones" contract, preserved through the build the same way.
    *
    * Discovered at build time by importing this page's own module (the same mechanism
-   * `loadRoutes()` already uses at server startup — see `discoverPageStyles`'s own doc,
-   * `modules/bundler/discover-page-styles.ts`, for the full build-time story) — an author never
+   * `loadRoutes()` already uses at server startup — see `discoverPages`'s own doc,
+   * `modules/bundler/discover-pages.ts`, for the full build-time story) — an author never
    * registers this by hand beyond declaring the field itself. Omit for a page with nothing of its
    * own beyond `global` — the overwhelming majority — at zero behavior change from before this
    * field existed.
    *
    * Not yet composed with a layout's own styles (page → layout → root inheritance) — only a page's
-   * own, direct declaration is resolved in this first version; see this field's own design doc for
-   * why that's a deliberate scope limit, not an oversight.
+   * own, direct declaration is resolved today; this is a deliberate scope limit, not an oversight.
    */
   public static styles?: StylesheetRef[]
 
@@ -376,6 +387,8 @@ export abstract class SpacePageController<
         ctx.payload.body instanceof FormData
           ? Promise.resolve(ctx.payload.body)
           : ctx.req.formData(),
+      // The real object reference, not a copy — see `PageActionContext.locals`'s own doc for why.
+      locals: ctx.locals,
     }
 
     const Body = Ctor.actionRto?.Body
@@ -397,7 +410,7 @@ export abstract class SpacePageController<
       return await action({ ...pageCtx, body: validated })
     }
 
-    return await this.renderInvalidAction(ctx, pageCtx, fieldErrors, submitted)
+    return await this.#renderInvalidAction(ctx, pageCtx, fieldErrors, submitted)
   }
 
   /**
@@ -409,7 +422,17 @@ export abstract class SpacePageController<
    * own `loader` receives `fieldErrors`/`submitted` and surfaces them exactly the way it already
    * forwards `csrfToken` — an established path, not a second mechanism.
    */
-  private async renderInvalidAction(
+  // Native `#`-private, not TypeScript's `private` keyword — `HandlerBaseClass` (`@zanix/server`)
+  // declares `[key: string | symbol]: HandlerPrototype<Interactor, Extensions>` on every handler
+  // instance, and TS's `private` is still a plain, string-keyed member for that check (only a
+  // visibility modifier, not a different key kind), so it gets held to `HandlerPrototype`'s shape —
+  // which tops out at `HandlerFunction`'s `(ctx, args?: any)`, at most one required parameter. This
+  // method's real signature (`ctx`, `actionCtx`, `fieldErrors`, `submitted`, all required) can never
+  // fit that, and never needs to: it's an internal implementation detail of `handlePost`, never a
+  // route handler the framework dispatches to. A genuine `#`-private field isn't string/symbol-keyed
+  // at all, so it falls outside the index signature entirely — confirmed empirically (TS2411 fires
+  // on the `private` form, not on this one).
+  async #renderInvalidAction(
     ctx: HandlerContext,
     actionCtx: PageActionContext<Params>,
     fieldErrors: PageFieldErrors,

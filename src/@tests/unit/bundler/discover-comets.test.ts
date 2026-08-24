@@ -1,6 +1,7 @@
-import { assertEquals } from '@std/assert'
+import { assertEquals, assertRejects } from '@std/assert'
 import { join } from '@std/path'
 import { getTemporaryFolder } from '@zanix/helpers'
+import { InternalError } from '@zanix/errors'
 import { discoverComets } from 'modules/bundler/discover-comets.ts'
 
 const TMP_ROOT = getTemporaryFolder(import.meta.url)
@@ -93,3 +94,26 @@ Deno.test('discoverComets: a missing root is zero comets, not an error', async (
   await Deno.remove(missing)
   assertEquals(await discoverComets(missing), [])
 })
+
+/**
+ * Regression coverage: `discoverComets`'s own `visit()` used to rethrow a non-`NotFound` error
+ * completely raw. Build-time-only (never runs per-request), so this proves the shared
+ * `InternalError` class specifically — not `code`/`userMessage`, which the real exemption
+ * (`WebServerManager`'s own `readSslFile`) deliberately skips for a boot/build-time-only failure.
+ * `Deno.readDir()` on a path that is actually a FILE (not `NotFound`) is a real, deterministic,
+ * cross-platform way to trigger `Deno.errors.NotADirectory`.
+ */
+Deno.test(
+  'discoverComets: a non-NotFound native read failure (e.g. root is actually a file) is wrapped into InternalError, never rethrown raw',
+  async () => {
+    const dir = await Deno.makeTempDir({ dir: TMP_ROOT })
+    try {
+      const notADir = join(dir, 'actually-a-file')
+      await Deno.writeTextFile(notADir, 'x')
+      const error = await assertRejects(() => discoverComets(notADir), InternalError)
+      assertEquals(error.cause instanceof Deno.errors.NotADirectory, true)
+    } finally {
+      await Deno.remove(dir, { recursive: true })
+    }
+  },
+)

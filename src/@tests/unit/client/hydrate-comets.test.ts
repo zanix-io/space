@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertFalse } from '@std/assert'
-import logger from '@zanix/logger'
+import logger from 'modules/client/client-logger.ts'
 import { hydrateComets } from 'modules/client/hydrate-comets.ts'
 import {
   COMET_EXPORT_ATTR,

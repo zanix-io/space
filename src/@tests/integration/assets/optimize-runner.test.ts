@@ -169,6 +169,14 @@ Deno.test(
   },
 )
 
+// `runOnWorker`'s own `error instanceof Error ? error : new Error(String(...))` fallback (the
+// non-`Error` branch) is deliberately NOT forced here: both real tasks this module ever runs on a
+// worker (`optimizeImageAssetTask`/`optimizeSvgAssetTask`) only ever throw real sharp/svgo
+// `Error`s, which survive `postMessage`'s structured-clone transfer as real `Error` instances —
+// confirmed via the test below, which already exercises the worker-error path end to end. Forcing
+// the OTHER branch would need a worker task that rejects with a non-`Error` primitive, which has
+// no injection point through this module's own public API (`runOnWorker` itself is private) —
+// dead code by design for this module's real task set, not a real gap.
 Deno.test(
   'createOptimizeRunner(true): an error thrown inside a worker task is never silenced — it ' +
     'rejects the caller, it does not hang (regression test for a real, previously-reproduced bug)',
@@ -191,5 +199,38 @@ Deno.test(
     const garbage = new Uint8Array([1, 2, 3, 4, 5])
     await assertRejects(() => runner.optimizeImage('bad.jpg', garbage, true))
     runner.close()
+  },
+)
+
+Deno.test(
+  'createOptimizeRunner(true): falls back to a 4-worker pool when navigator.hardwareConcurrency ' +
+    'is unavailable/falsy, rather than sizing the pool to 0',
+  async () => {
+    // `navigator` is a real, configurable global accessor (confirmed: `hardwareConcurrency` alone
+    // has no setter, so the whole property is redefined, restored in `finally`) — the ONLY way to
+    // force this branch, since a real host always reports a positive core count.
+    const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+    if (!originalNavigator) throw new Error('expected a real "navigator" global to redefine')
+    let runner: ReturnType<typeof createOptimizeRunner> | undefined
+    try {
+      Object.defineProperty(globalThis, 'navigator', {
+        value: { hardwareConcurrency: 0 },
+        configurable: true,
+      })
+      runner = createOptimizeRunner(true)
+    } finally {
+      Object.defineProperty(globalThis, 'navigator', originalNavigator)
+    }
+
+    try {
+      // The pool size itself isn't observable through the public API — this proves the fallback
+      // produced a WORKING pool (at least one real worker), not a degenerate zero-sized one that
+      // would hang forever on `invoke()`.
+      const source = await gradientJpeg(300, 200, 100)
+      const result = await runner.optimizeImage('hero.jpg', source, { breakpoints: ['msm'] })
+      assert(result.length >= 1)
+    } finally {
+      runner.close()
+    }
   },
 )

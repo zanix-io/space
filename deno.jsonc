@@ -1,0 +1,290 @@
+{
+  "name": "@zanix/space",
+  "version": "0.1.0",
+  "zanix": {
+    "project": "library"
+  },
+  "links": [],
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitAny": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
+    "types": []
+  },
+  "lint": {
+    "rules": {
+      "tags": [
+        "recommended",
+        "jsr",
+        "react",
+        "jsx"
+      ],
+      "include": [
+        "eqeqeq",
+        "default-param-last",
+        "camelcase",
+        "no-await-in-loop",
+        "no-const-assign",
+        "no-eval",
+        "no-non-null-asserted-optional-chain",
+        "no-non-null-assertion",
+        "no-self-compare",
+        "no-sync-fn-in-async-fn",
+        "no-throw-literal",
+        "no-useless-rename"
+      ]
+    },
+    "exclude": [
+      ".dist",
+      // Deliberately real, hand-written CommonJS (`require`/`exports.x`) — the fixtures
+      // `bare-specifier-resolve.ts`'s own regression tests need. Linting them as this project's
+      // own source style would fight their entire purpose.
+      "src/@tests/fixtures/resolve-identity",
+      // Git-ignored scratch space (`getTemporaryFolder`, `@zanix/helpers`) that several tests root
+      // their own real-filesystem fixtures/subprocess scripts under — never meant to hold this
+      // project's own source style, and normally cleaned up by each test's own `finally`, but an
+      // interrupted run can leave a stray file behind.
+      "**/__tmp__"
+    ],
+    "plugins": [
+      "jsr:@zanix/utils@^3.0.0/linter/deno-zanix-plugin"
+    ],
+    "report": "pretty"
+  },
+  "fmt": {
+    "exclude": [
+      ".dist",
+      "src/@tests/fixtures/resolve-identity",
+      "**/__tmp__"
+    ],
+    "proseWrap": "always",
+    "indentWidth": 2,
+    "singleQuote": true,
+    "lineWidth": 100,
+    "useTabs": false,
+    "semiColons": false
+  },
+  "imports": {
+    "@std/assert": "jsr:@std/assert@0.224",
+    "@std/path": "jsr:@std/path@0.224",
+    // Test-only, never reachable from `mod.ts`/`mod-react.ts`/`mod-preact.ts` — see
+    // `src/@tests/unit/client/dom-test-setup.ts`'s own doc. `ensureStylesheetsLoaded`
+    // (`modules/client/orbit.ts`) is the first function in this package whose contract is real
+    // `document.head` mutation plus `load`/`error`/timeout event timing — untestable as a plain
+    // string/object fixture the way `extractStylesheetLinks`/`shouldInterceptNavigation` already
+    // are. `happy-dom`, not `jsdom` — same real-DOM bootstrap role `@zanix/space-ui` already
+    // established for the identical class of problem (`useEffect`-driven DOM behavior static SSR
+    // markup can't reach), zero transitive dependencies (`jsdom` pulls in the now-deprecated
+    // `whatwg-encoding`/`glob@10` via `html-encoding-sniffer`). Deliberately NOT shared with
+    // `space-ui`'s own copy: `space-ui` depends on `@zanix/space`, so the reverse import would be
+    // circular, and this package's surface need (`document.head`/`createElement`/`<link>` load
+    // events) is a small, distinct slice of what `space-ui`'s components need (focus/keyboard/
+    // resize) — not the same abstraction wearing two names.
+    "happy-dom": "npm:happy-dom@^20.11.2",
+    "typings/": "./src/typings/",
+    "modules/": "./src/modules/",
+    "@zanix/app": "jsr:@zanix/app@^0.2.0",
+    "@zanix/app/runtime": "jsr:@zanix/app@^0.2.0/runtime",
+    "@zanix/server": "jsr:@zanix/server@^3.4.0",
+    // Domain infrastructure tier (`zanix-dependency-direction`'s tier 3), a valid direct dependency
+    // for a `server`-activated consumer app the same way `@zanix/admin` already depends on it —
+    // only `rateLimitGuard` is used today, `POST /api/log`'s own default anonymous-traffic guard
+    // (`modules/log-api/controllers/log.controller.ts`).
+    "@zanix/auth": "jsr:@zanix/auth@^0.8.0",
+    "@zanix/errors": "jsr:@zanix/utils@^3.1.2/errors",
+    "@zanix/logger": "jsr:@zanix/utils@^3.1.2/logger",
+    // Browser-safe logger entry point (`createClientLogger`/`Logger#ingest`) — see
+    // `modules/client/client-logger.ts`'s own doc for why client-bundled code imports THIS alias
+    // instead of `@zanix/logger` above, which pulls in `WorkerManager`/`Deno.readTextFile`.
+    "@zanix/logger/client": "jsr:@zanix/utils@^3.1.2/logger/client",
+    "@zanix/helpers": "jsr:@zanix/utils@^3.1.2/helpers",
+    "@zanix/workers": "jsr:@zanix/utils@^3.1.2/workers",
+    "@zanix/validator": "jsr:@zanix/utils@^3.1.2/validator",
+    "@zanix/types": "jsr:@zanix/utils@^3.1.2/types",
+    "react": "npm:react@^19.2.0",
+    "react-dom": "npm:react-dom@^19.2.0",
+    "@types/react": "npm:@types/react@^19.2.0",
+    "@types/react-dom": "npm:@types/react-dom@^19.2.0",
+    "vite": "npm:vite@^8.0.0",
+    // JSX transform + real React Fast Refresh for the `client` environment (Comets) — confirmed
+    // via its own published `peerDependencies` to declare real, official Vite 8 support (not
+    // assumed from an older major).
+    "@vitejs/plugin-react": "npm:@vitejs/plugin-react@^6.0.5",
+    // React Compiler support (`renderer:'react'` only — see `space-plugin.ts`'s own doc). All
+    // three are `@vitejs/plugin-react`'s own documented optional peers for its exported
+    // `reactCompilerPreset()`, confirmed by a real spike (build + SSR + streaming + Preact
+    // isolation, all verified against real output, not assumed from docs) before being declared
+    // here. `@rolldown/plugin-babel` is the actual Vite plugin consuming the preset;
+    // `babel-plugin-react-compiler` is what `reactCompilerPreset()` resolves internally via
+    // `import.meta.resolve` (must be installed for the preset to even construct); `@babel/core` is
+    // `@rolldown/plugin-babel`'s own required peer. None of the three are imported anywhere
+    // `renderer:'preact'` can reach — see `space-plugin.ts`.
+    "@rolldown/plugin-babel": "npm:@rolldown/plugin-babel@^0.2.3",
+    "babel-plugin-react-compiler": "npm:babel-plugin-react-compiler@^1.0.0",
+    "@babel/core": "npm:@babel/core@^7.29.0",
+    // `--renderer=preact` (`spacePlugin({ renderer: 'preact' })`) — Preact CORE only, never
+    // `preact/compat`, per this package's own decision spike: confirmed by direct inspection that
+    // Preact core exports no `Suspense`/`lazy`/`use()` at all, and confirmed that
+    // `getDerivedStateFromError`/`componentDidCatch` (this package's own `SpaceErrorBoundary`) ARE
+    // native to core, no compat needed for those. `@preact/preset-vite` is Preact's own official
+    // Vite integration (JSX transform + `@prefresh/vite` for Fast Refresh) — confirmed via a real,
+    // disposable spike running the actual, unmodified `createSpaceDevEngine` with this composed in
+    // instead of `@vitejs/plugin-react`: real hydration, real interaction, and real Prefresh-driven
+    // state preservation across a hot edit all verified against a real headless browser, not
+    // assumed. Ships its own real Babel pass (`@prefresh/babel-plugin`) — a genuinely different
+    // mechanism from `react()`'s Rolldown-native `oxc.jsx` transform, not just a drop-in swap; see
+    // `spacePlugin`'s own doc for what that difference means downstream.
+    "preact": "npm:preact@^10.29.0",
+    "@preact/preset-vite": "npm:@preact/preset-vite@^2.10.6",
+    // Preact's own official SSR renderer — confirmed via this package's own decision spike to
+    // support real, synchronous server rendering (`render`) and, separately, error boundaries
+    // (`options.errorBoundaries`, see `error-boundary-preact.ts`'s own doc) without needing
+    // `preact/compat`. The streaming (`/stream`) and async (`renderToStringAsync`) entry points
+    // are deliberately never imported anywhere in this package — both exist to support `Suspense`,
+    // which Preact core doesn't have, so there is nothing for them to do here.
+    "preact-render-to-string": "npm:preact-render-to-string@^6.5.0",
+    // Resolves Deno-style specifiers (deno.json import-map aliases, `npm:`/`jsr:`/`http(s):`) inside
+    // Vite's own module graph — `createSpaceDevEngine` needs this for ANY bare specifier a real page
+    // imports (`@zanix/space` itself, `react`, ...); confirmed via a real spike that Vite/Rolldown
+    // has no other resolution path to a Deno import map on its own.
+    "@deno/vite-plugin": "npm:@deno/vite-plugin@^2.0.3",
+    // The same resolver `@deno/vite-plugin` uses internally, invoked directly by
+    // `space/bundler/cjs-interop.ts` to resolve/load a CJS dependency's own relative `require()`
+    // subtree by hand — needed because routing those sub-requires back through Vite's own module
+    // graph bypasses `@deno/vite-plugin`'s `onLoad` hook for any already-resolved absolute path
+    // (confirmed empirically; see that file's own doc for the full reasoning).
+    "@deno/loader": "jsr:@deno/loader@^0.5.0",
+    "@tailwindcss/vite": "npm:@tailwindcss/vite@^4.3.3",
+    // Never imported directly from any .ts/.tsx source — listed so Deno hoists it to a top-level
+    // `node_modules/tailwindcss` symlink. `@tailwindcss/vite` resolves it by walking up from the
+    // *.css file's own directory (Tailwind's own `@import "tailwindcss"` mechanism), which Deno's
+    // flattened `.deno` package store otherwise never surfaces at a location that walk would find.
+    // A consuming app needs this exact same entry in its own `deno.json` for the same reason.
+    "tailwindcss": "npm:tailwindcss@^4.3.3",
+    "@vanilla-extract/vite-plugin": "npm:@vanilla-extract/vite-plugin@^5.2.6",
+    // `css-modules-dts.ts`'s own typed-`.d.ts` codegen — replaces `typed-css-modules`, which was
+    // last published Jan 2024 and pins a deprecated `glob@10` (no newer release fixes it). Same
+    // underlying `postcss-modules-*` plugins `typed-css-modules` itself wrapped, used directly:
+    // `postcss` runs them, `postcss-modules` collects the exported token names (also picks up
+    // cross-file `composes: x from './y.css'` via its own resolver) — zero deprecated transitive
+    // deps, actively maintained.
+    "postcss": "npm:postcss@^8.5.26",
+    "postcss-modules": "npm:postcss-modules@^9.0.1",
+    // Build-time only (icon resizing for the PWA manifest) — never imported by anything that ships
+    // to the browser or runs in the deployed server process.
+    "sharp": "npm:sharp@^0.35.3",
+    // Permanent fixtures for `bare-specifier-resolve.ts`'s own regression suite — stand-ins for
+    // real npm packages (a real disposable spike already confirmed the identity bug and its fix
+    // against real `react`/`react-dom`; these let the same shape of bug — ESM<->ESM, CJS<->CJS,
+    // CJS<->ESM, all reached via a bare specifier from a `node_modules`-like importer — get
+    // regression-tested deterministically, without depending on any particular npm package's own
+    // internal module structure staying stable). Namespaced under `@test-fixtures/` so the name can
+    // never collide with a real, future npm package. Never imported outside `src/@tests`.
+    "@test-fixtures/pkg-a": "./src/@tests/fixtures/resolve-identity/pkg-a/index.mjs",
+    "@test-fixtures/pkg-b": "./src/@tests/fixtures/resolve-identity/pkg-b/index.mjs",
+    "@test-fixtures/pkg-c": "./src/@tests/fixtures/resolve-identity/pkg-c/index.js",
+    "@test-fixtures/pkg-d": "./src/@tests/fixtures/resolve-identity/pkg-d/index.js",
+    "@test-fixtures/pkg-ts-source": "./src/@tests/fixtures/resolve-identity/pkg-ts-source/index.ts",
+    "@test-fixtures/pkg-tsx-source": "./src/@tests/fixtures/resolve-identity/pkg-tsx-source/index.tsx",
+    "@zanix/datamaster/storage": "jsr:@zanix/datamaster@^1.5.0/storage",
+    "@zanix/datamaster/core": "jsr:@zanix/datamaster@^1.5.0/core"
+  },
+  "exports": {
+    ".": "./mod.ts",
+    // The two renderer entry points. `.` above ships no renderer implementation at all — an app
+    // imports exactly one of these once, from its own main module, matching its own
+    // `defineSpaceApp({ renderer })` (which stays the single source of truth and is checked
+    // against whichever one was imported).
+    "./react": "./mod-react.ts",
+    "./preact": "./mod-preact.ts",
+    "./vite": "./src/modules/bundler/mod.ts",
+    "./client": "./src/modules/client/mod.ts",
+    "./client/preact": "./src/modules/client/mod-preact.ts",
+    "./testing": "./src/modules/testing/mod.ts",
+    "./dev": "./src/modules/dev/mod.ts",
+    // Both already re-exported from `.` (`mod.ts`) — these two narrow subpaths exist so a
+    // consumer that wants ONLY video-source detection or ONLY asset-href resolution (today:
+    // `@zanix/space-ui`'s own `Video` — see that package's own `deno.jsonc` comment) never pulls
+    // in the full framework (React/Preact renderers, router, comets, i18n, PWA, SEO, middleware)
+    // or the heavier build-time-only deps `modules/assets/` also holds (`sharp`, `svgo`, both used
+    // by `image-optimize.ts`/`svg-optimize.ts`, neither of which either of these two files import).
+    // Named identically to `@zanix/space-ui`'s own TEMP local path override, so switching that
+    // package from the temporary relative path to a real `jsr:@zanix/space@^x.y.z/video-source`
+    // specifier — once this package actually publishes — is a one-line value swap, no renaming.
+    "./video-source": "./src/modules/assets/video-source.ts",
+    "./assets-manifest": "./src/modules/assets/assets-manifest.ts",
+    // Image/video/thumbnail/audio transformation + the shared transform cache
+    // (`transform-cache.ts`) — a runtime-agnostic facade over `optimizeImageAsset`/
+    // `VideoTranscoder`/`AudioTranscoder`, plus the real image/cache primitives that were
+    // previously reachable only via internal relative paths. Sibling of `./media` for the same
+    // reason: sharp (transitively) is an opt-in, heavier-dependency capability, never folded into
+    // the main `.` barrel. Deliberately does NOT export `AssetManifestRegistry` (publication stays
+    // an adapter concern), anything from `ffmpeg-availability.ts` (capability probing stays in
+    // `./media`), or the video/audio primitives themselves (`VideoTranscoder`, `AudioTranscoder`,
+    // `createSystemFfmpegTranscoder`, `createSystemFfmpegAudioTranscoder`, the voice policy, ...) —
+    // those are already public via `./media`, one canonical subpath per symbol, never two.
+    "./assets": "./src/modules/asset-transform/mod.ts",
+    // The Asset Application/HTTP API — a NEW, strictly one-way layer ABOVE `./assets`: it imports
+    // from `modules/asset-transform/`, never the reverse (enforced by
+    // `src/@tests/unit/asset-transform/dependency-boundary.test.ts`). Real `@Controller`/
+    // `ZanixController` REST routes (never `ZanixSsrController` — that's this package's own
+    // page/byte-serving base, not this concern's shape) over `AssetStorage`/`AssetRepository`/
+    // `JobDispatcher` ports — Mongo/S3 are NOT implemented here, only the ports a future
+    // `@zanix/datamaster` adapter implements. `modules/assets/`, `modules/media/`, and
+    // `modules/asset-transform/` themselves never import `@zanix/server` — only this subpath does.
+    "./assets-api": "./src/modules/assets-api/mod.ts",
+    // Video/audio transcoding — its own subpath, not re-exported from `.`: unlike
+    // `video-source`/`assets-manifest` (tiny, dependency-free), this is a distinct, opt-in
+    // capability most `@zanix/space` apps never touch, the same reasoning `./vite`/`./dev` are
+    // already their own subpaths rather than folded into the main barrel. Zero npm dependencies of
+    // its own either way (`Deno.Command` only, no `fluent-ffmpeg`) — see
+    // `modules/media/system-ffmpeg-transcoder.ts`'s own doc for the full contract.
+    "./media": "./src/modules/media/mod.ts"
+  },
+  "tasks": {
+    // Deno-level renderer benchmarks only (React vs Preact SSR) — `deno.jsonc`'s own `bench.include`
+    // above already scopes `deno bench` to exactly `src/@tests/benchmarks/renderer/`, so no path
+    // argument is needed. Separate, real-browser benchmarks (JS transferred, hydration, Comet
+    // architecture) and the Fast Refresh/HMR E2E are NOT `Deno.bench`-shaped (they orchestrate a
+    // real HTTP server + Playwright) and are never picked up by this task or by `deno test` — each
+    // gets its own explicit task once built.
+    // `--allow-env` is required, not optional: React reads `process.env.NODE_ENV` at module
+    // load, and Deno denies that by default — without it every renderer bench fails with
+    // `NotCapable: Requires env access to "NODE_ENV"`. Nothing here needs any wider
+    // permission, so the grant stays exactly that narrow.
+    "bench:renderer": "deno bench --allow-env",
+    "bench:space": "deno run --allow-all src/@tests/benchmarks/space/run.ts",
+    // A manual spike, NOT a benchmark and NOT a test — it produces no metrics and is not an
+    // acceptance criterion. Named here purely so it is discoverable via `deno task`: it covers the
+    // two things `deno test` cannot reach today (`reuseRetainedComets`, and a real Orbit A→B→A
+    // navigation on both renderers), and nothing else in the repository references it. Being a task
+    // does not put it in CI or in `deno test` — see the script's own header.
+    "spike:persistence": "deno run --allow-all src/@tests/benchmarks/space/persistence/run.ts"
+  },
+  "nodeModulesDir": "auto",
+  "publish": {
+    "exclude": [
+      ".github",
+      "src/@tests"
+    ]
+  },
+  "test": {
+    "include": [
+      "src/@tests/**/*.test.ts",
+      "src/@tests/**/*.test.tsx"
+    ],
+    // Defense in depth alongside the `lint`/`fmt` excludes above: a subprocess-spawning test may
+    // write its own generated `*.ts` fixture under a `__tmp__` it created via `getTemporaryFolder`
+    // — this makes sure a stray one, however named, is never picked up by this OUTER test run's own
+    // discovery and raced against the subprocess actually running it.
+    "exclude": [
+      "**/__tmp__"
+    ]
+  },
+  "bench": {
+    "include": [
+      "src/@tests/benchmarks/renderer/**/*.bench.ts"
+    ]
+  }
+}

@@ -9,6 +9,8 @@ import LoadingFixturePage from '../../support/fixtures/loading-routes/page.tsx'
 // (same file, same resolved specifier) — so the classes below are the very ones `loadRoutes()`
 // populates via `setPageTree()`, with no need to go through HTTP/`bootstrapServers` for this.
 
+console.error = () => {}
+
 Deno.test(
   "SpacePageController.handleGet: a segment's error.tsx keeps a thrown component's page a 200, wrapped in that segment's layout",
   async () => {

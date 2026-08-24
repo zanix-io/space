@@ -95,3 +95,32 @@ Deno.test('cspGuard (nonce form): two separate calls produce two different nonce
 
   assertNotEquals(ctxA.locals[CSP_NONCE_LOCALS_KEY], ctxB.locals[CSP_NONCE_LOCALS_KEY])
 })
+
+/**
+ * Regression coverage for a confirmed invariant: the nonce genuinely derives from
+ * `crypto.getRandomValues` (the real Web Crypto CSPRNG), not merely "looks different each time" —
+ * a plain incrementing counter or `Date.now()` would ALSO satisfy the "two calls differ" test
+ * above without being cryptographically random at all. Stubbing `crypto.getRandomValues` with a
+ * fully controlled, deterministic fake and proving the emitted nonce is EXACTLY the base64 of
+ * those bytes (not merely influenced by them) is what actually pins this down.
+ */
+Deno.test('cspGuard (nonce form): the nonce derives from real crypto.getRandomValues', async () => {
+  const original = crypto.getRandomValues.bind(crypto)
+  const fixedBytes = new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
+  crypto.getRandomValues = (<T extends ArrayBufferView | null>(arr: T): T => {
+    const view = arr as unknown as Uint8Array
+    view.set(fixedBytes.subarray(0, view.length))
+    return arr
+  }) as Crypto['getRandomValues']
+
+  try {
+    const ctx = mockGuardContext()
+    const guard = cspGuard((nonce) => ({ 'script-src': [`'nonce-${nonce}'`] }))
+    await guard(ctx)
+
+    const expectedNonce = btoa(String.fromCharCode(...fixedBytes))
+    assertEquals(ctx.locals[CSP_NONCE_LOCALS_KEY], expectedNonce)
+  } finally {
+    crypto.getRandomValues = original
+  }
+})

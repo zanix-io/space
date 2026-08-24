@@ -226,9 +226,9 @@ export function validateRenderedDocument(
  * Runs {@linkcode validateRenderedDocument} over several routes, returning one merged list in the
  * same stable order a single route's findings come back in.
  *
- * Sorting only. Each finding was already resolved against `config` by the call that produced it, and
- * an earlier version of this function re-reported them through a fresh collector — running the same
- * severity policy a second time and discarding each finding's own resolution trace in the process.
+ * Sorting only. Each finding was already resolved against `config` by the call that produced it, so
+ * merging must never re-report them through a fresh collector — that would run the same severity
+ * policy a second time and discard each finding's own resolution trace in the process.
  */
 export function validateRenderedDocuments(
   pages: RenderedPageInput[],

@@ -24,8 +24,8 @@ export interface SpacePluginOptions {
    * SSR, `Suspense`, full async semantics — the framework's original, complete renderer,
    * unchanged, and the only renderer React Compiler ever runs against — see below) or `'preact'`
    * (Preact core, no `preact/compat`, a deliberately smaller/reduced renderer for Comets/islands
-   * and pages whose data resolves entirely inside their own `loader` — see this package's own
-   * decision spike for the full contract; a page or Comet needing
+   * and pages whose data resolves entirely inside their own `loader` — Preact core has no
+   * `Suspense`/`use()`, so a page or Comet needing
    * `Suspense`/`loading.tsx`/`useRequestCache` is not supported under `'preact'`, by design, not
    * as an oversight).
    *
@@ -55,12 +55,9 @@ export interface SpacePluginOptions {
  * are each several cooperating plugins, not one — spread it into a `plugins: [...]` array like any
  * other entry, or via `...spacePlugin()` if composing it alongside more plugins in the same array.
  * Never needs a `command`/dev-vs-build branch here: both `react()`'s and `preact()`'s own
- * sub-plugins already self-restrict to dev/`serve` on their own (confirmed for `react()` via a
- * real, disposable spike reading its actual `dist/index.js` and exercising `transformRequest`
- * end-to-end; confirmed for `preact()`/`@prefresh/vite` the same way — see this package's own
- * decision spike, which ran the real, unmodified engine this function feeds with `preact()`
- * composed in and observed its `configResolved` hook self-gate on `config.isProduction`/
- * `config.command === 'build'`). Under Vite 8/Rolldown, `react()` does NOT layer a separate Babel
+ * sub-plugins already self-restrict to dev/`serve` on their own — `preact()`/`@prefresh/vite`'s
+ * `configResolved` hook self-gates on `config.isProduction`/`config.command === 'build'` the same
+ * way `react()`'s own sub-plugins do. Under Vite 8/Rolldown, `react()` does NOT layer a separate Babel
  * transform on top of this project's own native JSX handling (`deno.json`'s
  * `compilerOptions.jsx`/`jsxImportSource`) — its `"vite:react-babel"`-named sub-plugin only
  * configures Rolldown's own native `oxc.jsx` transform options (`runtime`, `importSource`,
@@ -74,11 +71,10 @@ export interface SpacePluginOptions {
  * `renderer: 'react'` also wires in React Compiler, via `@vitejs/plugin-react`'s own first-party
  * `reactCompilerPreset()` (its documented, official integration point — replacing the older
  * `babel.plugins` option, which v6 dropped entirely alongside its move to Rolldown's native
- * `oxc.jsx` transform above). No opt-out flag — `renderer: 'react'` always compiles, matching this
- * package's own decision (verified by a real spike before adoption: a real Space-shaped component,
- * built through this exact pipeline, produces byte-identical `renderToStaticMarkup`/
- * `renderToReadableStream` output before and after compilation, with its top-level `Fragment`
- * intact). The `@rolldown/plugin-babel` import backing this is a dynamic `import()`, evaluated
+ * `oxc.jsx` transform above). No opt-out flag — `renderer: 'react'` always compiles: a real
+ * Space-shaped component, built through this exact pipeline, produces byte-identical
+ * `renderToStaticMarkup`/`renderToReadableStream` output before and after compilation, with its
+ * top-level `Fragment` intact. The `@rolldown/plugin-babel` import backing this is a dynamic `import()`, evaluated
  * ONLY inside this ternary's `'react'` branch — for `renderer: 'preact'`, that `import()` is dead
  * code, never reached, never evaluated; `preact()`'s own branch never sees it. This is why this
  * function's return type is {@linkcode PluginOption}`[]`, not `Plugin[]` — one array entry is a

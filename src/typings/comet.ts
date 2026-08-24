@@ -10,9 +10,6 @@ import type { SpaceChildren, SpaceComponent } from './renderable.ts'
 /**
  * When a Comet hydrates — declared at the point of use (`<Counter comet="visible" />`), so the same
  * component can be static in one place and interactive in another without being duplicated.
- *
- * (Previously this symbol borrowed the module's own doc comment, which sat directly above it; it
- * carries its own now that an import separates the two.)
  */
 export type CometStrategy =
   /** Hydrates immediately once the client runtime reaches this boundary. The default. */
@@ -90,10 +87,11 @@ export type CometComponent<P> = SpaceComponent<P>
  * PASSED IN (and must therefore stay permissive enough for a Preact class component, whose
  * `render()` returns `ComponentChildren` — see that type's own doc), while this describes what
  * `defineComet` HANDS BACK, which is always the one element its own boundary just built. An `any`
- * here used to escape into consumer code: `const n: number = MyComet({ ... })` type-checked, since
- * calling a component outside JSX yields its declared return. `SpaceChildren` closes that without
- * naming a renderer — it is still assignable to React's `ReactNode` and to Preact's
- * `ComponentChildren`, so the boundary remains usable in either renderer's JSX with no cast.
+ * here would let that value escape into consumer code unchecked: `const n: number = MyComet({ ... })`
+ * would type-check, since calling a component outside JSX yields its declared return type.
+ * `SpaceChildren` closes that without naming a renderer — it is still assignable to React's
+ * `ReactNode` and to Preact's `ComponentChildren`, so the boundary remains usable in either
+ * renderer's JSX with no cast.
  *
  * @template P - The wrapped component's own props, plus {@linkcode CometProps}.
  */

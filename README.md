@@ -613,6 +613,27 @@ If you'd like to contribute to the project, follow these steps:
 4. **Submit a Pull Request**: Once your changes are ready, submit a pull request with a clear
    description of what you've done.
 
+### Running tests locally
+
+`deno test --min-dep-age=0 --allow-all` runs the whole suite — including the S3/ffmpeg-gated
+functional tests below, which `ignore` themselves automatically when their real dependency isn't
+available, so this works with zero setup for everything else.
+
+To also exercise the S3-backed functional suite (`src/@tests/functional/assets-api/*-s3.test.ts`),
+matching exactly what `.github/workflows/publish.yml` does in CI:
+
+```sh
+docker run -d -p 8333:8333 chrislusf/seaweedfs server -s3
+curl -X PUT http://localhost:8333/zanix-objects/ # registers the default bucket — see publish.yml's
+                                                  # own comment for why an implicit write isn't enough
+RUN_S3_TESTS=true deno test --min-dep-age=0 --allow-all
+```
+
+The audio/video/calibration suite additionally needs a real `ffmpeg`/`ffprobe` on `PATH` with
+`libvmaf`/`libvpx-vp9`/`libopus` support — a Homebrew install (`brew install ffmpeg`) has all three;
+a plain `apt install ffmpeg` on Debian/Ubuntu commonly lacks `libvmaf`. Run the suite without either
+requirement met and those tests simply report themselves as `ignore`d, same as the S3 ones above.
+
 ## Changelog
 
 For a detailed list of changes, refer to the [CHANGELOG](./CHANGELOG.md).

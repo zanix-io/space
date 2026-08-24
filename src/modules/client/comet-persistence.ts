@@ -1,4 +1,3 @@
-/// <reference lib="dom" />
 import logger from './client-logger.ts'
 import {
   COMET_EXPORT_ATTR,

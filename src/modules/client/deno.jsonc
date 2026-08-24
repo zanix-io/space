@@ -1,0 +1,59 @@
+{
+  // Scoped `lib` override for this directory only — every file here runs in the browser, never
+  // under Deno at runtime (see `mod.ts`'s own client-barrel doc). JSR's own publish-time linter
+  // bans `/// <reference lib="dom" />` triple-slash directives in a published package (they leak
+  // into a CONSUMING project's own type environment); `compilerOptions.lib` on a nested config
+  // like this one is the JSR-blessed replacement — same DOM types, just declared at the config
+  // level instead of inline per file. Not set at the repo root: doing that would ALSO hand every
+  // server-side file `document`/`window`/etc. as if they existed, silently masking a real bug (a
+  // server file that should never reference a browser-only global type-checking as if it could).
+  //
+  // The rest of this file (`fmt`/`lint`) is not new policy — a nested `deno.json(c)` becomes its
+  // own independent config root for every setting, not just `compilerOptions`, so `fmt`/`lint`
+  // are copied verbatim from the repo root here to keep this directory on the exact same style
+  // and rule set as everywhere else, instead of silently falling back to Deno's own defaults.
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitAny": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
+    "types": [],
+    "lib": ["esnext", "dom", "dom.iterable"]
+  },
+  "lint": {
+    "rules": {
+      "tags": [
+        "recommended",
+        "jsr",
+        "react",
+        "jsx"
+      ],
+      "include": [
+        "eqeqeq",
+        "default-param-last",
+        "camelcase",
+        "no-await-in-loop",
+        "no-const-assign",
+        "no-eval",
+        "no-non-null-asserted-optional-chain",
+        "no-non-null-assertion",
+        "no-self-compare",
+        "no-sync-fn-in-async-fn",
+        "no-throw-literal",
+        "no-useless-rename"
+      ]
+    },
+    "plugins": [
+      "jsr:@zanix/utils@^3.0.0/linter/deno-zanix-plugin"
+    ],
+    "report": "pretty"
+  },
+  "fmt": {
+    "proseWrap": "always",
+    "indentWidth": 2,
+    "singleQuote": true,
+    "lineWidth": 100,
+    "useTabs": false,
+    "semiColons": false
+  }
+}

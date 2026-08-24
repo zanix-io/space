@@ -1,4 +1,3 @@
-/// <reference lib="dom" />
 import { createElement } from 'react'
 import { createRoot, hydrateRoot } from 'react-dom/client'
 import type { CometStrategy } from 'typings/comet.ts'

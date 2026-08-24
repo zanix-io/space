@@ -1,5 +1,3 @@
-/// <reference lib="dom" />
-
 /**
  * Which `hydrateComets` implementation Orbit re-hydrates a swapped outlet with.
  *

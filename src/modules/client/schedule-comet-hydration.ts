@@ -1,4 +1,3 @@
-/// <reference lib="dom" />
 import type { CometStrategy } from 'typings/comet.ts'
 
 /**

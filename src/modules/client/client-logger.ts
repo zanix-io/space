@@ -1,4 +1,3 @@
-/// <reference lib="dom" />
 /**
  * The one shared, browser-safe `Logger` instance every client-bundled module in this package logs
  * through — the React and Preact hydrate-comets modules (`comet-persistence.ts` too) all import

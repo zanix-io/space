@@ -1,4 +1,3 @@
-/// <reference lib="dom" />
 import { createElement, hydrate, render } from 'preact'
 import type { CometStrategy } from 'typings/comet.ts'
 import logger from './client-logger.ts'

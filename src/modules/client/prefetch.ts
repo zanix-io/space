@@ -1,4 +1,3 @@
-/// <reference lib="dom" />
 import { ORBIT_FRAGMENT_HEADER } from '../router/orbit-protocol.ts'
 import { findAnchor, resolveLinkInfo } from './link-info.ts'
 

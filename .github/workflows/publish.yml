@@ -25,6 +25,19 @@ jobs:
       contents: read # Allows reading of the repository's contents.
       id-token: write # Allows the creation of an ID token for authentication with JSR.
 
+    # A real S3-compatible gateway for the `*-s3.test.ts` functional suite
+    # (`src/@tests/functional/assets-api/`) — same image/command this repo's own local dev setup
+    # runs (`chrislusf/seaweedfs`, `server -s3`), so CI exercises the exact same real backend those
+    # tests are meant to prove against, not a mock. Without this service, every one of those tests
+    # stays permanently `ignore`d (gated on `RUN_S3_TESTS`) even in CI — confirmed empirically: they
+    # were never actually run here before this, on any prior workflow run.
+    services:
+      seaweedfs:
+        image: chrislusf/seaweedfs
+        ports:
+          - 8333:8333
+        command: server -s3
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -34,8 +47,37 @@ jobs:
         with:
           deno-version: v2.x
 
+      # Required by the audio/video functional suite (`voice-upload-s3.test.ts`,
+      # `video-upload-s3.test.ts`, and every other `probeFfmpegAvailability`-gated test) —
+      # confirmed NOT part of the `ubuntu-latest` runner's own default image, so without this step
+      # those tests stay permanently `ignore`d here too, same as the S3 gap above.
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      # `services:` only guarantees the CONTAINER has started, not that SeaweedFS's own S3 gateway
+      # inside it is done initializing and actually accepting connections yet — polls from the
+      # runner itself (the `seaweedfs` image has no `curl`/health-check tooling of its own to rely
+      # on for a `services.*.options` health check instead).
+      - name: Wait for SeaweedFS
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8333/ && exit 0
+            sleep 1
+          done
+          echo "SeaweedFS never became reachable on :8333" >&2
+          exit 1
+
       - name: Run tests
-        run: deno test --allow-all
+        env:
+          # Enables the `*-s3.test.ts` suite against the `seaweedfs` service above — same flag,
+          # same convention, `@zanix/datamaster`'s own `s3-object-storage.test.ts` functional suite
+          # already uses.
+          RUN_S3_TESTS: 'true'
+          S3_ENDPOINT: http://localhost:8333
+        # `--min-dep-age=0`: this repo's dependencies (e.g. `@zanix/utils`) get published and
+        # consumed here within the same day; without this flag, Deno's own minimum-dependency-age
+        # safety check can reject a fresh resolution of a package published too recently.
+        run: deno test --min-dep-age=0 --allow-all
 
       - name: Publish to Deno
         # `needs.ci.result == 'success'` is explicit, not just relying on the default `needs:`

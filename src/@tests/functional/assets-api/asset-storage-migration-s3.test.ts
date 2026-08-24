@@ -1,9 +1,12 @@
 import { assert, assertEquals } from '@std/assert'
+import { closeAllConnections, ProgramModule } from '@zanix/server'
+import { registerS3Connector } from '@zanix/datamaster/core'
 import { createLocalFilesystemAssetStorage } from 'modules/assets-api/adapters/local-filesystem-asset-storage.ts'
 import {
   createFallbackObjectStorage,
   ensureLocalObjectsSynced,
   resetLocalObjectsSyncState,
+  type S3ObjectStorage,
 } from '@zanix/datamaster/storage'
 
 /**
@@ -33,9 +36,10 @@ Deno.test({
       'S3_ENDPOINT',
       Deno.env.get('S3_ENDPOINT') || 'http://localhost:8333',
     )
-    await import(`datamaster-internal/core.ts?case=migration-s3-${crypto.randomUUID()}`)
-    const { ProgramModule } = await import('@zanix/server')
-    const { S3ObjectStorage } = await import('@zanix/datamaster/storage')
+    // Real, portable replacement for the old query-string-on-a-local-path re-evaluation trick
+    // (`datamaster-internal/core.ts?case=...`) — see `resolve-asset-storage-s3.test.ts`'s own doc.
+    await closeAllConnections()
+    registerS3Connector()
 
     const s3 = ProgramModule.getConnectors(undefined, false).get(
       's3',

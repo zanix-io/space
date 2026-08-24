@@ -1,5 +1,11 @@
 import { assert, assertEquals, assertNotEquals } from '@std/assert'
-import { bootstrapServers, ProgramModule, webServerManager } from '@zanix/server'
+import {
+  bootstrapServers,
+  closeAllConnections,
+  ProgramModule,
+  webServerManager,
+} from '@zanix/server'
+import { registerS3Connector } from '@zanix/datamaster/core'
 import { createAssetsController } from 'modules/assets-api/controllers/assets.controller.ts'
 import { createAssetService } from 'modules/assets-api/asset-service.ts'
 import { createInMemoryAssetRepository } from 'modules/assets-api/adapters/in-memory-asset-repository.ts'
@@ -83,7 +89,10 @@ Deno.test({
     )
     Deno.env.set('S3_ENCRYPT', 'symmetric')
     Deno.env.set('DATA_AES_KEY', Deno.env.get('DATA_AES_KEY') || 'e2e-test-symmetric-key')
-    await import(`datamaster-internal/core.ts?case=encrypted-e2e-${crypto.randomUUID()}`)
+    // Real, portable replacement for the old query-string-on-a-local-path re-evaluation trick
+    // (`datamaster-internal/core.ts?case=...`) — see `resolve-asset-storage-s3.test.ts`'s own doc.
+    await closeAllConnections()
+    registerS3Connector()
     const { S3ObjectStorage } = await import('@zanix/datamaster/storage')
 
     const s3 = ProgramModule.getConnectors(undefined, false).get(

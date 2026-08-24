@@ -243,6 +243,21 @@ async function measure(
 
   const metrics = await page.evaluate(collectMetrics)
 
+  // Warm-up click, discarded — on `like-1`, a DIFFERENT LikeButton instance from the one measured
+  // below (`like-0`), so its own toggled state never touches what the real measurement waits on.
+  // The first real interaction after navigation absorbs a fixed cost every variant pays alike
+  // (first Chromium input-dispatch/compositor round trip, first post-idle paint, first
+  // React/Preact synthetic-event-system + click-handler JIT warm-up) — without this, that cost
+  // always lands on whichever metric gets clicked first (`interactionLatencyMs` below), inflating
+  // it relative to `cartInteractionLatencyMs` for reasons that have nothing to do with either
+  // component's own architecture. Confirmed empirically: the gap was LARGEST in variant A, which
+  // has zero Comet machinery at all — ruling out hydration-boundary cost as the explanation.
+  await page.click('[data-testid="like-1"]')
+  await page.waitForFunction(() => {
+    const el = document.querySelector('[data-testid="like-1"]')
+    return el?.textContent?.includes('♥') ?? false
+  })
+
   const likeStart = Date.now()
   await page.click('[data-testid="like-0"]')
   await page.waitForFunction(() => {

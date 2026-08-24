@@ -3,12 +3,14 @@
 import '../../../../mod-react.ts'
 // Registers a REAL `'cache'` core provider (in-memory `cache:local` connector) — a module-level
 // side effect that, once registered, stays registered for the rest of THIS process. Deliberately
-// its own file, not folded into `define-space-app-log-api-guards.test.tsx`: `deno test` isolates
-// each file into its own worker, so that sibling file's own "no cache provider registered" fixture
-// (proving the fail-open path, see its own top-level doc) is never contaminated by this one — same
-// isolation reasoning `resolve-asset-storage-local.test.ts`'s own top-level doc already documents
-// for the identical `@zanix/datamaster/core` side effect. Only ever imported from a TEST file —
-// `@zanix/space`'s own runtime source never does this (see `modules/assets-api/mod.ts`'s own doc).
+// its own file, not folded into `define-space-app-log-api-fail-open.test.tsx`: `deno test`
+// isolates each file into its own worker, so that sibling file's own "no cache provider
+// registered" fixture (proving the fail-open path, see ITS own top-level doc — not this file's
+// nor `define-space-app-log-api-guards.test.tsx`'s, which only proves wiring) is never
+// contaminated by this one — same isolation reasoning `resolve-asset-storage-local.test.ts`'s own
+// top-level doc already documents for the identical `@zanix/datamaster/core` side effect. Only
+// ever imported from a TEST file — `@zanix/space`'s own runtime source never does this (see
+// `modules/assets-api/mod.ts`'s own doc).
 import '@zanix/datamaster/core'
 import { assert, assertEquals } from '@std/assert'
 import { activateApps, deactivateApps } from '@zanix/app/runtime'

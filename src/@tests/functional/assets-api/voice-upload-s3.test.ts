@@ -1,5 +1,11 @@
 import { assert, assertEquals } from '@std/assert'
-import { bootstrapServers, ProgramModule, webServerManager } from '@zanix/server'
+import {
+  bootstrapServers,
+  closeAllConnections,
+  ProgramModule,
+  webServerManager,
+} from '@zanix/server'
+import { registerS3Connector } from '@zanix/datamaster/core'
 import { probeFfmpegAvailability } from 'modules/media/ffmpeg-availability.ts'
 import { createAssetsController } from 'modules/assets-api/controllers/assets.controller.ts'
 import { createAssetService } from 'modules/assets-api/asset-service.ts'
@@ -54,7 +60,10 @@ Deno.test({
       'S3_ENDPOINT',
       Deno.env.get('S3_ENDPOINT') || 'http://localhost:8333',
     )
-    await import('datamaster-internal/core.ts?case=voice-upload-s3')
+    // Real, portable replacement for the old query-string-on-a-local-path re-evaluation trick
+    // (`datamaster-internal/core.ts?case=...`) — see `resolve-asset-storage-s3.test.ts`'s own doc.
+    await closeAllConnections()
+    registerS3Connector()
 
     const dir = await Deno.makeTempDir()
     const sourcePath = `${dir}/source.wav`

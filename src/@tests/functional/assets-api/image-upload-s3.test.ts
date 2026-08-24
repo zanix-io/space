@@ -1,5 +1,11 @@
 import { assert, assertEquals, assertNotEquals } from '@std/assert'
-import { bootstrapServers, ProgramModule, webServerManager } from '@zanix/server'
+import {
+  bootstrapServers,
+  closeAllConnections,
+  ProgramModule,
+  webServerManager,
+} from '@zanix/server'
+import { registerS3Connector } from '@zanix/datamaster/core'
 import { createAssetsController } from 'modules/assets-api/controllers/assets.controller.ts'
 import { createAssetService } from 'modules/assets-api/asset-service.ts'
 import { createInMemoryAssetRepository } from 'modules/assets-api/adapters/in-memory-asset-repository.ts'
@@ -36,7 +42,12 @@ Deno.test({
       'S3_ENDPOINT',
       Deno.env.get('S3_ENDPOINT') || 'http://localhost:8333',
     )
-    await import('datamaster-internal/core.ts?case=image-upload-s3')
+    // Real, portable replacement for the old query-string-on-a-local-path re-evaluation trick
+    // (`datamaster-internal/core.ts?case=...`) — see `resolve-asset-storage-s3.test.ts`'s own doc.
+    // `registerS3Connector` is a real, callable export now, so a fresh connector registry entry
+    // (reading `S3_ENDPOINT` just set above) needs no module re-evaluation at all.
+    await closeAllConnections()
+    registerS3Connector()
 
     const dir = await Deno.makeTempDir()
     // A high-quality (100) source — re-encoding through the pipeline's own default optimize

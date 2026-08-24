@@ -9,22 +9,23 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- **Client-bundled code no longer imports the server `@zanix/logger` — `hydrate-comets.ts`/
-  `hydrate-comets-preact.ts`/`comet-persistence.ts` now log through one shared browser-safe instance
-  (`modules/client/client-logger.ts`, built via `@zanix/utils@3.1.0`'s new `createClientLogger`).**
-  Previously, importing `@zanix/logger` in these files pulled `WorkerManager`/`Deno.readTextFile`
-  into the client bundle — invisible at runtime (no thrown error, no console warning), but real dead
-  weight in every app's shipped JS. This client logger POSTs each already-formatted log entry to a
-  new backend relay, **`POST /api/log`** (`modules/log-api/`, `createLogApiController`), always
-  registered as part of `defineSpaceApp`'s own `setup()` — core observability plumbing, not an
-  opt-in `SpaceAppConfig` field, unlike `assetsApi`. The handler validates only `level`
-  (`LoggerMethods`) and relays the rest of the body into the server's own `@zanix/logger` default
-  instance via `Logger#ingest`, per `@zanix/utils`'s own documented relay contract — so a
-  browser-originated log persists through whatever backend (file, Elasticsearch, a custom sink) the
-  server's own logger is already configured with, with no separate wiring needed. No full auth on
-  this route — the same genuinely-public posture `sitemap.xml`/`robots.txt` already establish, since
-  the whole point is accepting a POST from any anonymous browser tab that ever loaded this app's
-  client bundle — but it's not unguarded: see the new default `rateLimitGuard` entry below.
+- **Client-bundled code never imports the server `@zanix/logger` — `hydrate-comets.ts`/
+  `hydrate-comets-preact.ts`/`comet-persistence.ts` log through one shared browser-safe instance
+  instead** (`modules/client/client-logger.ts`, built via `@zanix/utils@3.1.0`'s new
+  `createClientLogger`). Importing `@zanix/logger` directly in these files would pull
+  `WorkerManager`/`Deno.readTextFile` into the client bundle — invisible at runtime (no thrown
+  error, no console warning), but real dead weight in every app's shipped JS. This client logger
+  POSTs each already-formatted log entry to a new backend relay, **`POST /api/log`**
+  (`modules/log-api/`, `createLogApiController`), always registered as part of `defineSpaceApp`'s
+  own `setup()` — core observability plumbing, not an opt-in `SpaceAppConfig` field, unlike
+  `assetsApi`. The handler validates only `level` (`LoggerMethods`) and relays the rest of the body
+  into the server's own `@zanix/logger` default instance via `Logger#ingest`, per `@zanix/utils`'s
+  own documented relay contract — so a browser-originated log persists through whatever backend
+  (file, Elasticsearch, a custom sink) the server's own logger is already configured with, with no
+  separate wiring needed. No full auth on this route — the same genuinely-public posture
+  `sitemap.xml`/`robots.txt` already establish, since the whole point is accepting a POST from any
+  anonymous browser tab that ever loaded this app's client bundle — but it's not unguarded: see the
+  new default `rateLimitGuard` entry below.
 - **`POST /api/log` now forwards `data.origin` into `Logger#ingest`'s new `origin` parameter**
   (`ingest(type, origin = 'client', ...data)`, per `@zanix/utils`'s own updated contract) instead of
   relying on `Logger#ingest`'s previous, origin-less signature. `client-logger.ts`'s own `postLog`
@@ -33,17 +34,16 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
   `data.origin` through as `undefined` when absent, never resolving that default a second time
   itself. A caller relaying from somewhere else (not this package's own client) can still send an
   explicit `origin` to override it.
-- **`POST /api/log` now has a mandatory default `rateLimitGuard`** (new `@zanix/auth` dependency,
-  `createLogApiController`), replacing the previous "rate limiting is left to the app's own reverse
-  proxy/CDN" stance — that framing had zero precedent anywhere else in the ecosystem and is now
-  fixed at the source instead. Default: `anonymousLimit: 30` requests per `windowSeconds: 60`,
-  `trustProxyHeader: true` (per-caller IP+User-Agent buckets, not one shared bucket) — a
-  deliberately low, human-tab-sized budget ("poco límite"), sized well above real page-load/error
-  telemetry but well short of meaningful storage write amplification from a runaway/abusive caller.
-  Two new, DIFFERENT `SpaceAppConfig.logApi` knobs over this same default: `guards` lets an
-  integrator append EXTRA guards after it — unlike `assetsApi.guards` (which replaces its
-  `[denyAllGuard]` placeholder once configured), this default is the decided policy and is never
-  replaceable via `guards`, only extended; `rateLimit`
+- **`POST /api/log` ships with a mandatory default `rateLimitGuard`** (new `@zanix/auth` dependency,
+  `createLogApiController`) — leaving rate limiting to the app's own reverse proxy/CDN would have
+  zero precedent anywhere else in the ecosystem, so it's fixed at the source instead. Default:
+  `anonymousLimit: 30` requests per `windowSeconds: 60`, `trustProxyHeader: true` (per-caller
+  IP+User-Agent buckets, not one shared bucket) — a deliberately low, human-tab-sized budget ("poco
+  límite"), sized well above real page-load/error telemetry but well short of meaningful storage
+  write amplification from a runaway/abusive caller. Two new, DIFFERENT `SpaceAppConfig.logApi`
+  knobs over this same default: `guards` lets an integrator append EXTRA guards after it — unlike
+  `assetsApi.guards` (which replaces its `[denyAllGuard]` placeholder once configured), this default
+  is the decided policy and is never replaceable via `guards`, only extended; `rateLimit`
   (`{ anonymousLimit?, windowSeconds?,
   trustProxyHeader? }`) is the real "change the floor"
   surface instead, for an app whose traffic profile or deployment topology (whether it genuinely
@@ -64,9 +64,6 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
   `@zanix/validator`/`@zanix/types` aliases from `^3.0.3` to `^3.1.2` (same underlying package) —
   the first published release with `Logger#ingest`'s `origin` parameter and `createClientLogger`'s
   `disableGlobalAssign` default, both required by this change.
-
-### Changed
-
 - **BREAKING (pre-release, no known consumers): three framework-owned request headers renamed to the
   ecosystem-wide `X-Znx-` namespace** — `x-csrf-token` → `X-Znx-Csrf-Token` (`csrfGuard`'s default
   `headerName`, still customizable), `x-asset-filename` → `X-Znx-Asset-Filename`
@@ -74,47 +71,45 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
   (`ORBIT_FRAGMENT_HEADER`, also the `Vary` value every Orbit-negotiated response sets). These were
   the only custom headers in the whole ecosystem outside that namespace, confirmed via a full
   12-repo audit — a client/proxy sending or matching the old literal names needs updating.
-
-### Fixed
-
-- **The published package no longer contains `/// <reference lib="dom" />` triple-slash directives**
-  — JSR's own publish-time linter bans them, since they leak into a consuming project's own type
-  environment. The nine `src/modules/client/*.ts` files that relied on this directive now get their
-  DOM types from a scoped `compilerOptions.lib` override on a new `src/modules/client/deno.jsonc`
-  instead — same types resolve for a consumer, only the mechanism changed. Kept out of the repo root
-  config deliberately: applying it there would also hand every server-side file `document`/`window`
-  as if they existed, masking a real bug (a server file referencing a browser-only global that
-  should never type-check as if it could).
-- **`LogIngestRTO`'s `data` field now validates correctly — previously, EVERY real `POST /api/log`
-  request, even well-formed ones, failed with `400 BAD_REQUEST`
-  (`"The 'data'
-  property must be defined."`).** `@zanix/validator`'s own `@Expose()` "must be
-  defined" check is keyed off the raw request body's OWN `data` property, which never exists as a
+- **The published package carries no `/// <reference lib="dom" />` triple-slash directives** — JSR's
+  own publish-time linter bans them, since they leak into a consuming project's own type
+  environment. The nine `src/modules/client/*.ts` files get their DOM types from a scoped
+  `compilerOptions.lib` override on a new `src/modules/client/deno.jsonc` instead — the same types
+  resolve for a consumer either way. Kept out of the repo root config deliberately: applying it
+  there would also hand every server-side file `document`/`window` as if they existed, masking a
+  real bug (a server file referencing a browser-only global that should never type-check as if it
+  could).
+- **`LogIngestRTO`'s `data` field validates correctly.** `@zanix/validator`'s own `@Expose()` "must
+  be defined" check is keyed off the raw request body's OWN `data` property, which never exists as a
   literal top-level key on the wire — `data` is `LogIngestRTO`'s own constructor-computed
-  rest-spread of "everything except `level`", not a field with a matching payload key. Never caught
-  before because no functional/integration test had ever exercised this route over real HTTP (only
-  direct RTO construction, which bypasses the validation decorators entirely). Fixed with
+  rest-spread of "everything except `level`", not a field with a matching payload key, so a naive
+  `@Expose()` would reject EVERY well-formed `POST /api/log` request with `400 BAD_REQUEST`
+  (`"The 'data'
+  property must be defined."`). Caught by a functional/integration test that
+  exercises this route over real HTTP (direct RTO construction alone bypasses the validation
+  decorators entirely, so it wouldn't have surfaced this) before any real request could ever hit it.
   `@Expose({ optional:
-  true })`.
-- **`langGuard`/`langPreHandler`/`populationGuard`'s cookies now include `Secure`** (built from
+  true })` is the fix.
+- **`langGuard`/`langPreHandler`/`populationGuard`'s cookies include `Secure`** (built from
   `@zanix/utils`'s new `PUBLIC_COOKIE_ATTRIBUTES`, the client-readable counterpart to
-  `SESSION_COOKIE_ATTRIBUTES`) — the only cookies in the ecosystem missing it, confirmed via the
-  same 12-repo audit above. A browser could previously attach these cookies over a plain-HTTP
-  connection.
-- **`csrfGuard`/`langGuard`/`langPreHandler`/`populationGuard` now throw at construction
+  `SESSION_COOKIE_ATTRIBUTES`), so a browser never attaches them over a plain-HTTP connection —
+  confirmed via the same 12-repo audit above as the only cookies in the ecosystem that would
+  otherwise have missed it.
+- **`csrfGuard`/`langGuard`/`langPreHandler`/`populationGuard` throw at construction
   (`@zanix/utils`'s new `assertZnxCookieName`) if a custom `cookieName` doesn't start with
-  `X-Znx-`** — previously this was documented as a hard requirement but never enforced: a typo'd
-  `cookieName` silently became invisible to `@zanix/server`'s `cookiesGuard` (or, for
-  `langPreHandler`, just inconsistent with the ecosystem-wide naming convention) instead of failing
-  loudly where the mistake was actually made. `csrfGuard` additionally requires the name contain
-  `Csrf`, so a customized name stays recognized by `@zanix/utils`'s sensitive-key redaction pattern.
-- `deno lint`'s own `@zanix/utils` plugin (`deno-zanix-plugin`) is now version-pinned (`^2.6.1`),
-  matching every other `@zanix/utils` import in `deno.jsonc` — it used to resolve unpinned, so a
-  lint run could silently pick up a newer, unreviewed plugin version.
-- **`createLocalFilesystemAssetStorage` confines every `key` to `rootDir` before touching disk,**
-  same fix and same reason as `@zanix/datamaster`'s `createLocalFilesystemObjectStorage` (routed
-  through the shared `@zanix/helpers`'s `confinePath`) — `bytesPath`/`metaPath` used to join `key`
-  straight onto `rootDir` with no containment check.
+  `X-Znx-`** — a hard requirement, enforced at the exact point a mistake could be made: an
+  unprefixed `cookieName` would otherwise be silently invisible to `@zanix/server`'s `cookiesGuard`
+  (or, for `langPreHandler`, just inconsistent with the ecosystem-wide naming convention), rather
+  than failing loudly. `csrfGuard` additionally requires the name contain `Csrf`, so a customized
+  name stays recognized by `@zanix/utils`'s sensitive-key redaction pattern.
+- `deno lint`'s own `@zanix/utils` plugin (`deno-zanix-plugin`) is version-pinned (`^2.6.1`),
+  matching every other `@zanix/utils` import in `deno.jsonc` — pinning it keeps a lint run from
+  silently picking up a newer, unreviewed plugin version.
+- **`createLocalFilesystemAssetStorage` confines every `key` to `rootDir` before touching disk**
+  (routed through the shared `@zanix/helpers`'s `confinePath`), the same containment guarantee
+  `@zanix/datamaster`'s `createLocalFilesystemObjectStorage` establishes — `bytesPath`/`metaPath`
+  never join `key` straight onto `rootDir` without it, closing off a path-traversal-shaped key
+  before it can reach disk.
 - **`AssetIdParamsRTO.id` (the `GET /assets/:id`, `/:id/status`, `/:id/download` route param) is
   validated as a real UUID (`@IsUUID`) instead of an unrestricted string.** `id` is always a
   `generateUUID()` value minted server-side by `AssetService` — rejecting anything else at the API
@@ -142,37 +137,29 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
   overlapping requests for the same href never produce a duplicate `<link>`.
   `ensureStylesheetsLoaded` itself is now exported (only `swapOutlet` calls it in real client code)
   so the test can reach it directly.
-- **`AssetService.createAsset()` now enforces a real, configurable per-kind upload size cap
-  (`AssetServiceOptions.limits`, default 25MB image / 50MB audio / 200MB video).** Two layers: a
-  fast reject against `UploadedAsset.size` (`Content-Length`) when the client sent one, followed by
-  the real enforcement — `readBoundedBytes()` aborting the drain (`reader.cancel()`) the instant the
-  cap is exceeded while buffering, which is what actually matters since `Content-Length` is optional
-  (absent with chunked transfer-encoding) and client-controlled. Previously the upload stream was
-  buffered whole into memory with no cap at all, regardless of what `Content-Length` claimed.
-- **`runImageTransformation` now verifies the uploaded bytes actually match their declared
-  `Content-Type`'s real file signature (jpeg/png/webp magic bytes, `magic-bytes.ts`), not just the
-  client-supplied header.** Runs after the size cap above, on already-bounded bytes, before the
-  bytes ever reach `sharp`/`transformImage`. Previously the jpeg/png/webp allowlist only checked the
-  header — nothing verified the bytes genuinely were what the header claimed.
-
-### Documentation
-
-- **README's "CLI scaffolding" line no longer says "not yet implemented."** `zanix new space`/
-  `zanix new spacecraft` (`@zanix/cli`) are real, tested commands — file-based routing, a Comet
-  example, `--renderer`, and an opt-in `--icons` catalog — and have been for a while; the README had
-  simply never been updated to say so.
-- **Removed a stale "Not implemented yet" paragraph in the CSS/theming section that contradicted the
-  paragraph immediately above it.** Runtime, per-request token personalization
-  (`defineSpaceApp({ theme: { resolve } })`) is real and already fully documented there
-  (sanitization, CSP, ETag folding) and in `docs/theming.md`; the removed paragraph was leftover
-  text from before that feature existed, incorrectly claiming it was deferred pending the
-  i18n/population subsystem.
-- **README's PWA `space.app.ts` example used two fields (`iconsDir`, `swPath`) that don't exist on
-  `PwaConfig`,** left over from before `loadPwaBuildOutput` replaced them, and was missing the
-  type's actually-required `icon` field — as written it wouldn't type-check. Now shows the real
-  `defineSpaceApp({ pwa: { icon } })` shape plus the separate `main.ts`-side `loadPwaBuildOutput`
-  call `registerPwa` actually reads, matching the `loadCssManifest`/`loadCometManifest` convention
-  the CSS/Comets sections already document correctly.
+- **`AssetService.createAsset()` enforces a real, configurable per-kind upload size cap**
+  (`AssetServiceOptions.limits`, default 25MB image / 50MB audio / 200MB video). Two layers: a fast
+  reject against `UploadedAsset.size` (`Content-Length`) when the client sent one, followed by the
+  real enforcement — `readBoundedBytes()` aborting the drain (`reader.cancel()`) the instant the cap
+  is exceeded while buffering, which is what actually matters since `Content-Length` is optional
+  (absent with chunked transfer-encoding) and client-controlled, so the upload stream is never
+  buffered whole into memory with no cap regardless of what `Content-Length` claims.
+- **`runImageTransformation` verifies the uploaded bytes actually match their declared
+  `Content-Type`'s real file signature** (jpeg/png/webp magic bytes, `magic-bytes.ts`), not just the
+  client-supplied header. Runs after the size cap above, on already-bounded bytes, before the bytes
+  ever reach `sharp`/`transformImage` — so a mislabeled `Content-Type` can never smuggle bytes past
+  the jpeg/png/webp allowlist on the header's claim alone.
+- **README's "CLI scaffolding" section documents `zanix new space`/`zanix new spacecraft`
+  (`@zanix/cli`) as the real, tested commands they are** — file-based routing, a Comet example,
+  `--renderer`, and an opt-in `--icons` catalog.
+- **The CSS/theming section documents runtime, per-request token personalization
+  (`defineSpaceApp({ theme: { resolve } })`) consistently**, with no contradictory claim elsewhere
+  in the section that it's deferred pending an i18n/population subsystem — sanitization, CSP, and
+  ETag folding are covered there and in `docs/theming.md`.
+- **README's PWA `space.app.ts` example matches the real `PwaConfig` shape and type-checks as
+  written**: `defineSpaceApp({ pwa: { icon } })` plus the separate `main.ts`-side
+  `loadPwaBuildOutput` call `registerPwa` actually reads, matching the `loadCssManifest`/
+  `loadCometManifest` convention the CSS/Comets sections already document correctly.
 - **Closed six `deno doc --lint` gaps** (`AssetsOptimizeOptions`, `MediaOptimizeOptions`,
   `SsrModuleChangedEvent` now re-exported, type-only, from `mod.ts`; `DevClientScriptOptions` now
   re-exported, type-only, from `mod-react.ts`/`mod-preact.ts`) — each was already a real field on a
@@ -191,38 +178,35 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
   README + `docs/*.md` still resolves); the "Current status" feature list and several sections
   (Not-found page, Head management, Document shell, SEO helpers) were also tightened in place — same
   facts, less restatement of what the section right below (or the linked guide) already says.
-- **`setAssetsManifestState`'s own doc comment no longer claims it isn't exported from a public
-  entry point.** `deno.jsonc`'s `./assets-manifest` subpath maps `assets-manifest.ts` directly, so
-  this test-only escape hatch — unlike every sibling `set*`/`reset*` test hatch, each of which sits
+- **`setAssetsManifestState`'s own doc comment accurately says it's reachable from a public entry
+  point.** `deno.jsonc`'s `./assets-manifest` subpath maps `assets-manifest.ts` directly, so this
+  test-only escape hatch — unlike every sibling `set*`/`reset*` test hatch, each of which sits
   behind a curated barrel that omits it — really is reachable as `@zanix/space/assets-manifest`. No
-  export or routing changed; the comment now says so and notes it's still not meant for production
-  use.
+  export or routing changed; the comment says so and notes it's still not meant for production use.
 - **New `docs/assets-api.md`** — the full reference for `@zanix/space/assets-api` (the Asset HTTP
-  upload/transform/download API added earlier in this same `[Unreleased]` window:
-  `createAssetService`/ `createAssetsController` composition, the deny-by-default `denyAllGuard`,
-  the upload contract (`readUploadedAssetFromRequest`'s streaming/no-multipart shape), the
-  `AssetLimits` size caps and magic-byte content verification fixed above, the `AssetStatus`
-  lifecycle, and the storage/ repository adapters — including the structural-typing story for
-  `@zanix/datamaster`'s `S3ObjectStorage`/`MongoFileRepository`, which this package never imports
-  directly. Previously this subpath had JSDoc only, with zero coverage in `docs/` or the README;
-  README's "Assets" section now links to it, disambiguated explicitly from the unrelated build-time
-  pipeline `docs/assets.md` already documents.
-
-### Changed
-
-- **BREAKING — `@zanix/space` no longer ships a renderer: `@zanix/space/react` and
-  `@zanix/space/preact` are now separate entry points.** Importing the framework never evaluates
-  `react`, `react-dom/server` or `preact` any more — verified on the real import graph (0 value AND
-  0 type edges from `.`, `./vite`, `./dev`, `./testing`) and by a real Preact SSR render in a
+  upload/transform/download API added earlier in this same `[0.1.0]` release: `createAssetService`/
+  `createAssetsController` composition, the deny-by-default `denyAllGuard`, the upload contract
+  (`readUploadedAssetFromRequest`'s streaming/no-multipart shape), the `AssetLimits` size caps and
+  magic-byte content verification described above, the `AssetStatus` lifecycle, and the storage/
+  repository adapters — including the structural-typing story for `@zanix/datamaster`'s
+  `S3ObjectStorage`/`MongoFileRepository`, which this package never imports directly. This subpath
+  otherwise has JSDoc only, with no coverage in `docs/` or the README; README's "Assets" section now
+  links to it, disambiguated explicitly from the unrelated build-time pipeline `docs/assets.md`
+  already documents.
+- **`@zanix/space` ships no renderer of its own — `@zanix/space/react` and `@zanix/space/preact` are
+  separate entry points that supply the React/Preact implementation.** Importing the framework never
+  evaluates `react`, `react-dom/server`, or `preact` — verified on the real import graph (0 value
+  AND 0 type edges from `.`, `./vite`, `./dev`, `./testing`) and by a real Preact SSR render in a
   subprocess where React is poisoned to throw on evaluation
   (`@tests/functional/render/renderer-isolation.test.ts`).
 
-  Three eager React defaults caused the coupling and are gone: the page-renderer registry, the
-  not-found-renderer registry and the Comet element factory. All three are now installed by
+  The three things that would otherwise couple the framework to React eagerly — the page-renderer
+  registry, the not-found-renderer registry, and the Comet element factory — are each installed by
   whichever renderer entry point an app imports, symmetrically, through one seam
   (`router/renderer-runtime.ts`).
 
-  **Migration** — add one import to the app's own main module, matching what it already declares:
+  **Wiring** — an app declares its renderer with one import in its own main module, matching what
+  `defineSpaceApp({ renderer })` declares:
 
   ```diff
   + import '@zanix/space/react'   // or '@zanix/space/preact'
@@ -231,26 +215,22 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
     export default defineSpaceApp({ name: 'storefront' })
   ```
 
-  `defineSpaceApp({ renderer })` remains the single source of truth for which renderer a project
-  uses; the entry point supplies the implementation and the two are checked against each other at
+  `defineSpaceApp({ renderer })` is the single source of truth for which renderer a project uses;
+  the entry point supplies the implementation, and the two are checked against each other at
   startup, so a mismatch (or a missing import) fails immediately with a message naming both. No
   renderer detection, no second configuration key.
 
-  **Exports that moved** — from `@zanix/space` to `@zanix/space/react`: `renderToResponse`,
-  `RenderToResponseOptions`, `RequestCacheProvider`, `useRequestCache`, `RequestCache`. They cannot
-  be re-exported from `.` for compatibility: a value re-export recreates the very edge this change
-  removes. The Preact serializer is now public too, as `@zanix/space/preact`'s own
-  `renderToResponse` (previously internal).
+  **Renderer-specific exports live at their own entry point, never at `.`**: `@zanix/space/react`
+  carries `renderToResponse`, `RenderToResponseOptions`, `RequestCacheProvider`, `useRequestCache`,
+  `RequestCache` — re-exporting them from `.` would recreate the very coupling this design avoids.
+  The Preact serializer is public too, as `@zanix/space/preact`'s own `renderToResponse`.
 
-  Everything else stays exactly where it was — `defineSpaceApp`, `SpacePageController`, `Page`,
-  `loadRoutes`, `defineComet`, `createNotFoundHandler` and the whole document/SEO/PWA/i18n/
-  middleware/validation surface are renderer-agnostic and unmoved.
+  Everything else — `defineSpaceApp`, `SpacePageController`, `Page`, `loadRoutes`, `defineComet`,
+  `createNotFoundHandler`, and the whole document/SEO/PWA/i18n/middleware/validation surface — is
+  renderer-agnostic and lives at `.`.
 
-  Calling `getPageRenderer()`/`getNotFoundRenderer()` with no entry point imported now throws an
-  explicit `InternalError` naming the import to add, instead of silently rendering with React.
-
-### Added
-
+  Calling `getPageRenderer()`/`getNotFoundRenderer()` with no entry point imported throws an
+  explicit `InternalError` naming the import to add, rather than silently rendering with React.
 - **Voice audio optimization — the first real, implemented audio capability
   (`modules/media/audio/`), reached via `AssetTransformer.transformAudio()` and, at build time,
   `mediaPlugin({ optimize: { audio: { voice } } })`.** Preceded by a real audit (legacy `js`
@@ -570,10 +550,10 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
   `globalCss` entries now accept the SAME `StylesheetRef` shape already introduced
   (`string |
   {href, media?}`), and `css-manifest.json`'s `global` scope is now written in the
-  EXACT order `globalCss` declared it, fixing a real, confirmed bug: the manifest used to be written
-  in whatever order `Object.values(bundle)` yielded (alphabetical by hashed output filename),
-  silently contradicting `globalCss`'s own documented "declaration order matters, later entries can
-  override earlier ones" contract.
+  EXACT order `globalCss` declared it — a real bug found and fixed while building this: writing the
+  manifest by walking whatever order `Object.values(bundle)` yielded (alphabetical by hashed output
+  filename) would have silently contradicted `globalCss`'s own documented "declaration order
+  matters, later entries can override earlier ones" contract.
   - `defineSpaceApp({ globalCss: [{href: './mobile.css', media: '(max-width: 599px)'}, './base.css'] })`
     — a plain string entry is the byte-for-byte original contract; `media` is the same opaque,
     author-supplied string `StylesheetRef` already defined, never parsed/validated, no breakpoint
@@ -608,13 +588,13 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
     `render-page-preact` — a `{href, media}` entry renders its `media` attribute in React and in
     Preact; a plain string entry renders none), 2 unit (`resolveDevCssHrefs` threading `media`
     through the dev `?direct` transform, string/object entries mixing freely in order).
-- **Comet-scoped CSS (the first slice of the CSS delivery architecture)** — fixes a real, confirmed
-  bug: a Comet's own CSS Module (`import styles from './widget.module.css'` inside a `'use comet'`
-  file) used to ship on **every** full-document response, whether or not that page actually rendered
-  the Comet — proven with a real `buildSpaceClient()` build plus a real SSR render of a page that
-  never used the Comet, not just inferred from reading `cssPlugin`'s own code. The fix scopes a
-  Comet's CSS to follow the Comet itself: unused on a page → never linked; used → linked exactly
-  where that Comet renders.
+- **Comet-scoped CSS (the first slice of the CSS delivery architecture)** — a real bug found and
+  fixed while building this: a naive implementation would have shipped a Comet's own CSS Module
+  (`import styles from './widget.module.css'` inside a `'use comet'` file) on **every**
+  full-document response, whether or not that page actually rendered the Comet — caught with a real
+  `buildSpaceClient()` build plus a real SSR render of a page that never used the Comet, not just
+  inferred from reading `cssPlugin`'s own code. The shipped design scopes a Comet's CSS to follow
+  the Comet itself: unused on a page → never linked; used → linked exactly where that Comet renders.
   - New `StylesheetRef` type (`string | { href: string; media?: string }`) — a plain string is the
     byte-for-byte pre-existing contract; the object form is strictly additive, carrying an opaque,
     author-supplied `media` string (never parsed/validated beyond `typeof === 'string'`, rendered as
@@ -627,8 +607,9 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
   - `cssPlugin({ cometEntries })` (new option, wired automatically by `build-client.ts` — no app
     config needed) correlates each Comet's own forced build entry to its real, hashed CSS output via
     Vite's own `chunk.viteMetadata.importedCss`, claiming those filenames out of the flat sweep that
-    used to populate `global` unconditionally. A Comet entry with no CSS of its own contributes
-    nothing; an app with zero Comets writes no `comets` field at all — fully backward compatible.
+    would otherwise populate `global` unconditionally. A Comet entry with no CSS of its own
+    contributes nothing; an app with zero Comets writes no `comets` field at all — fully backward
+    compatible.
   - `CometBoundary` (`define-comet.tsx`) renders its own resolved CSS `<link>`s inline, at the
     Comet's own tree position — React and Preact reach the same outcome through two genuinely
     different, deliberately NOT unified mechanisms, since React alone has native support for the
@@ -807,8 +788,8 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
   - PWA icons/favicon are explicitly out of scope too — still `pwaPlugin`/`registerPwa`'s own,
     separate, already-working pipeline; `assetsDir` is for general component-referenced content.
   - Explicitly NOT included (deliberately deferred, separate future task if ever needed): module
-    aliasing for `import`-based assets. Hashing/manifest for production caching is no longer
-    deferred — see `assetsPlugin` further below.
+    aliasing for `import`-based assets. Hashing/manifest for production caching is included — see
+    `assetsPlugin` further below.
   - 27 new tests across `scan-assets.test.ts`, `asset-registry.test.ts`,
     `define-space-app.test.tsx`, and a new `functional/assets/assets-serving.test.tsx` — covering
     base + host override + fallback, multiple directories, nested levels, case-sensitive names, 404,
@@ -828,17 +809,16 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
   assembled from mismatched directories. A single `string` (the default, `'./routes'`) behaves
   exactly as before this array support existed.
 - **`addGlobalCssPaths(paths)`** (`.`, `./render`) — appends to the process-wide `globalCss` list
-  instead of replacing it, and is now what `defineSpaceApp({ globalCss })` itself calls internally
-  (previously `setGlobalCssPaths`, a hard replace). Lets a HOST compose a base app's own `globalCss`
-  automatically: if the base app's own `defineSpaceApp()` call executes first, its stylesheets
-  already occupy the front of the list by the time a host's own customization app's
-  `defineSpaceApp
-  ({ globalCss: [...] })` call appends its own — `['./base.css']` then
-  `['./custom.css']` composes to `['./base.css', './custom.css']`, with neither app referencing the
-  other's file paths. Order is simply WHEN each `defineSpaceApp()` call executes, same "declaration
-  order wins" principle `activateApps()`'s own `onStart` sequencing already follows.
-  `setGlobalCssPaths` itself is unchanged — still an exact hard replace/reset, for tests or an
-  advanced caller that genuinely wants to discard whatever was accumulated.
+  instead of replacing it, and is what `defineSpaceApp({ globalCss })` itself calls internally. Lets
+  a HOST compose a base app's own `globalCss` automatically: if the base app's own
+  `defineSpaceApp()` call executes first, its stylesheets already occupy the front of the list by
+  the time a host's own customization app's `defineSpaceApp
+  ({ globalCss: [...] })` call appends
+  its own — `['./base.css']` then `['./custom.css']` composes to `['./base.css', './custom.css']`,
+  with neither app referencing the other's file paths. Order is simply WHEN each `defineSpaceApp()`
+  call executes, same "declaration order wins" principle `activateApps()`'s own `onStart` sequencing
+  already follows. `setGlobalCssPaths` itself is unchanged — still an exact hard replace/reset, for
+  tests or an advanced caller that genuinely wants to discard whatever was accumulated.
 - **`populationGuard`** (`.`) — resolves which population (segment/tenant content variant) a request
   is for: route param, then query string, then a persisted `X-Znx-Population` cookie, in that order,
   exposed as `ctx.population` inside `loader`. Resolved **on the server**, not just the client —
@@ -920,14 +900,15 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
   now locate the configured directory to compile it — `@zanix/cli`'s own `writeCompiledMessagesTree`
   is the first real consumer. `@zanix/space` itself still never inspects a catalog's own content;
   this only exposes the path string a project already declared.
-  - **Fix, not just an addition**: `messagesDir` used to be stored inside `defineSpaceApp()`'s own
-    `setup()` — the same composition scope `assetsDir`'s directory SCAN runs in, but unlike
-    `assetsDir`'s own PATH (`setAssetsDirConfig`, already eager for exactly this reason),
-    `messagesDir`'s path was never split out. That meant `getMessagesDir()` returned `undefined` for
-    any orchestrator that imports the manifest without calling `activateApps()` — invisible to
-    `zanix space build` specifically, the one thing that needed it. Moved to the same eager point
-    `assetsDir`'s own path already uses; `loadMessages()`'s own resolution timing is completely
-    unaffected — still per-`(lang, population)` key, on first access, never eager.
+  - **A real bug caught and fixed while building this, not just new surface**: `messagesDir`'s path
+    is resolved at the same eager point `assetsDir`'s own path already uses — unlike `assetsDir`'s
+    own PATH (`setAssetsDirConfig`, already eager for exactly this reason), storing it only inside
+    `defineSpaceApp()`'s own `setup()` (the same composition scope `assetsDir`'s directory SCAN runs
+    in, but without a split-out eager path) would have left `getMessagesDir()` returning `undefined`
+    for any orchestrator that imports the manifest without calling `activateApps()` — invisible to
+    `zanix space build` specifically, the one thing that needed it. `loadMessages()`'s own
+    resolution timing is completely unaffected — still per-`(lang, population)` key, on first
+    access, never eager.
   - 4 new tests in `define-space-app.test.tsx` covering the eager timing directly (readable
     immediately after `defineSpaceApp()` returns, before `setup()` ever runs, for both a single
     string and an array), plus that omitting `messagesDir` still never touches the registry.
@@ -941,8 +922,8 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
   wins over the next one out, checked field-by-field (`title`)/per-identity-key (`meta`/`link`),
   never whole-descriptor-replaces-whole-descriptor. Deduplication: `meta` by identity key (`name`/
   `property`/`httpEquiv`, whichever is set — a tag with none of the three is never deduplicated
-  against another); `link` by `rel`+`href` (see the Fixed entry below for why `hreflang` also
-  matters here).
+  against another); `link` by `rel`+`href` (see the entry below for why `hreflang` also matters
+  here).
   - **Coexists with a hand-authored JSX `<title>`/`<meta>`/`<link>` — never suppressed.** The
     resolved head renders BEFORE a page's own element tree; under React 19 this is what makes it the
     document's FIRST `<title>` (hoisting flushes tags into `<head>` in encounter order, and the HTML
@@ -955,15 +936,16 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
     disabled to make this true.
   - A custom root `layout.tsx` receives the resolved head automatically under React (native hoisting
     needs zero cooperation from the layout) and via an explicit `headExtras` prop under Preact — a
-    real, found gap fixed here: a custom root layout previously never received `cssHrefs`/`pwaHead`
-    at all under Preact, silently dropped rather than merely unused.
+    real gap found and closed while building this: without that prop, a custom root layout would
+    never receive `cssHrefs`/`pwaHead` at all under Preact, silently dropped rather than merely
+    unused.
 - **`buildHreflangLinks`**/**`buildCanonicalLink`** (`.`) — SEO helpers built on Head management
   above. `buildHreflangLinks` produces one `alternate` link per `availableLangs` (always including a
   self-reference for the current language) plus an `x-default` pointing at the default language's
   own version of the current page. `buildCanonicalLink` strips the query string by default
   (`keepParams` opts specific params back in) and always uses `url.origin`. Neither is a port of the
-  legacy components they replace — real fixes/gaps documented in the Fixed/`### Added` entries below
-  and each function's own doc.
+  legacy components they replace — real fixes/gaps documented in the entries below and each
+  function's own doc.
 - **`SpaceAppConfig.sitemap?: SitemapSource`** + **`buildSitemapXml`**/**`registerSitemap`** (`.`) —
   `sitemap.xml` registered as a real `GET` route, not a build-time static file. **This is a
   deliberate architectural decision, not an accidental limitation**: `@zanix/space` has no general
@@ -1226,24 +1208,21 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
   circular reference or `BigInt` throws. Deliberately not a richer format — no tree/element
   serialization, no Server-Action-style references — matching this project's own conclusion, after
   evaluating React Server Components against Space's real Comets/Orbit architecture, that Space's
-  real usage has never needed more than flat, JSON-safe data. Also fixes two real bugs the
-  formalization surfaced: a circular reference or `BigInt` anywhere inside `initialState` used to
-  make `renderToResponse` (React) throw a raw `JSON.stringify` `TypeError` instead of resolving,
-  escaping its own documented "always resolves, never throws" contract (Preact's own
-  `JSON.stringify` call was already fully unguarded — same gap). Both now resolve gracefully —
-  `onError` (if given) receives the real error, the function returns a `500` — matching how a real
-  render error already behaves in both. A Comet's own props hitting the same case now throw a clear,
-  Space-authored `InternalError` naming the offending Comet, instead of a raw `TypeError` —
-  deliberately a throw, not a graceful failure, since a Comet's props are evaluated mid-render,
-  where an uncaught throw is already the correct, pre-existing propagation path. 7 new tests across
+  real usage has never needed more than flat, JSON-safe data. The formalization also surfaced two
+  real bugs, fixed here: a circular reference or `BigInt` anywhere inside `initialState` would have
+  made `renderToResponse` (React) throw a raw `JSON.stringify` `TypeError` instead of resolving,
+  breaking its own "always resolves, never throws" design contract (Preact's own `JSON.stringify`
+  call was already fully unguarded — same gap). Both resolve gracefully instead — `onError` (if
+  given) receives the real error, the function returns a `500` — matching how a real render error
+  already behaves in both. A Comet's own props hitting the same case throw a clear, Space-authored
+  `InternalError` naming the offending Comet, instead of a raw `TypeError` — deliberately a throw,
+  not a graceful failure, since a Comet's props are evaluated mid-render, where an uncaught throw is
+  already the correct, pre-existing propagation path. 7 new tests across
   `render-to-response.test.tsx`, `render-to-response-preact.test.ts`, and `define-comet.test.tsx`
   (circular value and `BigInt` for both renderers, the full undefined/function/`Date`/`Map`/`Set`
   degradation asserted on the literal serialized output, and the `defineComet` error case) —
   byte-for-byte behavior for every already-supported JSON-safe value is unchanged (confirmed via the
   full existing suite, unmodified).
-
-### Fixed
-
 - **`resolveHead`'s own `link` deduplication silently dropped a real, distinct `hreflang` entry
   whenever it shared an `href` with another one.** `rel`+`href` alone was the dedup key — correct
   for `canonical`/`stylesheet`/`manifest` links, but not for `rel="alternate"` hreflang links: an
@@ -1255,38 +1234,38 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
   resolved data passed in. Fixed by including `hreflang` in the dedup key (`rel`+`href`+`hreflang`,
   falling back to `''` when unset) — every other `<link>` kind, which never sets `hreflang`, dedupes
   by `rel`+`href` exactly as before.
-- **`defineSpaceApp({ renderer })` now resolves eagerly** (`getActiveRenderer()`, newly public from
-  both `.` and `./dev`), same timing as `headers`/`pwa`/`globalCss` — previously only set inside
-  `setup()`'s own closure, unreadable until `activateApps()` actually ran. This closes a real,
-  previously-unwired gap: `zanix space build` never calls `activateApps()` at all, so it had no way
-  to ever learn a project declared `renderer: 'preact'`, and `zanix space dev` called
-  `spacePlugin()` before activation too — both silently built/served with React's Vite plugin
-  regardless of what `space.app.ts` declared. `BuildSpaceClientOptions.renderer` now defaults to
-  `getActiveRenderer()` (same pattern `globalCss` below already established), so a build script that
-  already imports `space.app.ts` gets the right renderer automatically.
-- **`buildSpaceClient({ globalCss })` now defaults to `getGlobalCssPaths()`** instead of `[]` —
-  closes the production side of the composition gap `addGlobalCssPaths` (above) opened: a build
+- **`defineSpaceApp({ renderer })` resolves eagerly** (`getActiveRenderer()`, newly public from both
+  `.` and `./dev`), same timing as `headers`/`pwa`/`globalCss` — set outside `setup()`'s own
+  closure, so it's readable without ever calling `activateApps()`. This matters because
+  `zanix space build` never calls `activateApps()` at all: without eager resolution it would have
+  had no way to learn a project declared `renderer: 'preact'`, and `zanix space dev` calling
+  `spacePlugin()` before activation would have hit the same gap — both would silently build/serve
+  with React's Vite plugin regardless of what `space.app.ts` declared.
+  `BuildSpaceClientOptions.renderer` defaults to `getActiveRenderer()` (same pattern `globalCss`
+  below already establishes), so a build script that already imports `space.app.ts` gets the right
+  renderer automatically.
+- **`buildSpaceClient({ globalCss })` defaults to `getGlobalCssPaths()`** instead of `[]` — the
+  production-side half of the composition story `addGlobalCssPaths` (above) establishes: a build
   script that already imports the app's `space.app.ts` (so `defineSpaceApp()` runs and populates
-  `getGlobalCssPaths()`) no longer has to separately re-declare `globalCss` to get it into the real
-  production build — and, now that `globalCss` is host-composable, this includes BOTH a base app's
-  own stylesheets and a host's own on top, automatically. `buildSpaceClient` already wired a passed
-  `globalCss` array correctly into `rollupOptions.input` before this change — the gap was only in
-  the default, never in the wiring itself. Passing `globalCss` explicitly still overrides the
-  default, unchanged.
-- **Orbit (`initOrbit`) wrongly intercepted same-document hash-only links** (`<a href="#section">`,
-  or the current path plus a hash) — `shouldInterceptNavigation` had no way to distinguish that case
-  from a normal internal link, so a click on it triggered a full fragment `fetch()` + `innerHTML`
-  swap instead of letting the browser natively scroll to the anchor: no smooth native scroll, a
-  wasted network round-trip, and the same anchor clicked twice re-fetched and re-rendered identical
-  content each time. Fixed by adding `isSameDocumentHashLink` (true only when the resolved URL has a
-  non-empty hash AND the same `pathname`+`search` as the current page) as a new escape hatch,
-  alongside the existing modified-click/`target`/cross-origin ones.
-- **`Vary: x-space-navigate` was only ever sent when a page declared `cacheControl`.** Every page's
-  response body genuinely differs by that request header regardless of caching config (full document
-  vs. bare Orbit outlet fragment) — a response with no `cacheControl` still silently risked a shared
-  HTTP cache in front of the app serving the wrong shape to the wrong request. Fixed in both
-  `SpacePageController.handleGet`'s non-`cacheControl` branch and `createNotFoundHandler` (which
-  previously never set `Vary` at all), so every response now sets it unconditionally.
+  `getGlobalCssPaths()`) never has to separately re-declare `globalCss` to get it into the real
+  production build — and, since `globalCss` is host-composable, this includes BOTH a base app's own
+  stylesheets and a host's own on top, automatically. `buildSpaceClient` already wires a passed
+  `globalCss` array correctly into `rollupOptions.input`; only the default needed this. Passing
+  `globalCss` explicitly still overrides the default, unchanged.
+- **Orbit (`initOrbit`) never intercepts same-document hash-only links** (`<a href="#section">`, or
+  the current path plus a hash). `shouldInterceptNavigation` distinguishes that case from a normal
+  internal link via the new `isSameDocumentHashLink` check (true only when the resolved URL has a
+  non-empty hash AND the same `pathname`+`search` as the current page), alongside the existing
+  modified-click/`target`/cross-origin escape hatches — without it, a click on such a link would
+  trigger a full fragment `fetch()` + `innerHTML` swap instead of letting the browser natively
+  scroll to the anchor: no smooth native scroll, a wasted network round-trip, and the same anchor
+  clicked twice re-fetching and re-rendering identical content each time.
+- **`Vary: x-space-navigate` is sent unconditionally, not only when a page declares
+  `cacheControl`.** Every page's response body genuinely differs by that request header regardless
+  of caching config (full document vs. bare Orbit outlet fragment), so a response with no
+  `cacheControl` would still silently risk a shared HTTP cache in front of the app serving the wrong
+  shape to the wrong request. Set in both `SpacePageController.handleGet`'s non-`cacheControl`
+  branch and `createNotFoundHandler`.
 - **Every security header this framework manages — CSP, `frameOptions`, `referrerPolicy`, `noSniff`,
   and every other field `securityHeadersGuard()` handles — now resolves through a genuine three-tier
   precedence chain: this page's own explicit config (including `false`) > a guard registered via
@@ -1299,30 +1278,30 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
      not interpret a comma-joined value as "enforce both"). Fixed at the source (`@zanix/server`'s
      `mainInterceptor`, see that package's own CHANGELOG): a guard's header now only applies when
      the handler's response doesn't already have that header.
-  2. **A guard could never actually act as an app-wide default, for ANY of these headers.**
+  2. **A guard genuinely can act as an app-wide default, for ANY of these headers.**
      `SpacePageController` always applies its own zero-config defaults (nonce-based CSP;
      `frameOptions: 'SAMEORIGIN'`; `referrerPolicy: 'strict-origin-when-cross-origin'`;
      `noSniff: true`) UNLESS a page explicitly disables them — so for any ordinary page that
-     configures nothing at all, those defaults were ALREADY present on the response by the time
-     `mainInterceptor`'s merge ran, making a registered guard lose to them every time, silently,
-     even though nobody actually asked for the framework's own defaults over the app's own guard.
-     Confirmed empirically with an isolated test before fixing: a page with no `headers` option,
-     under a registered global `cspGuard({ 'default-src': ["'self'"] })`, still came back with the
-     framework's own nonce-based CSP, not the guard's. Fixed by exposing the fully-accumulated guard
-     headers to the handler itself, via `@zanix/server`'s new `GUARD_HEADERS_LOCALS_KEY`
-     (`ctx.locals`, see that package's own CHANGELOG) — `handleGet` now checks, BEFORE building its
-     own response, whether a guard already has an answer for each header, and steps aside (applies
-     neither its own default NOR anything else, for that specific field) when one does, letting
-     `mainInterceptor`'s own merge fill the gap from the guard afterward. Implemented generically,
-     not per-field: `security-headers-guard.ts` now exports `SECURITY_HEADER_NAMES`, the single
-     source of truth mapping each `SecurityHeadersOptions` field to its real HTTP header name (used
-     internally by `securityHeadersGuard` itself too, replacing 7 hardcoded string literals), which
-     `applySecurityGuards` iterates generically — no bespoke logic duplicated per field.
-  3. **An explicit `false` used to be indistinguishable from "not configured" once a guard was
+     configures nothing at all, those defaults would already be present on the response by the time
+     `mainInterceptor`'s merge ran, letting them silently win over a registered guard every time,
+     regardless of intent. Confirmed empirically with an isolated test before fixing: a page with no
+     `headers` option, under a registered global `cspGuard({ 'default-src': ["'self'"] })`, would
+     otherwise come back with the framework's own nonce-based CSP, not the guard's. Fixed by
+     exposing the fully-accumulated guard headers to the handler itself, via `@zanix/server`'s new
+     `GUARD_HEADERS_LOCALS_KEY` (`ctx.locals`, see that package's own CHANGELOG) — `handleGet`
+     checks, BEFORE building its own response, whether a guard already has an answer for each
+     header, and steps aside (applies neither its own default NOR anything else, for that specific
+     field) when one does, letting `mainInterceptor`'s own merge fill the gap from the guard
+     afterward. Implemented generically, not per-field: `security-headers-guard.ts` exports
+     `SECURITY_HEADER_NAMES`, the single source of truth mapping each `SecurityHeadersOptions` field
+     to its real HTTP header name (used internally by `securityHeadersGuard` itself too, replacing 7
+     hardcoded string literals), which `applySecurityGuards` iterates generically — no bespoke logic
+     duplicated per field.
+  3. **An explicit `false` stays distinguishable from "not configured" even once a guard is
      involved.** `false` must win even over a registered guard, ending with that header COMPLETELY
      ABSENT — but a merely-absent header is exactly what `mainInterceptor`'s merge already reads as
-     "please fill this from the guard," so silently setting nothing couldn't communicate "and don't
-     fill it either." An earlier version of this fix worked around this by writing an empty policy
+     "please fill this from the guard," so setting nothing can't by itself communicate "and don't
+     fill it either." An earlier iteration of this fix worked around this by writing an empty policy
      value (functionally equivalent — zero directives enforce nothing — but still a byte-level
      `Content-Security-Policy:` on the wire, not a genuinely absent header). Replaced with a proper,
      generic mechanism: `@zanix/server`'s new `GUARD_BLOCKED_HEADERS_LOCALS_KEY` (`ctx.locals`, a
@@ -1341,9 +1320,6 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
      produces a comma-joined value; and Set-Cookie from an unrelated guard still accumulates
      correctly alongside a blocked header. Plus 1 new unit test verifying `SECURITY_HEADER_NAMES`
      stays in sync with `securityHeadersGuard`'s own real output.
-
-### Documentation
-
 - **New `docs/theming.md`** — the full design-tokens convention: declaring tokens, the `--space-*`
   naming convention (and how to avoid colliding with a third-party tool's own prefix, e.g.
   Tailwind's `--tw-*`), the primitive-vs-semantic distinction (a component must only ever consume

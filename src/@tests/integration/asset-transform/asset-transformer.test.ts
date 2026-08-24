@@ -35,6 +35,20 @@ async function generateFixtureVideo(path: string, durationSeconds = 2): Promise<
     'yuv420p',
     '-c:v',
     'libx264',
+    // Explicit, high-quality CRF — deliberately LOWER than breakpoint `'msm'`'s own `x264Crf: 23`
+    // (`video-breakpoints.ts`). At 640px width the source is already below `msm`'s 720px cap, so
+    // resolution never shrinks here — bitrate/CRF is the only lever a real re-encode has to
+    // produce a genuinely smaller file. Without this, the source used ffmpeg's own bare CLI
+    // default CRF, which happens to ALSO be 23 — the same value the breakpoint re-encodes at —
+    // so whether the "never worsened" guardrail (`system-ffmpeg-transcoder.ts`'s own
+    // `neverWorsened` check, comparing real byte sizes) tripped came down to encoder-build/
+    // platform-specific size variance, not a real quality/size difference. Confirmed empirically:
+    // this exact test failed in CI (Linux/Homebrew ffmpeg) while passing locally (macOS/Homebrew
+    // ffmpeg) for exactly this reason. CRF 18 is "visually lossless" — a meaningfully bigger,
+    // better-quality source than `msm`'s own CRF 23 target, guaranteeing a real, robust size
+    // reduction regardless of the specific libx264 build encoding it.
+    '-crf',
+    '18',
     path,
   ])
   assert(success, `fixture generation failed: ${stderr}`)

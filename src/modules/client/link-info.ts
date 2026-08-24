@@ -1,5 +1,3 @@
-/// <reference lib="dom" />
-
 /**
  * Finds the closest `<a>` ancestor of `target` (or `target` itself) — shared by every Orbit
  * trigger (click, hover, focus) that delegates a single listener on `document` rather than

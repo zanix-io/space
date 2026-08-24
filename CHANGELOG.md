@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0] - 2026-08-24
 
 ### Added
 
@@ -77,6 +77,14 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **The published package no longer contains `/// <reference lib="dom" />` triple-slash directives**
+  — JSR's own publish-time linter bans them, since they leak into a consuming project's own type
+  environment. The nine `src/modules/client/*.ts` files that relied on this directive now get their
+  DOM types from a scoped `compilerOptions.lib` override on a new `src/modules/client/deno.jsonc`
+  instead — same types resolve for a consumer, only the mechanism changed. Kept out of the repo root
+  config deliberately: applying it there would also hand every server-side file `document`/`window`
+  as if they existed, masking a real bug (a server file referencing a browser-only global that
+  should never type-check as if it could).
 - **`LogIngestRTO`'s `data` field now validates correctly — previously, EVERY real `POST /api/log`
   request, even well-formed ones, failed with `400 BAD_REQUEST`
   (`"The 'data'
@@ -199,8 +207,6 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
   directly. Previously this subpath had JSDoc only, with zero coverage in `docs/` or the README;
   README's "Assets" section now links to it, disambiguated explicitly from the unrelated build-time
   pipeline `docs/assets.md` already documents.
-
-## [0.1.0] - 2026-08-19
 
 ### Changed
 

@@ -1,4 +1,3 @@
-/// <reference lib="dom" />
 import { ORBIT_FRAGMENT_HEADER, ORBIT_OUTLET_ATTR } from '../router/orbit-protocol.ts'
 import { getCometHydrator } from './hydrator-registry.ts'
 import { findAnchor, resolveLinkInfo } from './link-info.ts'

@@ -14,7 +14,6 @@ import {
   setDevImportModule,
   setDevRoutesReloader,
 } from 'modules/dev/dev-engine-registry.ts'
-import { ZANIX_APP_RUNTIME_SERVER_SKEW_BLOCKED } from '../../support/zanix-app-runtime-server-skew.ts'
 
 const TMP_ROOT = getTemporaryFolder(import.meta.url)
 
@@ -31,11 +30,10 @@ function ReloadedView() {
   return <p>dev-import-reloaded-ok</p>
 }
 
-Deno.test({
-  ignore: ZANIX_APP_RUNTIME_SERVER_SKEW_BLOCKED,
-  name: "defineSpaceApp + activateApps: a page registers under this app's own Application, " +
+Deno.test(
+  "defineSpaceApp + activateApps: a page registers under this app's own Application, " +
     'reachable at the site root once bootstrapServers targets that Application by name',
-  fn: async () => {
+  async () => {
     const app = defineSpaceApp({
       name: 'fixture-app',
       routesDir: 'src/@tests/support/fixtures/app-routes',
@@ -62,7 +60,7 @@ Deno.test({
       await deactivateApps(activated)
     }
   },
-})
+)
 
 Deno.test(
   "defineSpaceApp: setup()'s own loadRoutes() call uses a registered dev import override",

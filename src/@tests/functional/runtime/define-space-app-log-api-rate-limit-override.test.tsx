@@ -16,7 +16,6 @@ import { assert, assertEquals } from '@std/assert'
 import { activateApps, deactivateApps } from '@zanix/app/runtime'
 import { bootstrapServers, webServerManager } from '@zanix/server'
 import { defineSpaceApp } from 'modules/runtime/mod.ts'
-import { ZANIX_APP_RUNTIME_SERVER_SKEW_BLOCKED } from '../../support/zanix-app-runtime-server-skew.ts'
 
 /**
  * Real, end-to-end proof that `SpaceAppConfig.logApi.rateLimit` genuinely overrides the default
@@ -28,12 +27,11 @@ import { ZANIX_APP_RUNTIME_SERVER_SKEW_BLOCKED } from '../../support/zanix-app-r
  * open instead of a hard `500`, which would otherwise mask this test's own intent (every request
  * would 200 regardless of the override).
  */
-Deno.test({
-  ignore: ZANIX_APP_RUNTIME_SERVER_SKEW_BLOCKED,
-  name: 'defineSpaceApp({ logApi: { rateLimit } }) + activateApps: a tightened anonymousLimit is ' +
+Deno.test(
+  'defineSpaceApp({ logApi: { rateLimit } }) + activateApps: a tightened anonymousLimit is ' +
     'genuinely enforced — the 2nd request within the same window is rejected with 429, the 1st ' +
     'is not',
-  fn: async () => {
+  async () => {
     const app = defineSpaceApp({
       name: 'fixture-log-api-rate-limit-override-app',
       logApi: { rateLimit: { anonymousLimit: 1, windowSeconds: 60, trustProxyHeader: true } },
@@ -74,13 +72,12 @@ Deno.test({
       await deactivateApps(activated)
     }
   },
-})
+)
 
-Deno.test({
-  ignore: ZANIX_APP_RUNTIME_SERVER_SKEW_BLOCKED,
-  name: 'defineSpaceApp: omitting logApi.rateLimit still enforces the real, unmodified default ' +
+Deno.test(
+  'defineSpaceApp: omitting logApi.rateLimit still enforces the real, unmodified default ' +
     '(30/60s) — a single request comfortably within it succeeds',
-  fn: async () => {
+  async () => {
     const app = defineSpaceApp({ name: 'fixture-log-api-real-default-rate-limit-app' })
 
     const activated = await activateApps([app])
@@ -111,4 +108,4 @@ Deno.test({
       await deactivateApps(activated)
     }
   },
-})
+)

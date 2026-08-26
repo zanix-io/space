@@ -6,7 +6,6 @@ import { assert, assertEquals } from '@std/assert'
 import { activateApps, deactivateApps } from '@zanix/app/runtime'
 import { bootstrapServers, webServerManager } from '@zanix/server'
 import { defineSpaceApp } from 'modules/runtime/mod.ts'
-import { ZANIX_APP_RUNTIME_SERVER_SKEW_BLOCKED } from '../../support/zanix-app-runtime-server-skew.ts'
 
 /**
  * Real, end-to-end proof that `POST /api/log` is genuinely guarded — unlike
@@ -26,11 +25,10 @@ const denyEverythingGuard = () =>
     response: new Response('blocked by an extra guard', { status: 403 }),
   })
 
-Deno.test({
-  ignore: ZANIX_APP_RUNTIME_SERVER_SKEW_BLOCKED,
-  name: "defineSpaceApp + activateApps: POST /api/log succeeds under this route's own default " +
+Deno.test(
+  "defineSpaceApp + activateApps: POST /api/log succeeds under this route's own default " +
     'rateLimitGuard when no extra guards are configured',
-  fn: async () => {
+  async () => {
     const app = defineSpaceApp({ name: 'fixture-log-api-default-guard-app' })
 
     const activated = await activateApps([app])
@@ -67,15 +65,13 @@ Deno.test({
       await deactivateApps(activated)
     }
   },
-})
+)
 
-Deno.test({
-  ignore: ZANIX_APP_RUNTIME_SERVER_SKEW_BLOCKED,
-  name:
-    'defineSpaceApp({ logApi: { guards } }) + activateApps: an extra guard composes AFTER the ' +
+Deno.test(
+  'defineSpaceApp({ logApi: { guards } }) + activateApps: an extra guard composes AFTER the ' +
     'default rateLimitGuard — it can still block a request the rate limit itself would have ' +
     'allowed',
-  fn: async () => {
+  async () => {
     const app = defineSpaceApp({
       name: 'fixture-log-api-extra-guard-app',
       logApi: { guards: [denyEverythingGuard] },
@@ -109,4 +105,4 @@ Deno.test({
       await deactivateApps(activated)
     }
   },
-})
+)

@@ -1,5 +1,5 @@
 import type { ClassConstructor } from '@zanix/server'
-import type { SpacePageController } from './space-page-controller.tsx'
+import type { SpacePageController } from './space-page-controller.ts'
 import type { HeadDescriptor } from './head-descriptor.ts'
 import type { PageContext } from 'typings/page.ts'
 
@@ -74,4 +74,31 @@ export function getPageTree(
   Target: ClassConstructor<SpacePageController<never>>,
 ): PageTree | undefined {
   return registry.get(Target)
+}
+
+/**
+ * Finds this route's nearest `error.tsx` — leaf (this page's own directory) first, walking toward
+ * the root, the FIRST segment declaring one wins. The exact same resolution order
+ * `render-page-react.tsx`'s/`render-page-preact.ts`'s own `composeSegments` already establishes for
+ * a RENDER-phase throw (their own segment-walk wraps every ancestor's `error.tsx` in a boundary, most
+ * specific innermost); this is that same "nearest wins" rule, factored out so a DATA-phase throw
+ * (`loader-error-handler.ts`, reached when a page's own `loader` or a segment's own `loader` throws)
+ * shares one implementation with it instead of a second, independently-maintained lookup.
+ *
+ * Deliberately returns only the SINGLE nearest match rather than every ancestor's own `error.tsx`
+ * (unlike `composeSegments`, which wraps all of them): a data-phase throw means this request's own
+ * segment data never fully resolved at all, so there is no partial tree to nest an outer boundary
+ * around — only the one nearest fallback is ever rendered, wrapped directly in the app's root layout
+ * (see `loader-error-handler.ts`'s own doc).
+ *
+ * @param segments - A page's own composition chain, root-first — same shape `getPageTree` returns.
+ * @returns The nearest segment's own `error.tsx` default export (still `unknown` — a renderer casts
+ * it to its own real `ComponentType<ErrorBoundaryProps>` at the point of use), or `undefined` when no
+ * segment in this chain declares one.
+ */
+export function findNearestErrorBoundary(segments: ResolvedSegment[]): unknown {
+  for (let i = segments.length - 1; i >= 0; i--) {
+    if (segments[i].error !== undefined) return segments[i].error
+  }
+  return undefined
 }

@@ -7,7 +7,7 @@ import {
   SECURITY_HEADER_NAMES,
   securityHeadersGuard,
 } from '../middleware/security-headers-guard.ts'
-import type { PageHeaderOptions } from './space-page-controller.tsx'
+import type { PageHeaderOptions } from './space-page-controller.ts'
 
 /**
  * Resolving a page's response security headers — the default CSP, and the three-tier merge between

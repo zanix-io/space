@@ -118,7 +118,7 @@ const PREACT_SSR = `
 import { createElement } from 'preact'
 import '${ROOT}mod-preact.ts'
 import { defineComet } from '${ROOT}src/modules/comets/define-comet.ts'
-import { SpacePageController } from '${ROOT}src/modules/router/space-page-controller.tsx'
+import { SpacePageController } from '${ROOT}src/modules/router/space-page-controller.ts'
 import { setPageTree } from '${ROOT}src/modules/router/page-tree-registry.ts'
 import { setActiveRenderer } from '${ROOT}src/modules/router/active-renderer.ts'
 import { getPageRenderer } from '${ROOT}src/modules/router/page-renderer-registry.ts'
@@ -158,7 +158,7 @@ Deno.test('preact ssr under a poisoned react', async () => {
 const REACT_SSR = `
 import { createElement } from 'react'
 import '${ROOT}mod-react.ts'
-import { SpacePageController } from '${ROOT}src/modules/router/space-page-controller.tsx'
+import { SpacePageController } from '${ROOT}src/modules/router/space-page-controller.ts'
 import { setPageTree } from '${ROOT}src/modules/router/page-tree-registry.ts'
 import { setActiveRenderer } from '${ROOT}src/modules/router/active-renderer.ts'
 import { getPageRenderer } from '${ROOT}src/modules/router/page-renderer-registry.ts'

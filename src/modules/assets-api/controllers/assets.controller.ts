@@ -17,27 +17,12 @@ import type { HandlerContext } from '@zanix/server'
 import { Controller, Get, Guard, Post, ZanixController } from '@zanix/server'
 import type { MiddlewareGuard } from '@zanix/server'
 import { HttpError } from '@zanix/errors'
-import type { AssetService } from '../asset-service.ts'
 import { readUploadedAssetFromRequest } from '../upload.ts'
 import { denyAllGuard } from './guards/deny-all-guard.ts'
 import { AssetIdParamsRTO, VideoUploadQueryRTO, VoiceUploadQueryRTO } from './rtos/assets.rto.ts'
+import type { AssetsControllerOptions } from './assets-controller-types.ts'
 
-/** Options for {@link createAssetsController}. */
-export interface AssetsControllerOptions {
-  /** The composed `AssetService` every route delegates to — see this module's own top-level doc. */
-  service: AssetService
-  /** Route prefix, e.g. `'assets'` (default) for `/assets/*`. */
-  prefix?: string
-  /**
-   * Per-operation-group guards. Each group defaults to `[denyAllGuard]` when omitted or empty —
-   * never to "no guard at all." `write` gates every `POST` route (`/assets/audio`,
-   * `/assets/image`, `/assets/video`); `read` gates every `GET` route.
-   */
-  guards?: {
-    write?: MiddlewareGuard[]
-    read?: MiddlewareGuard[]
-  }
-}
+export type { AssetsControllerOptions }
 
 /** Combines a guard list into ONE guard: runs each in order, short-circuiting on the first
  * denial. Empty/omitted lists fall back to `[denyAllGuard]` — the concrete mechanism behind

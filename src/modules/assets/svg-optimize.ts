@@ -33,13 +33,14 @@
  */
 
 import { pickSmaller } from './image-optimize.ts'
+import { SVGO_SPECIFIER } from '../lazy/specifiers.ts'
 
 type SvgoModule = { optimize(input: string, config?: unknown): { data: string } }
 
 let svgoModule: SvgoModule | undefined
 
 async function getSvgo(): Promise<SvgoModule> {
-  svgoModule ??= await import('npm:svgo@^3') as unknown as SvgoModule
+  svgoModule ??= await import(SVGO_SPECIFIER) as unknown as SvgoModule
   return svgoModule
 }
 

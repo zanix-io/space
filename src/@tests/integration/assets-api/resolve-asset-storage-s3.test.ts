@@ -39,7 +39,7 @@ Deno.test({
       // `@zanix/datamaster`'s own `observability/core.test.ts` already establishes for
       // `ELASTICSEARCH_URL`.
       await closeAllConnections()
-      registerS3Connector()
+      await registerS3Connector()
       const { S3ObjectStorage } = await import('@zanix/datamaster/storage')
 
       const registered = ProgramModule.getConnectors(undefined, false).get('s3')

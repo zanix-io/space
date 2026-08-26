@@ -1,4 +1,4 @@
-import type { PageHeaderOptions } from './space-page-controller.tsx'
+import type { PageHeaderOptions } from './space-page-controller.ts'
 
 let defaultHeaders: PageHeaderOptions | false | undefined = undefined
 

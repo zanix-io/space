@@ -32,9 +32,14 @@ Deno.test({
     try {
       // Clears the `'type:connector'` registry and re-registers fresh, re-reading the env vars
       // just set above — see `resolve-asset-storage-s3.test.ts`'s own doc for why this replaced
-      // the query-string-on-a-local-path import trick this file used to need.
+      // the query-string-on-a-local-path import trick this file used to need. `registerS3Connector`
+      // became async in `@zanix/datamaster@1.6.0` (it now lazily `import()`s `./connector.ts` so
+      // `@aws-sdk/client-s3` stays out of the graph for consumers that never set `S3_ENDPOINT`) —
+      // this MUST be awaited, or the `@Connector` decoration/registration below hasn't actually run
+      // yet by the time `.get('s3')` is called, and `getInstance` throws `[BaseInstancesContainer]:
+      // Target is not a constructor` instead.
       await closeAllConnections()
-      registerS3Connector()
+      await registerS3Connector()
 
       const registered = ProgramModule.getConnectors(undefined, false).get('s3')
       assert(

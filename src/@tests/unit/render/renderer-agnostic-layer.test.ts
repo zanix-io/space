@@ -74,7 +74,7 @@ const AGNOSTIC_ENTRY_POINTS = [
   // The dev transport, corrected once already from a wrongly renderer-scoped shape.
   'modules/dev/dev-client-script.ts',
   // Public typings that describe framework/document concepts. `page.ts` is on this list only
-  // BECAUSE the two React defaults it and `space-page-controller.tsx` used to carry are gone —
+  // BECAUSE the two React defaults it and `space-page-controller.ts` used to carry are gone —
   // `LayoutProps<TChildren = SpaceChildren>` and `SpacePageController<..., TComponent =
   // SpaceComponent | null>` — so the page contract itself no longer names a renderer.
   'typings/page.ts',

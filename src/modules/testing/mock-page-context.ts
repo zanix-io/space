@@ -26,7 +26,7 @@ export function mockPageContext<Params = Record<string, string>>(
     params: (overrides.params ?? {}) as Params,
     csrfToken: overrides.csrfToken,
     population: overrides.population,
-    // A fresh cache per call, same as the real `toPageContext` (`space-page-controller.tsx`) —
+    // A fresh cache per call, same as the real `toPageContext` (`space-page-controller.ts`) —
     // `overrides.dedupe` still wins when a test wants to assert on a SHARED cache across several
     // `mockPageContext()`-received loaders (pass the same `createDedupeCache()` result to each).
     dedupe: overrides.dedupe ?? createDedupeCache(),

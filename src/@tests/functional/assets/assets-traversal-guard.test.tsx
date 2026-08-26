@@ -11,6 +11,7 @@ import { Page, SpacePageController } from 'modules/router/mod.ts'
 import { setDevImportModule } from 'modules/dev/dev-engine-registry.ts'
 import { resetResolvedAssets } from 'modules/assets/asset-registry.ts'
 import { loadAssetsBuildOutput, setAssetsManifestState } from 'modules/assets/assets-manifest.ts'
+import { ZANIX_APP_RUNTIME_SERVER_SKEW_BLOCKED } from '../../support/zanix-app-runtime-server-skew.ts'
 
 /**
  * Regression coverage for a confirmed path-traversal defect in `register-assets.ts`'s
@@ -53,11 +54,12 @@ async function cleanup(...dirs: string[]): Promise<void> {
   await Promise.all(dirs.map((dir) => Deno.remove(dir, { recursive: true })))
 }
 
-Deno.test(
-  'assets traversal guard: no `../`-shaped or encoded-traversal-shaped request ever reads ' +
+Deno.test({
+  ignore: ZANIX_APP_RUNTIME_SERVER_SKEW_BLOCKED,
+  name: 'assets traversal guard: no `../`-shaped or encoded-traversal-shaped request ever reads ' +
     'the secret file OUTSIDE buildOutputDir/assets — every one degrades to a plain 404, never ' +
     'a raw error or a successful read',
-  async () => {
+  fn: async () => {
     const routesDir = await Deno.makeTempDir({ dir: TMP_ROOT })
     const assetsDir = await Deno.makeTempDir({ dir: TMP_ROOT })
     const buildOutputDir = await Deno.makeTempDir({ dir: TMP_ROOT })
@@ -133,4 +135,4 @@ Deno.test(
       await Deno.remove(join(TMP_ROOT, 'secret-outside.txt'))
     }
   },
-)
+})

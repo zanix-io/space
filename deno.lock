@@ -26,16 +26,13 @@
     "jsr:@std/path@^1.1.5": "1.1.6",
     "jsr:@std/semver@^1.0.8": "1.0.8",
     "jsr:@std/streams@~0.224.5": "0.224.5",
-    "jsr:@zanix/app@0.2": "0.2.0",
-    "jsr:@zanix/asyncmq@0.7": "0.7.0",
-    "jsr:@zanix/auth@0.8": "0.8.0",
-    "jsr:@zanix/datamaster@1": "1.5.0",
-    "jsr:@zanix/datamaster@^1.5.0": "1.5.0",
-    "jsr:@zanix/server@3": "3.4.0",
-    "jsr:@zanix/server@^3.4.0": "3.4.0",
-    "jsr:@zanix/utils@3": "3.1.2",
-    "jsr:@zanix/utils@^3.1.2": "3.1.2",
-    "npm:@aws-sdk/client-s3@^3.700.0": "3.1116.0",
+    "jsr:@zanix/app@~0.2.1": "0.2.1",
+    "jsr:@zanix/asyncmq@0.8": "0.8.0",
+    "jsr:@zanix/datamaster@^1.7.0": "1.8.0",
+    "jsr:@zanix/datamaster@^1.8.0": "1.8.0",
+    "jsr:@zanix/server@4": "4.0.0",
+    "jsr:@zanix/utils@4": "4.0.0",
+    "npm:@aws-sdk/client-s3@^3.700.0": "3.1118.0",
     "npm:@babel/core@^7.29.0": "7.29.7",
     "npm:@deno/vite-plugin@^2.0.3": "2.0.3_vite@8.2.2",
     "npm:@formatjs/icu-messageformat-parser@^3.5.17": "3.5.17",
@@ -47,9 +44,7 @@
     "npm:@types/react@^19.2.0": "19.2.18",
     "npm:@vanilla-extract/vite-plugin@^5.2.6": "5.2.6_vite@8.2.2",
     "npm:@vitejs/plugin-react@^6.0.5": "6.1.0_@rolldown+plugin-babel@0.2.3__@babel+core@7.29.7__rolldown@1.2.5__vite@8.2.2_babel-plugin-react-compiler@1.0.0_vite@8.2.2_@babel+core@7.29.7_rolldown@1.2.5",
-    "npm:amqplib@^2.0.1": "2.0.1",
     "npm:babel-plugin-react-compiler@1": "1.0.0",
-    "npm:graphql@16": "16.14.2",
     "npm:happy-dom@^20.11.2": "20.11.6",
     "npm:mongoose@8": "8.24.4",
     "npm:playwright-core@1.62.1": "1.62.1",
@@ -178,57 +173,45 @@
     "@std/streams@0.224.5": {
       "integrity": "bcde7818dd5460d474cdbd674b15f6638b9cd73cd64e52bd852fba2bd4d8ec91"
     },
-    "@zanix/app@0.2.0": {
-      "integrity": "a410f2ff864ed9caecaf4ce424336afc41c1ab983860999b120d6d240319125f",
+    "@zanix/app@0.2.1": {
+      "integrity": "5461c543a95f1e6a7be754d5a0b32bd28618c6cb6dc448644b717e4fd717462d",
       "dependencies": [
         "jsr:@std/semver",
         "jsr:@zanix/asyncmq",
-        "jsr:@zanix/auth",
-        "jsr:@zanix/datamaster@1",
-        "jsr:@zanix/server@3",
-        "jsr:@zanix/utils@3"
+        "jsr:@zanix/datamaster@^1.7.0",
+        "jsr:@zanix/server",
+        "jsr:@zanix/utils"
       ]
     },
-    "@zanix/asyncmq@0.7.0": {
-      "integrity": "f78d359102d70b147be1dde2a506f2ff71d9e336b0f2e766c49551a7101614cc",
+    "@zanix/asyncmq@0.8.0": {
+      "integrity": "a66f121a851132e99237cf71c2e4b611fb1cdd889f22fe61fc0f97eeb1b0400d",
       "dependencies": [
-        "jsr:@zanix/server@3",
-        "jsr:@zanix/utils@3",
-        "npm:amqplib"
+        "jsr:@zanix/server",
+        "jsr:@zanix/utils"
       ]
     },
-    "@zanix/auth@0.8.0": {
-      "integrity": "2526fbccc5990c6cb4334bc7e726a9ee6d3069efce6299c9cd752540c21ee504",
-      "dependencies": [
-        "jsr:@zanix/server@3",
-        "jsr:@zanix/utils@3"
-      ]
-    },
-    "@zanix/datamaster@1.5.0": {
-      "integrity": "99c3e4801a4a5fdaecbc5bcaccc4d54d739066060ddc1a52b653d829218f3d62",
+    "@zanix/datamaster@1.8.0": {
+      "integrity": "ad13d1c3af032d650df4ba455eda4b14640f1d7c726fbdd39e177f73834b602b",
       "dependencies": [
         "jsr:@db/sqlite",
         "jsr:@std/path@0.224",
-        "jsr:@zanix/server@3",
-        "jsr:@zanix/utils@3",
+        "jsr:@zanix/server",
+        "jsr:@zanix/utils",
         "npm:@aws-sdk/client-s3",
         "npm:mongoose",
         "npm:redis"
       ]
     },
-    "@zanix/server@3.4.0": {
-      "integrity": "1868349aff4954c40b236d8f9c0cef197aed79774bbc13ad8f31cfbc1c92893d",
+    "@zanix/server@4.0.0": {
+      "integrity": "03117403ba5e0ee1575d4a0096282149d7b6a7e510f7a1572621958ea58fa3d8",
       "dependencies": [
         "jsr:@std/http",
         "jsr:@std/path@0.224",
-        "jsr:@zanix/server@^3.4.0",
-        "jsr:@zanix/utils@3",
-        "npm:graphql",
-        "npm:redis"
+        "jsr:@zanix/utils"
       ]
     },
-    "@zanix/utils@3.1.2": {
-      "integrity": "7f2bcdcd53fd3617b6794f31e0dd9bcf0a3faea547c72e438fe6f60cca1fdef8",
+    "@zanix/utils@4.0.0": {
+      "integrity": "2ef04a760e011829ff14e198d6e5fc947ae0cf2615b519c1954ddb78b7b376e6",
       "dependencies": [
         "jsr:@std/fmt@0.224",
         "jsr:@std/path@0.224"
@@ -246,8 +229,8 @@
         "tslib"
       ]
     },
-    "@aws-sdk/client-s3@3.1116.0": {
-      "integrity": "sha512-UKRl9qSVW0rZpvSOauQNpYAy8+ONBAVYnpfKVtCyOF+FZVT1tl6MunYuHvuarCrroD2/YJs+tHTALYNgAlec3Q==",
+    "@aws-sdk/client-s3@3.1118.0": {
+      "integrity": "sha512-nh46pLKeRNFvTOZAJMfYR7kZ/KzhSqzhXVIJSwl4jJ/b2D+KOXL2jeOCryOvGgwpUQo9YNWFUg63cm2qr5MX9g==",
       "dependencies": [
         "@aws-sdk/checksums",
         "@aws-sdk/core",
@@ -1431,9 +1414,6 @@
       "integrity": "sha512-lGq+9yr1/GuAWaVYIHRjvvySG5/4VfKIvC8EWxStPdcDh/Ka7FG3twP6v4d5BkravUilhIAsG4Qj83t02LWUPQ==",
       "bin": true
     },
-    "amqplib@2.0.1": {
-      "integrity": "sha512-a3P2MgfCf9nzVis12VxWEn0dS6hcqve7dlEAhXDtIWR27BlhtMkILOc+H9aeHjDi6i6r94dYKc2Kx2OFe3avvg=="
-    },
     "babel-plugin-react-compiler@1.0.0": {
       "integrity": "sha512-Ixm8tFfoKKIPYdCCKYTsqv+Fd4IJ0DQqMyEimo+pxUOMUR9cVPlwTrFt9Avu+3cb6Zp3mAzl+t1MrG2fxxKsxw==",
       "dependencies": [
@@ -1674,9 +1654,6 @@
     },
     "graceful-fs@4.2.11": {
       "integrity": "sha512-RbJ5/jmFcNNCcDV5o9eTnBLJ/HszWV0P73bc+Ff4nS/rJj+YaS6IGyiOL0VoBYX+l1Wrl3k63h/KrH+nhJ0XvQ=="
-    },
-    "graphql@16.14.2": {
-      "integrity": "sha512-Chq1s4CY7jmh8gO2qvLIJyfCDIN+EHLFW/9iShnp1z8FjBQMoodWP1kDC36VAMXXIvAjj4ARa7ntfAV2BrjsbA=="
     },
     "happy-dom@20.11.6": {
       "integrity": "sha512-Hldbg8AdAa5a5oDcZpjqnGitp7JB0hqWmfv/8qr+kft4vzSD8BHsbdRfzYvL/0QcbKcURC/yyoygbeDQarPvYg==",
@@ -2358,11 +2335,11 @@
       "jsr:@deno/loader@0.5",
       "jsr:@std/assert@0.224",
       "jsr:@std/path@0.224",
-      "jsr:@zanix/app@0.2",
-      "jsr:@zanix/auth@0.8",
-      "jsr:@zanix/datamaster@^1.5.0",
-      "jsr:@zanix/server@^3.4.0",
-      "jsr:@zanix/utils@^3.1.2",
+      "jsr:@zanix/app@~0.2.1",
+      "jsr:@zanix/auth@~0.8.1",
+      "jsr:@zanix/datamaster@^1.8.0",
+      "jsr:@zanix/server@4",
+      "jsr:@zanix/utils@4",
       "npm:@babel/core@^7.29.0",
       "npm:@deno/vite-plugin@^2.0.3",
       "npm:@preact/preset-vite@^2.10.6",

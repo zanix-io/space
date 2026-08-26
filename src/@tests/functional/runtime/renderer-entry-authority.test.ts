@@ -5,6 +5,7 @@ import { installReactRuntime } from '../../../../mod-react.ts'
 import { installPreactRuntime } from '../../../../mod-preact.ts'
 import { getInstalledRenderer } from 'modules/router/renderer-runtime.ts'
 import { assertEquals } from '@std/assert'
+import { ZANIX_APP_RUNTIME_SERVER_SKEW_BLOCKED } from '../../support/zanix-app-runtime-server-skew.ts'
 
 /**
  * The relationship between the two things that could each look like "the renderer setting", pinned
@@ -40,10 +41,12 @@ Deno.test(
   },
 )
 
-Deno.test(
-  'renderer authority: `@zanix/space/preact` + renderer:"preact" activates cleanly too — the ' +
+Deno.test({
+  ignore: ZANIX_APP_RUNTIME_SERVER_SKEW_BLOCKED,
+  name:
+    'renderer authority: `@zanix/space/preact` + renderer:"preact" activates cleanly too — the ' +
     'same contract, with neither renderer privileged',
-  async () => {
+  fn: async () => {
     installPreactRuntime()
     assertEquals(getInstalledRenderer(), 'preact')
 
@@ -53,7 +56,7 @@ Deno.test(
     // Left as React for every later test in this process, which is this suite's own default.
     installReactRuntime()
   },
-)
+})
 
 Deno.test(
   'renderer authority: declaring one renderer while the OTHER entry point is installed fails ' +

@@ -39,7 +39,7 @@ Deno.test({
     // Real, portable replacement for the old query-string-on-a-local-path re-evaluation trick
     // (`datamaster-internal/core.ts?case=...`) — see `resolve-asset-storage-s3.test.ts`'s own doc.
     await closeAllConnections()
-    registerS3Connector()
+    await registerS3Connector()
 
     const s3 = ProgramModule.getConnectors(undefined, false).get(
       's3',

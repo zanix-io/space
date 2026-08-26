@@ -88,6 +88,270 @@ const ESM_SHAPE_RE = /^\s*(import|export)\b/m
 
 const decoder = new TextDecoder()
 
+/**
+ * Blanks out (space-fills, same length/offsets, so `REQUIRE_RE` match indices stay valid against
+ * the ORIGINAL `code`) every `//` and `/* *‍/`-style comment span in `code` — used ONLY to decide
+ * which `require(...)` occurrences {@linkcode buildCjsBundle} should treat as real dependencies,
+ * never to produce output text (comments reach the final rewritten source completely untouched).
+ *
+ * `REQUIRE_RE`'s own content-based heuristic (this module's own header doc) cannot tell a real
+ * `require('foo')` call from identical text sitting inside a JSDoc usage example — `picomatch@4`'s
+ * own `lib/picomatch.js` has exactly this, e.g. `* const pm = require('picomatch');` and,
+ * separately, `* const picomatch = require('picomatch/posix');` (`picomatch/posix` — a real,
+ * on-disk subpath, but one nothing in picomatch's own EXECUTABLE code ever actually requires).
+ * Left unmasked, `buildCjsBundle` records both as real bare dependencies of `picomatch/index.js`;
+ * `picomatch/posix` — genuinely resolvable, but never itself visited/wrapped by this file's own CJS
+ * detection, since nothing real ever requires it — then reaches Vite's SSR module runner as a raw
+ * external CJS file and crashes with `ReferenceError: module is not defined` at its own
+ * `module.exports = require('./lib/picomatch')` line, the identical failure mode this module's
+ * header doc already describes for `react`/`react-dom`. The generated bundle text traces the whole
+ * failure directly back to this file's own naive regex scan: `__vite_ssr_import__("picomatch/
+ * posix", {})`.
+ *
+ * Deliberately does not also try to mask string-literal contents elsewhere in the file (only
+ * comments) — no confirmed real case needs it, and doing so risks misclassifying a genuine
+ * `require('picomatch')` call's own string-literal argument. A backslash inside a string is
+ * consumed together with the character it escapes, so a comment-starting `//`/`/*` sequence
+ * embedded in an escaped string (`"a \" // not a comment"`) is never misread as leaving the
+ * string early.
+ *
+ * A plain single `quote` flag is not enough to get this right for two further, confirmed-real
+ * shapes, so this tracks a small stack of lexical contexts instead of one variable:
+ * - **A template literal's own `${...}` interpolation hole is real, executable code, not string
+ *   content** — a `//`/`/* *‍/` sequence written INSIDE one is a genuine comment (masking it is
+ *   exactly this function's job), while the literal text on either side of the hole is opaque, same
+ *   as any other string. Treating the whole backtick-to-backtick span as one opaque quote (as a
+ *   single `quote` variable does) leaves a real comment inside a hole unmasked — `` `Hello ${/*
+ *   require('sneaky-dep') *‍/ name}` `` — recording `sneaky-dep` as a real dependency even though
+ *   it only ever appears inside a comment. The stack also lets a hole contain its OWN nested
+ *   template literal (and that literal its own further holes) without losing track of which `` ` ``
+ *   or `}` closes which context, and lets an ordinary object literal inside a hole (`${ {a: 1} }`)
+ *   use `{`/`}` freely without being mistaken for the hole's own closing brace (tracked via a
+ *   per-hole brace depth).
+ * - **A regex literal's own escaped `/` is not a comment delimiter** — `/http:\/\//`'s closing
+ *   delimiter is a `/` immediately preceded by an escaped `/`, and a plain char-by-char scan with no
+ *   notion of regex literals reads the two adjacent, unescaped-looking `/` characters right after it
+ *   as a `//` line comment, masking away everything after it on that line — including a real
+ *   `require(...)` call sharing that line, a false NEGATIVE (a missed real dependency) rather than
+ *   the false positive above, and arguably the more serious failure mode of the two since it fails
+ *   silently at bundle time instead of at masking time. A `/` is treated as a regex literal's own
+ *   opening delimiter when the last significant token before it is one this function recognizes as
+ *   only ever preceding an expression (an operator/punctuation character, or a keyword like
+ *   `return`/`typeof`/`case`) — the same regex-vs-division heuristic real lightweight (non-AST)
+ *   JS tokenizers use — and, once opened, its own `[...]` character class is tracked separately
+ *   since a `/` inside one never closes the regex either.
+ */
+function maskComments(code: string): string {
+  type Frame =
+    | { type: 'code' }
+    | { type: 'string'; quote: string }
+    | { type: 'template' }
+    | { type: 'templateExpr'; depth: number }
+
+  const REGEX_PRECEDERS = new Set([
+    '',
+    '(',
+    ',',
+    '=',
+    ':',
+    '[',
+    '!',
+    '&',
+    '|',
+    '?',
+    '{',
+    '}',
+    ';',
+    '+',
+    '-',
+    '*',
+    '%',
+    '~',
+    '^',
+    '<',
+    '>',
+    '\n',
+  ])
+  const REGEX_PRECEDING_KEYWORDS = new Set([
+    'return',
+    'typeof',
+    'case',
+    'delete',
+    'void',
+    'throw',
+    'new',
+    'in',
+    'of',
+    'instanceof',
+    'yield',
+    'do',
+    'else',
+  ])
+  const WORD_RE = /[A-Za-z0-9_$]/
+
+  let out = ''
+  let i = 0
+  const { length } = code
+  const stack: Frame[] = [{ type: 'code' }]
+  // The last significant (non-whitespace) code character emitted, and the last completed
+  // identifier/keyword run — both drive the regex-vs-division heuristic above.
+  let lastSignificant = ''
+  let currentWord = ''
+  let lastWord = ''
+
+  function noteChar(char: string): void {
+    if (WORD_RE.test(char)) {
+      currentWord += char
+    } else {
+      if (currentWord) lastWord = currentWord
+      currentWord = ''
+      if (!/\s/.test(char)) lastWord = ''
+    }
+    if (!/\s/.test(char)) lastSignificant = char
+  }
+
+  while (i < length) {
+    const top = stack[stack.length - 1]
+    const char = code[i]
+
+    if (top.type === 'string') {
+      out += char
+      if (char === '\\' && i + 1 < length) {
+        out += code[i + 1]
+        i += 2
+        continue
+      }
+      if (char === top.quote) stack.pop()
+      i++
+      continue
+    }
+
+    if (top.type === 'template') {
+      if (char === '\\' && i + 1 < length) {
+        out += char + code[i + 1]
+        i += 2
+        continue
+      }
+      if (char === '`') {
+        out += char
+        stack.pop()
+        i++
+        continue
+      }
+      if (char === '$' && code[i + 1] === '{') {
+        out += '${'
+        stack.push({ type: 'templateExpr', depth: 0 })
+        i += 2
+        continue
+      }
+      out += char
+      i++
+      continue
+    }
+
+    // top.type === 'code' | 'templateExpr' — real, executable JS.
+    const twoChars = code.slice(i, i + 2)
+    if (twoChars === '//') {
+      let end = i
+      while (end < length && code[end] !== '\n') end++
+      out += ' '.repeat(end - i)
+      i = end
+      continue
+    }
+    if (twoChars === '/*') {
+      let end = code.indexOf('*/', i + 2)
+      end = end === -1 ? length : end + 2
+      out += ' '.repeat(end - i)
+      i = end
+      continue
+    }
+    if (char === '"' || char === "'") {
+      stack.push({ type: 'string', quote: char })
+      out += char
+      noteChar(char)
+      i++
+      continue
+    }
+    if (char === '`') {
+      stack.push({ type: 'template' })
+      out += char
+      noteChar(char)
+      i++
+      continue
+    }
+    if (
+      char === '/' &&
+      (REGEX_PRECEDERS.has(lastSignificant) ||
+        (!currentWord && REGEX_PRECEDING_KEYWORDS.has(lastWord)))
+    ) {
+      let end = i + 1
+      let inClass = false
+      let closed = false
+      while (end < length) {
+        const c = code[end]
+        if (c === '\\') {
+          end += 2
+          continue
+        }
+        if (c === '\n') break // an unterminated regex can't span a real newline
+        if (c === '[') {
+          inClass = true
+          end++
+          continue
+        }
+        if (c === ']') {
+          inClass = false
+          end++
+          continue
+        }
+        if (c === '/' && !inClass) {
+          closed = true
+          end++
+          break
+        }
+        end++
+      }
+      if (closed) {
+        while (end < length && /[a-z]/i.test(code[end])) end++ // trailing flags
+        out += code.slice(i, end)
+        lastSignificant = '/'
+        lastWord = ''
+        currentWord = ''
+        i = end
+        continue
+      }
+      // No real closing delimiter found — not actually a regex literal; fall through below.
+    }
+    if (top.type === 'templateExpr') {
+      if (char === '{') {
+        top.depth++
+        out += char
+        noteChar(char)
+        i++
+        continue
+      }
+      if (char === '}') {
+        if (top.depth === 0) {
+          stack.pop()
+          out += char
+          i++
+          continue
+        }
+        top.depth--
+        out += char
+        noteChar(char)
+        i++
+        continue
+      }
+    }
+    out += char
+    noteChar(char)
+    i++
+  }
+
+  return out
+}
+
 interface CjsBundle {
   /** The resolved id of the file `wrapCjsIfNeeded` was originally called for. */
   entryId: string
@@ -122,8 +386,13 @@ async function buildCjsBundle(
     }
 
     const code = decoder.decode(result.code)
-    const specs: string[] = []
-    for (const match of code.matchAll(REQUIRE_RE)) specs.push(match[2])
+    // Matched against the COMMENT-MASKED text, never the raw `code` — see `maskComments`'s own doc
+    // for the real, confirmed false positive this avoids (a `require(...)` call sitting inside a
+    // JSDoc usage example, not real executable code). Masking preserves every character's offset,
+    // so `match.index` below still addresses the ORIGINAL `code` correctly.
+    const masked = maskComments(code)
+    const matches = [...masked.matchAll(REQUIRE_RE)]
+    const specs = matches.map((match) => match[2])
 
     const resolvedIds: string[] = []
     for (const spec of specs) {
@@ -143,15 +412,24 @@ async function buildCjsBundle(
       }
     }
 
-    let index = 0
-    const rewritten = code.replace(REQUIRE_RE, () => {
+    // Built by hand from `matches`' own offsets, not `code.replace(REQUIRE_RE, ...)` — replacing
+    // against the raw `code` would re-scan it with `REQUIRE_RE` and rewrite the SAME comment-only
+    // occurrences `masked` was built to exclude, right back into the output. A comment's own
+    // `require(...)` text is left completely untouched in the rewritten source, exactly as
+    // originally written.
+    let rewritten = ''
+    let lastIndex = 0
+    matches.forEach((match, index) => {
       const resolvedId = resolvedIds[index]
       const isRelative = specs[index].startsWith('.')
-      index++
-      return isRelative
+      rewritten += code.slice(lastIndex, match.index)
+      rewritten += isRelative
         ? `__cjsRequire__(${JSON.stringify(resolvedId)})`
         : `__bareRequire__(${JSON.stringify(resolvedId)})`
+      lastIndex = match.index + match[0].length
     })
+    rewritten += code.slice(lastIndex)
+
     factories.set(
       fileUrl,
       `function(module, exports) {\nconst require = __cjsRequire__\n${rewritten}\n}`,

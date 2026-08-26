@@ -47,7 +47,7 @@ import { extractDocumentSemantics } from 'modules/render/document-semantics.ts'
 import { mockPageContext } from 'modules/testing/mock-page-context.ts'
 import { getPageRenderer } from 'modules/router/page-renderer-registry.ts'
 import type { PageRenderer } from 'modules/router/page-renderer-registry.ts'
-import type { SpacePageController } from 'modules/router/space-page-controller.tsx'
+import type { SpacePageController } from 'modules/router/space-page-controller.ts'
 import type { DiscoveredPage } from './discover-pages.ts'
 
 /**

@@ -1,5 +1,5 @@
 import type { ClassConstructor, HandlerContext } from '@zanix/server'
-import type { SpacePageController } from 'modules/router/space-page-controller.tsx'
+import type { SpacePageController } from 'modules/router/space-page-controller.ts'
 import { mockHandlerContext } from './mock-handler-context.ts'
 
 /** What {@linkcode renderPageForTest} resolves to. */

@@ -205,9 +205,14 @@ export type RedirectConfig = {
  * `Promise.all`, never sequentially, and never depending on another segment's own `data` — the same
  * "no waterfalls" property the page's own single loader already has, just extended per segment
  * rather than reproducing RSC's arbitrary-depth per-component fetching. A segment's `loader`
- * throwing behaves exactly like a page's own `loader` throwing: uncaught, propagating past
- * `handleGet` unchanged — no per-segment try/catch, no partial-render fallback. **Root-layout-only
- * exception**: the app-wide root `layout.tsx` used by `createNotFoundHandler`'s own not-found page
+ * throwing behaves exactly like a page's own `loader` throwing: no per-segment try/catch, no
+ * partial-render fallback — the throw propagates past `resolveSegmentData` up through the same
+ * `await` chain `handleGet` itself runs, where {@linkcode SpacePageController.handleGet}'s own
+ * recovery path (`loader-error-handler.ts`) catches it, renders this route's nearest `error.tsx` (or
+ * `not-found.tsx`, for an `HttpError('NOT_FOUND')`) with the real HTTP status, falling back to this
+ * package's own built-in `DefaultErrorView` when this route declares no `error.tsx` anywhere in its
+ * own composition chain. **Root-layout-only exception**: the app-wide root `layout.tsx` used by
+ * `createNotFoundHandler`'s own not-found page
  * never runs its `loader` — that page has no route `params`/matched segment chain to build a real
  * `PageContext` from, so its root layout always receives `data: undefined`, whatever `loader` it
  * declares for every OTHER page that shares it.
@@ -245,7 +250,12 @@ export type LayoutProps<TChildren = SpaceChildren, TData = unknown> = {
 
 /**
  * Props passed to an `error.tsx` file's default export — the fallback UI for the nearest error
- * boundary above a segment that threw during render.
+ * boundary above a segment that threw during render, OR for a page's own `loader` (or a nested
+ * layout segment's own `loader`) that threw before render ever started (see
+ * `loader-error-handler.ts`'s own doc for the full data-phase recovery contract). `reset` is a
+ * client-side retry in the render-phase case (`SpaceErrorBoundary`); for a data-phase throw it is a
+ * no-op, since that response is already a fresh server render rather than something to re-render
+ * client-side.
  */
 export type ErrorBoundaryProps = {
   /** The error that was thrown. */

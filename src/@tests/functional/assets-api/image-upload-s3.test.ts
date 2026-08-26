@@ -47,7 +47,7 @@ Deno.test({
     // `registerS3Connector` is a real, callable export now, so a fresh connector registry entry
     // (reading `S3_ENDPOINT` just set above) needs no module re-evaluation at all.
     await closeAllConnections()
-    registerS3Connector()
+    await registerS3Connector()
 
     const dir = await Deno.makeTempDir()
     // A high-quality (100) source — re-encoding through the pipeline's own default optimize

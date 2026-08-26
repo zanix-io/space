@@ -7,8 +7,8 @@
  *
  * @module
  */
-import type { AssetsOptimizeOptions } from 'modules/bundler/assets-plugin.ts'
-import type { MediaOptimizeOptions } from 'modules/bundler/media-plugin.ts'
+import type { AssetsOptimizeOptions } from 'modules/bundler/assets-plugin-types.ts'
+import type { MediaOptimizeOptions } from 'modules/bundler/media-plugin-types.ts'
 
 let resolvedAssets: Map<string, string> | undefined
 let assetsDirConfig: string | string[] | undefined

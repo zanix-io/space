@@ -3,8 +3,8 @@ import type { ClassConstructor, ZanixClassDecorator, ZanixInteractorClass } from
 import { Get, Post, SsrController } from '@zanix/server'
 import type { RtoTypes } from '@zanix/types'
 import { InternalError } from '@zanix/errors'
-import type { PageHeaderOptions } from './space-page-controller.tsx'
-import { SpacePageController } from './space-page-controller.tsx'
+import type { PageHeaderOptions } from './space-page-controller.ts'
+import { SpacePageController } from './space-page-controller.ts'
 
 /**
  * Options accepted by {@linkcode Page}, beyond the plain-path shorthand (`@Page('products/:id')`,
@@ -81,7 +81,7 @@ export type PageOptions = {
    *    naive "handler already set it wins" check alone can't express it, because this page's own
    *    zero-config default is computed and applied inside the SAME handler that also applies tier
    *    1 — indistinguishable from a deliberate choice unless something explicitly steps aside for
-   *    tier 2 first. See `applySecurityGuards`'s own doc (`space-page-controller.tsx`) for exactly
+   *    tier 2 first. See `applySecurityGuards`'s own doc (`space-page-controller.ts`) for exactly
    *    how it does that (reading `ctx.locals[GUARD_HEADERS_LOCALS_KEY]`, from `@zanix/server`,
    *    BEFORE deciding whether to apply its own default at all).
    *

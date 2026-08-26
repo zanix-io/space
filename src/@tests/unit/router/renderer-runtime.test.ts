@@ -13,11 +13,12 @@ import {
 } from 'modules/router/renderer-runtime.ts'
 import type { RendererRuntime } from 'modules/router/renderer-runtime.ts'
 
-// A plain stub — none of these three functions need to actually render anything for this test,
+// A plain stub — none of these four functions need to actually render anything for this test,
 // they only need to be callable references `installRendererRuntime` can store.
 const STUB_RUNTIME: RendererRuntime = {
   renderPage: () => Promise.resolve(new Response('stub-page')),
   renderNotFound: () => Promise.resolve(new Response('stub-not-found')),
+  renderLoaderError: () => Promise.resolve(new Response('stub-loader-error')),
   createElement: () => null,
 }
 

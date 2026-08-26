@@ -1,6 +1,14 @@
 /**
  * Bundler module — the `@zanix/space/vite` entry point.
  *
+ * A consumer that only ever needs ONE of `assetsPlugin`/`mediaPlugin` should import from
+ * `@zanix/space/vite/assets` or `@zanix/space/vite/media` instead of this barrel — both plugin
+ * functions are re-exported here from the same file, and a plain ES module barrel resolves every
+ * one of its own export statements' source files the moment anything is imported from it, so
+ * importing only `mediaPlugin` from here still resolves `assetsPlugin`'s own file (and
+ * transitively `sharp`/`svgo`), and vice versa. See `assets-plugin.ts`'s/`media-plugin.ts`'s own
+ * doc for what each narrower subpath exports on its own.
+ *
  * @module
  */
 export { spacePlugin } from './space-plugin.ts'

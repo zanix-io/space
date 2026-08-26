@@ -1,7 +1,7 @@
 import { InternalError } from '@zanix/errors'
 import type { ClassConstructor } from '@zanix/server'
 import type { PageContext } from 'typings/page.ts'
-import type { SpacePageController } from './space-page-controller.tsx'
+import type { SpacePageController } from './space-page-controller.ts'
 
 /**
  * The function `SpacePageController.handleGet` calls to turn a page's resolved data into a final

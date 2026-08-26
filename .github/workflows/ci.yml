@@ -29,6 +29,77 @@ jobs:
         with:
           deno-version: v2.x
 
+      - name: Check formatting
+        run: deno fmt --check
+
+      - name: Lint
+        run: deno lint
+
       # Temporarily disabled: @zanix/cli check-cycles has not been published yet.
       # - name: Check for circular-import hazards
       #   run: deno run -A jsr:@zanix/cli check-cycles
+
+      # Required by the audio/video functional suite (`voice-upload-s3.test.ts`,
+      # `video-upload-s3.test.ts`, `system-ffmpeg-transcoder.calibration.test.ts`, and every other
+      # `probeFfmpegAvailability`-gated test) — confirmed NOT part of the `ubuntu-latest` runner's
+      # own default image, so without this step those tests stay permanently `ignore`d here too,
+      # same as the S3 gap above.
+      #
+      # Via Homebrew (pre-installed on this runner image, not on PATH by default — see the
+      # `brew shellenv` line below), NOT `apt-get install ffmpeg`, for two confirmed reasons:
+      #
+      # 1. Ubuntu's own `ffmpeg` apt package is built WITHOUT `libvmaf` — confirmed empirically:
+      #    `system-ffmpeg-transcoder.calibration.test.ts`'s real VMAF computation
+      #    (`-lavfi libvmaf=...`) never produced its output file against that build, failing all 8
+      #    calibration cases with `NotFound: ... vmaf.json`. Homebrew's own `ffmpeg` formula
+      #    depends on `libvmaf` directly, so its build has the filter compiled in.
+      # 2. Homebrew installs to `/home/linuxbrew/.linuxbrew/bin`, genuinely outside `/usr/bin:/bin`
+      #    — unlike a plain apt install, this doesn't collide with `system-ffmpeg-transcoder.
+      #    test.ts`'s own `RESTRICTED_PATH` (`'/usr/bin:/bin'`), the PATH several UNIT tests
+      #    deliberately restrict an isolated subprocess to, to simulate "ffmpeg genuinely not
+      #    installed" for the `binary-not-found`/`onUnavailable` fallback paths — a real,
+      #    intentional test fixture (confirmed empirically: a plain apt install placed `ffmpeg`/
+      #    `ffprobe` exactly inside the directories those tests treat as "definitely ffmpeg-free",
+      #    breaking 11 of them). No manual relocation needed here, unlike the apt approach.
+      - name: Install ffmpeg
+        run: |
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          brew install ffmpeg
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+
+      # `services:` only guarantees the CONTAINER has started, not that SeaweedFS's own S3 gateway
+      # inside it is done initializing and actually accepting connections yet — polls from the
+      # runner itself (the `seaweedfs` image has no `curl`/health-check tooling of its own to rely
+      # on for a `services.*.options` health check instead).
+      - name: Wait for SeaweedFS
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8333/ && exit 0
+            sleep 1
+          done
+          echo "SeaweedFS never became reachable on :8333" >&2
+          exit 1
+
+      # SeaweedFS doesn't auto-register a bucket as a real entity just because a write into it
+      # happened to succeed — confirmed empirically: a PUT of an object under `zanix-objects/...`
+      # into a never-created bucket returns 200 (SeaweedFS is lenient about the write itself), but
+      # `@zanix/datamaster`'s own S3 connector pings the bucket with a real `HeadBucketCommand`
+      # first (`connector.ts`'s own `ping`), which 404s against that same never-explicitly-created
+      # bucket — the exact `NoSuchBucket` error the first version of this workflow hit. A real
+      # `PUT` to the bucket's own root path (not an object inside it) is what actually registers
+      # it — `zanix-objects` is `@zanix/datamaster`'s own `DEFAULT_BUCKET`, unchanged since this
+      # workflow never sets `S3_BUCKET`.
+      - name: Create the default S3 bucket
+        run: curl -sf -X PUT http://localhost:8333/zanix-objects/
+
+      - name: Run tests
+        env:
+          # Enables the `*-s3.test.ts` suite against the `seaweedfs` service above — same flag,
+          # same convention, `@zanix/datamaster`'s own `s3-object-storage.test.ts` functional suite
+          # already uses.
+          RUN_S3_TESTS: 'true'
+          S3_ENDPOINT: http://localhost:8333
+        # `--min-dep-age=0`: this repo's dependencies (e.g. `@zanix/utils`) get published and
+        # consumed here within the same day; without this flag, Deno's own minimum-dependency-age
+        # safety check can reject a fresh resolution of a package published too recently.
+        run: deno test --min-dep-age=0 --allow-all

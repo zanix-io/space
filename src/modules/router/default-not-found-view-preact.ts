@@ -11,7 +11,10 @@ import type { VNode } from 'preact'
  * reach `<head>` at all. React's counterpart currently renders its own `<title>` in JSX and gets
  * away with it purely because of hoisting; both now also receive the same resolved head, so the two
  * produce the same document either way.
+ *
+ * Carries a stable `data-space="not-found"` hook on its root element — see the React counterpart's
+ * own doc for the full reasoning (an `@zanix/space` attribute, never `data-space-ui`).
  */
-export function DefaultNotFoundView(): VNode {
-  return createElement('h1', null, '404 — Page not found')
+export function DefaultNotFoundView(): VNode<{ 'data-space': string }> {
+  return createElement('h1', { 'data-space': 'not-found' }, '404 — Page not found')
 }

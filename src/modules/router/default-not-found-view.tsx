@@ -9,7 +9,12 @@ import type { ReactElement } from 'react'
  * tree; the Preact counterpart could never do the same, so the two renderers produced different
  * documents from the same built-in view. Sourcing it from the head instead makes them identical,
  * and is the same path an app's own `not-found.tsx` uses when it exports a `head`.
+ *
+ * Carries a stable `data-space="not-found"` hook on its root element — an `@zanix/space` attribute
+ * (never `data-space-ui`; that one belongs to `@zanix/space-ui`, a different package and a
+ * different audience — see `default-error-view.tsx`'s own doc) an optional stylesheet (e.g.
+ * `zanix new space --template themed`'s own `assets/theme/space-defaults.css`) can target.
  */
 export function DefaultNotFoundView(): ReactElement {
-  return <h1>404 — Page not found</h1>
+  return <h1 data-space='not-found'>404 — Page not found</h1>
 }

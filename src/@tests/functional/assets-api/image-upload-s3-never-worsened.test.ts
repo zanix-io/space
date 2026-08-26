@@ -44,7 +44,7 @@ Deno.test({
     // Real, portable replacement for the old query-string-on-a-local-path re-evaluation trick
     // (`datamaster-internal/core.ts?case=...`) — see `resolve-asset-storage-s3.test.ts`'s own doc.
     await closeAllConnections()
-    registerS3Connector()
+    await registerS3Connector()
 
     const dir = await Deno.makeTempDir()
     // A source already encoded at LOW quality (15) — re-encoding at the pipeline's own higher

@@ -1,9 +1,14 @@
-import { assert } from '@std/assert'
+import { assert, assertEquals } from '@std/assert'
 import { loadRoutes } from 'modules/router/mod.ts'
 import { mockHandlerContext } from 'modules/testing/mod.ts'
 import { stripHydrationComments } from '../../support/strip-hydration-comments.ts'
 import LayoutErrorFixturePage from '../../support/fixtures/layout-error-routes/page.tsx'
 import LoadingFixturePage from '../../support/fixtures/loading-routes/page.tsx'
+import LoaderErrorFixturePage from '../../support/fixtures/loader-error-routes/page.tsx'
+import LoaderNotFoundFixturePage from '../../support/fixtures/loader-not-found-routes/page.tsx'
+import NestedLoaderErrorFixturePage from '../../support/fixtures/nested-loader-error-routes/page.tsx'
+import LoaderErrorActionFixturePage from '../../support/fixtures/loader-error-action-routes/page.tsx'
+import LoaderErrorNoBoundaryFixturePage from '../../support/fixtures/loader-error-no-boundary-routes/page.tsx'
 
 // Static imports above resolve to the exact same module instances `loadRoutes()` itself imports
 // (same file, same resolved specifier) — so the classes below are the very ones `loadRoutes()`
@@ -59,5 +64,100 @@ Deno.test(
     const html = await response.text()
     assert(html.includes('data-testid="fixture-resolved"'), html)
     assert(html.includes('resolved-content'), html)
+  },
+)
+
+Deno.test(
+  "SpacePageController.handleGet: a page's own loader throwing a generic error renders the " +
+    'nearest error.tsx with a real 500, instead of leaking uncaught to a raw JSON error response',
+  async () => {
+    await loadRoutes('src/@tests/support/fixtures/loader-error-routes')
+
+    const ctx = mockHandlerContext()
+    const page = new LoaderErrorFixturePage(ctx)
+    const response = await page.handleGet(ctx)
+
+    assertEquals(response.status, 500)
+    const html = stripHydrationComments(await response.text())
+    assert(html.includes('data-testid="fixture-loader-error"'), html)
+    assert(html.includes('fixture-loader-boom'), html)
+  },
+)
+
+Deno.test(
+  "SpacePageController.handleGet: a page's own loader throwing HttpError('NOT_FOUND') renders " +
+    "this app's not-found.tsx with a real 404, reusing createNotFoundHandler's own lookup",
+  async () => {
+    await loadRoutes('src/@tests/support/fixtures/loader-not-found-routes')
+
+    const ctx = mockHandlerContext()
+    const page = new LoaderNotFoundFixturePage(ctx)
+    const response = await page.handleGet(ctx)
+
+    assertEquals(response.status, 404)
+    const html = stripHydrationComments(await response.text())
+    assert(html.includes('data-testid="loader-not-found"'), html)
+  },
+)
+
+Deno.test(
+  "SpacePageController.handleGet: a nested layout segment's own loader throwing is caught the " +
+    "same way as the page's own loader, rendering that segment's nearest error.tsx",
+  async () => {
+    await loadRoutes('src/@tests/support/fixtures/nested-loader-error-routes')
+
+    const ctx = mockHandlerContext()
+    const page = new NestedLoaderErrorFixturePage(ctx)
+    const response = await page.handleGet(ctx)
+
+    assertEquals(response.status, 500)
+    const html = stripHydrationComments(await response.text())
+    assert(html.includes('data-testid="fixture-segment-loader-error"'), html)
+    assert(html.includes('fixture-segment-loader-boom'), html)
+  },
+)
+
+Deno.test(
+  "SpacePageController.handleGet: a page's own loader throwing with NO error.tsx anywhere in its " +
+    "own composition chain still renders a real document — this package's own built-in " +
+    'DefaultErrorView, with a real 500 status — never a raw, uncaught throw leaking to ' +
+    "@zanix/server's own generic JSON error response",
+  async () => {
+    await loadRoutes('src/@tests/support/fixtures/loader-error-no-boundary-routes')
+
+    const ctx = mockHandlerContext()
+    const page = new LoaderErrorNoBoundaryFixturePage(ctx)
+    const response = await page.handleGet(ctx)
+
+    assertEquals(response.status, 500)
+    const html = stripHydrationComments(await response.text())
+    assert(html.includes('data-space="error"'), html)
+    assert(html.includes('Something went wrong'), html)
+    // The built-in fallback deliberately says nothing about the underlying error itself — only
+    // the log carries it (see `loader-error-handler.ts`'s own doc).
+    assert(!html.includes('fixture-no-boundary-loader-boom'), html)
+  },
+)
+
+Deno.test(
+  "SpacePageController.handlePost: a page's own loader throwing during the 422 field-validation " +
+    're-render is caught the same way as a GET, rendering the nearest error.tsx with a real 500 ' +
+    'instead of the 422 re-render (or a raw JSON error response)',
+  async () => {
+    await loadRoutes('src/@tests/support/fixtures/loader-error-action-routes')
+
+    // An invalid `email` fails `FixtureActionBody`'s own validation, which is what routes
+    // `handlePost` into `#renderInvalidAction` — the SAME `loader` the page's own GET uses, and the
+    // one this fixture always throws from.
+    const ctx = mockHandlerContext({
+      payload: { params: {}, search: {}, body: { email: 'not-an-email' } },
+    })
+    const page = new LoaderErrorActionFixturePage(ctx)
+    const response = await page.handlePost(ctx)
+
+    assertEquals(response.status, 500)
+    const html = stripHydrationComments(await response.text())
+    assert(html.includes('data-testid="fixture-action-loader-error"'), html)
+    assert(html.includes('fixture-action-loader-boom'), html)
   },
 )

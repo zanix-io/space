@@ -7,12 +7,14 @@ import {
   createAssetManifestRegistry,
 } from 'modules/assets/asset-manifest-registry.ts'
 import { defaultFormatFor } from 'modules/media/system-ffmpeg-transcoder.ts'
-import type { VideoBreakpointName } from 'modules/media/video-breakpoints.ts'
-import { isVoiceSource, type VoiceAudioFormat } from 'modules/media/audio/policies/voice.ts'
+import { isVoiceSource } from 'modules/media/audio/policies/voice.ts'
 import {
-  type AssetTransformer,
-  createAssetTransformer,
-} from 'modules/asset-transform/asset-transformer.ts'
+  createMediaTransformer,
+  type MediaTransformer,
+} from 'modules/asset-transform/media-transformer.ts'
+import type { MediaOptimizeOptions } from './media-plugin-types.ts'
+
+export type { MediaOptimizeOptions }
 
 // `Plugin` is not re-exported here — same accepted `deno doc --lint` finding `assets-plugin.ts`'s
 // own doc comment already establishes.
@@ -31,7 +33,7 @@ import {
  * through `assetsPlugin`'s own byte-in/byte-out shape would be the wrong kind of reuse. Audio was
  * added here rather than as a third, separate plugin for the same reason: it is FFMPEG-backed
  * exactly like video/thumbnail (never sharp-backed like images), so it shares this plugin's own
- * scan/transform/emit shape and its one `AssetTransformer`/cache instance — see this module's own
+ * scan/transform/emit shape and its one `MediaTransformer`/cache instance — see this module's own
  * "audio.voice" doc below for the full contract. What's reused: `scanAssets` (asset discovery),
  * `matchesInclude` (the `include` glob filter), and — the one genuinely shared, extracted
  * abstraction — {@linkcode AssetManifestRegistry}, so this plugin's own outputs land in the exact
@@ -121,62 +123,6 @@ import {
  * })
  * ```
  */
-export interface MediaOptimizeOptions {
-  /** Video breakpoint/format variants — see this module's own doc for the exact contract.
-   * Omitted: no variants of any kind, only the untouched original is hashed. */
-  video?: {
-    /** Which named presets to generate. Omitted/empty: no video transcoding at all. */
-    breakpoints?: VideoBreakpointName[]
-    /** Which containers to produce PER breakpoint. Omitted: exactly one, matching the source's
-     * own container (see this module's own doc on `defaultFormatFor`). */
-    formats?: ('mp4' | 'webm')[]
-  }
-  /** Thumbnail extraction policy — see this module's own doc for the exact contract. Omitted: no
-   * thumbnail is ever produced. */
-  thumbnails?: {
-    /** Same meaning as `ThumbnailOptions.atSeconds` — default `1`. */
-    atSeconds?: number
-    /** Same meaning as `ThumbnailOptions.width` — omitted keeps the source frame's own real
-     * width. */
-    width?: number
-    /** Which image format(s) to extract. Omitted: `['jpeg']`. */
-    formats?: ('jpeg' | 'png' | 'webp')[]
-  }
-  /** Voice/speech-only audio optimization — see this module's own doc for the exact contract and
-   * `modules/media/audio/policies/voice.ts` for the full product rationale. Omitted entirely: no
-   * audio file is even scanned by this plugin (existing `assetsPlugin` behavior for `.wav`/`.mp3`/
-   * etc. stays completely unchanged). */
-  audio?: {
-    /** The ONLY implemented audio profile today — see `modules/media/audio/audio-transcoder.ts`'s
-     * own doc for how a future profile (music, podcast, ...) would be added as a SIBLING key here,
-     * never by widening this one. Omitted: no voice optimization, even when `audio` itself is
-     * given (matches `video`/`thumbnails`'s own "the sub-key IS the opt-in" convention). */
-    voice?: {
-      /** Which output format(s) to produce, additively. Omitted: `['aac']` — the universal-
-       * compatibility fallback (see `VoiceAudioFormat`'s own doc). An explicit `['aac', 'opus']`
-       * produces both, independently. */
-      formats?: VoiceAudioFormat[]
-      /** Overrides `VOICE_DEFAULT_BITRATE_KBPS` (128) for every format this call produces. */
-      bitrateKbps?: number
-    }
-    /** Glob patterns scoping WHICH audio assets `voice` applies to — independent of this option's
-     * own top-level `include` (video-only). Omitted (the default): every recognized voice-source
-     * file (`isVoiceSource` — `.wav` only, deliberately conservative). An asset outside this filter
-     * — or one whose extension isn't `.wav` — is always left completely untouched, regardless of
-     * `voice` being configured. */
-    include?: string[]
-  }
-  /** Glob patterns (matched against the same `relativePath` the manifest keys on) scoping WHICH
-   * video assets `video`/`thumbnails` apply to (audio has its own, separate `audio.include` — see
-   * above). Omitted (the default): every recognized video file. An asset outside this filter — or
-   * one whose extension isn't a recognized video format at all — is always left completely
-   * untouched. */
-  include?: string[]
-  /** Persists `video`/`thumbnails`/`audio.voice` results ACROSS builds — see this module's own
-   * doc. Omitted (the default): every build re-transcodes/re-extracts from scratch. */
-  cacheDir?: string
-}
-
 /** Options for {@linkcode mediaPlugin}. */
 export interface MediaPluginOptions {
   /** Same value passed to `defineSpaceApp({ assetsDir })` — resolved with `scanAssets`'s own
@@ -231,7 +177,7 @@ interface EmittableEntry {
 }
 
 async function resolveVideoOutputs(
-  transformer: AssetTransformer,
+  transformer: MediaTransformer,
   relativePath: string,
   absolutePath: string,
   optimize: MediaOptimizeOptions | undefined,
@@ -300,7 +246,7 @@ async function resolveVideoOutputs(
  * publishing a wrong one.
  */
 async function resolveAudioOutputs(
-  transformer: AssetTransformer,
+  transformer: MediaTransformer,
   relativePath: string,
   absolutePath: string,
   optimize: MediaOptimizeOptions | undefined,
@@ -363,10 +309,12 @@ export function mediaPlugin(options: MediaPluginOptions): Plugin[] {
         : []
       if (videoEntries.length === 0 && audioEntries.length === 0) return
 
-      // Cache wiring itself lives in `createAssetTransformer` (`modules/asset-transform/`) —
-      // this plugin only supplies its own `cacheDir` option. ONE transformer/cache instance for
-      // video, thumbnail, AND voice audio — no separate `AudioCache`.
-      const transformer = createAssetTransformer({ cacheDir: options.optimize?.cacheDir })
+      // Cache wiring itself lives in `createMediaTransformer` (`modules/asset-transform/`, the
+      // npm-free sibling of `createImageTransformer` — `assetsPlugin`'s own sharp-backed
+      // equivalent never reachable from here) — this plugin only supplies its own `cacheDir`
+      // option. ONE transformer/cache instance for video, thumbnail, AND voice audio — no
+      // separate `AudioCache`.
+      const transformer = createMediaTransformer({ cacheDir: options.optimize?.cacheDir })
 
       const emitEntry = (relativePath: string, bytes: Uint8Array) => {
         const refId = this.emitFile({ type: 'asset', name: relativePath, source: bytes })

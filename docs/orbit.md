@@ -22,8 +22,8 @@ way, so it still fully works with JavaScript disabled, before this script loads,
 itself fails.
 
 **What gets swapped, and what doesn't**: only what's inside the page's own composed tree — a
-header/footer/nav declared in the root `layout.tsx` (see the README's own
-[Document shell](../README.md#document-shell)) sits outside that boundary and is never re-fetched or
+header/footer/nav declared in the root `layout.tsx` (see
+[Document shell](./routing.md#document-shell)) sits outside that boundary and is never re-fetched or
 re-rendered on navigation. What Orbit does _not_ do yet: preserve a shared _nested_ layout across
 sibling routes (`/products/1` → `/products/2` still re-renders everything under the root layout, not
 just the leaf page) — that needs comparing route trees between the current and target URL, a real
@@ -166,3 +166,5 @@ toward one. With it off, the bytes on the wire are byte-for-byte what they were 
   across an Orbit swap.
 - [`docs/css.md`](./css.md) — the `global`/page/comet CSS contract this page's "CSS during
   navigation" section relies on.
+- [`docs/routing.md`](./routing.md) — layout nesting and the document shell that defines what a
+  navigation swap does and doesn't touch.

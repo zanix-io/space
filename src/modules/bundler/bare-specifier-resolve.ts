@@ -1,6 +1,8 @@
 import type { Plugin } from 'vite'
 import { ResolutionMode } from '@deno/loader'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { isAbsolute } from '@std/path'
+import { isDenoSpecifier } from '@deno/vite-plugin/resolver'
 import { getSharedLoader } from './deno-loader.ts'
 
 /**
@@ -42,13 +44,17 @@ import { getSharedLoader } from './deno-loader.ts'
  * Registered BEFORE `deno()` in `createSpaceDevEngine`'s own `plugins` array. For a genuinely bare
  * specifier only (never relative/absolute/virtual/scheme-prefixed — those are left entirely to the
  * existing pipeline, untouched), this resolves it via `@deno/loader`'s own public
- * `Loader.resolveSync(id, undefined, ResolutionMode.Import)` — `referrer: undefined` is the exact
- * same call shape `@deno/vite-plugin`'s own `resolveDeno()` uses for a NON-wrapped importer — and
- * returns the resulting plain absolute path directly, for EVERY importer alike. Returning a value
- * short-circuits Vite's plugin chain: `@deno/vite-plugin`'s own `resolveId` never runs for this id
- * (it explicitly declines anything it didn't produce itself — `resolveDeno`'s own `if
- * (id.startsWith("\x00")) return null`), so its importer-dependent branching never gets a chance to
- * diverge. Same specifier, same referrer strategy, every time — that's what makes this canonical.
+ * `Loader.resolveSync(id, referrer, ResolutionMode.Import)` and returns the resulting plain absolute
+ * path directly. Returning a value short-circuits Vite's plugin chain: `@deno/vite-plugin`'s own
+ * `resolveId` never runs for this id (it explicitly declines anything it didn't produce itself —
+ * `resolveDeno`'s own `if (id.startsWith("\x00")) return null`), so its own importer-dependent
+ * wrapping-vs-unwrapping branching (the asymmetry this section documents) never gets a chance to
+ * diverge for it. `referrer` itself is NOT hardcoded to `undefined` for every importer — see
+ * {@linkcode resolveBareSpecifierCanonically}'s own doc for why a real referrer must be threaded
+ * through for a path-scoped `scopes` override to ever apply, and why doing so doesn't reopen the
+ * asymmetry this fix closes: a `node_modules`-rooted importer (every case the asymmetry above
+ * actually depends on) is deliberately excluded from referrer computation, so it still resolves
+ * exactly as before — referrer-less, one canonical id regardless of wrapped/unwrapped status.
  *
  * This never reconstructs `@deno/vite-plugin`'s own private `\0deno::...` id format — that is
  * deliberately avoided as too fragile, an undocumented internal format not guaranteed stable across
@@ -106,10 +112,64 @@ import { getSharedLoader } from './deno-loader.ts'
  * `Invalid hook call` failure this guards against: without it, this function and Vite's own plain
  * Node fast path above can each resolve the SAME bare specifier to a DIFFERENT physical file the
  * moment the target project has its own real, on-disk `node_modules`).
+ *
+ * ## `importer` — required for a path-scoped `scopes` override to apply at all
+ *
+ * `importer` (the plain absolute path of the file doing the importing, when Vite/Rollup's own
+ * `resolveId(source, importer, options)` hook shape provides one) is forwarded to
+ * `loader.resolveSync` as its own `referrer` argument, via {@linkcode referrerUrlFor}. This is not
+ * an optional refinement — per the WHATWG Import Maps spec `@deno/loader` implements, a `scopes`
+ * entry is matched against the REFERRER's own URL, not the bare specifier alone; calling
+ * `resolveSync` with `referrer: undefined` (this function's own behavior before this fix) makes
+ * every `scopes` entry structurally unreachable, unconditionally, for every resolution this
+ * function ever performs — regardless of whether the specifier's prefix is even ambiguous.
+ *
+ * A consuming project's own `deno.json` declaring a top-level `utils/` alias for its own
+ * `./src/utils/`, alongside a separate, correctly-scoped `scopes["../server/"]["utils/"]` override
+ * redirecting a linked dependency's (e.g. `@zanix/server`'s) own bare `utils/` imports to that
+ * dependency's real `../server/src/utils/` instead, is exactly the shape a referrer-less call gets
+ * wrong (confirmed correct at the plain Deno-resolution layer via `deno info --json`, which honors
+ * the referrer/scope relationship natively). Because this plugin is registered AHEAD of `deno()` in
+ * `createSpaceDevEngine`'s own `plugins` array and always short-circuits (see this file's own
+ * header doc), a referrer-less call intercepts `mod.ts`'s own `utils/targets.ts` import, matches
+ * only the TOP-LEVEL `imports["utils/"]` entry (the only one reachable with no referrer), and
+ * resolves it against the consuming project's own `src/utils/` directory — a file that may not even
+ * exist there — instead of the dependency's own real `src/utils/targets.ts`, surfacing as `Failed
+ * to load url /src/utils/targets.ts (resolved id: .../<consumer>/src/utils/targets.ts) in
+ * .../server/mod.ts`. `@deno/vite-plugin`'s own `resolveViteSpecifier` (`resolver.js`) already
+ * computes this exact referrer for a plain-file importer via its own internal (unexported)
+ * `memberReferrerUrl` specifically so "a member-scoped entry wins over the root map on a name
+ * collision" — this function's `referrerUrlFor` mirrors that same, already-proven-correct exclusion
+ * set (a deno-wrapped importer, a `node_modules`-rooted one, and Vite's own `/@fs/`/`/@id/`
+ * dev-server-only virtual paths, none of which are real project source a `scopes` entry should ever
+ * match against) using `@deno/vite-plugin`'s own public `isDenoSpecifier`, rather than inventing a
+ * new one.
+ *
+ * This is a correctness fix, not a reintroduction of the module-identity asymmetry described above:
+ * that asymmetry was about the SAME target file getting two different Vite module ids depending on
+ * importer type (wrapped vs. plain). Threading a real referrer through changes the TARGET a
+ * genuinely scope-ambiguous specifier resolves to — the outcome a `scopes` override exists to
+ * produce — while an unambiguous specifier (no matching `scopes` entry) resolves identically with
+ * or without a referrer, since the WHATWG resolution algorithm falls back to the same top-level
+ * `imports` map either way. No new per-importer id divergence is introduced for any specifier a
+ * project doesn't itself choose to scope differently.
  */
+function referrerUrlFor(importer: string | undefined): string | undefined {
+  if (importer === undefined || isDenoSpecifier(importer)) return undefined
+  const importerPath = importer.split('?')[0]
+  if (
+    !isAbsolute(importerPath) || importerPath.startsWith('/@') ||
+    importerPath.includes('/node_modules/')
+  ) {
+    return undefined
+  }
+  return pathToFileURL(importerPath).href
+}
+
 export async function resolveBareSpecifierCanonically(
   id: string,
   root: string,
+  importer?: string,
 ): Promise<string | null> {
   // Only a genuinely bare specifier — relative, absolute, Vite/Rollup virtual ids (`\0...`), and
   // scheme-prefixed specifiers (`npm:`, `jsr:`, `http(s):`) are left entirely to the existing
@@ -123,7 +183,7 @@ export async function resolveBareSpecifierCanonically(
   const loader = await getSharedLoader(root)
   let resolved: string
   try {
-    resolved = loader.resolveSync(id, undefined, ResolutionMode.Import)
+    resolved = loader.resolveSync(id, referrerUrlFor(importer), ResolutionMode.Import)
   } catch {
     return null // not resolvable this way — let the existing pipeline try its own resolution
   }
@@ -134,9 +194,9 @@ export async function resolveBareSpecifierCanonically(
 export function canonicalBareSpecifierResolvePlugin(): Plugin {
   return {
     name: 'zanix-space-dev-canonical-bare-specifier-resolve',
-    resolveId(id) {
+    resolveId(id, importer) {
       if (this.environment?.name !== 'ssr') return null
-      return resolveBareSpecifierCanonically(id, this.environment.config.root)
+      return resolveBareSpecifierCanonically(id, this.environment.config.root, importer)
     },
   }
 }

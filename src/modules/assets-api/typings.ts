@@ -8,12 +8,12 @@
  * @module
  */
 
-import type { AssetKind } from '../asset-transform/asset-transformer.ts'
+import type { AssetKind } from '../asset-transform/types.ts'
 import type { VoiceAudioFormat, VoiceAudioTransformOptions } from '../media/audio/policies/voice.ts'
 import type { VideoBreakpointName } from '../media/video-breakpoints.ts'
 
 /** Re-exported because `AssetTransformRequest` (below) references it, and a type reachable from
- * this module's own public surface must itself be nameable from here — see `asset-transformer.ts`
+ * this module's own public surface must itself be nameable from here — see `asset-transform/types.ts`
  * for the full contract (the same `'image' | 'video' | 'thumbnail' | 'audio'` shape shared with
  * `@zanix/space/assets`). */
 export type { AssetKind }

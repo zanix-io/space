@@ -15,6 +15,14 @@ thing a stylesheet genuinely can't express: a token whose VALUE depends on which
 served (e.g. per-tenant branding), not just on which app/host declared it. Everything else in this
 document stays exactly what it's always been: **static, resolved once at build/composition time**.
 
+**A real, working starting point, not just this convention document**:
+`zanix new space --template
+themed` (`@zanix/cli`) scaffolds a genuine
+`assets/theme/{tokens,behavior,card,space-defaults}.css` set (curated by `@zanix/space-ui`), already
+wired into `globalCss` — a project that wants a working default rather than authoring `tokens.css`
+from scratch can start there. See `@zanix/cli`'s own `docs/new.md` for the full `--template themed`
+reference and `@zanix/space-ui`'s own `docs/styling.md` for what each file does.
+
 ### Declaring tokens
 
 A token is a CSS custom property declared on `:root`, in a stylesheet passed to

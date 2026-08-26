@@ -20,7 +20,7 @@ type State = { hasError: boolean; error: unknown }
  * server renderer never invokes `getDerivedStateFromError`/`componentDidCatch` for a segment that
  * throws synchronously outside a `Suspense` boundary — that's always a fatal, response-breaking
  * error, no matter how many error boundaries sit above it (`composeSegments` in
- * `space-page-controller.tsx` always wraps a segment that has an `error.tsx` in a `Suspense`, for
+ * `space-page-controller.ts` always wraps a segment that has an `error.tsx` in a `Suspense`, for
  * exactly this reason). Even wrapped in `Suspense`, this boundary's `render()` never actually runs
  * during the SAME server response either — React instead emits that segment's `Suspense` fallback
  * (or nothing, if there is none) plus an instruction to finish that segment on the client. This

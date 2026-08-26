@@ -16,17 +16,17 @@
  *
  * @module
  */
-import type { AppSetupContext, ConfigAccessor, RuntimeContext } from '@zanix/app'
-import type { PageHeaderOptions } from 'modules/router/space-page-controller.tsx'
+import type { AppSetupContext, ConfigAccessor, RuntimeContext } from '@zanix/app/runtime'
+import type { PageHeaderOptions } from 'modules/router/space-page-controller.ts'
 import type { SitemapSource } from 'modules/seo/sitemap.ts'
 import type { SpaceRobotsConfig } from 'modules/seo/robots.ts'
 import type { ThemeResolver } from 'modules/theme/theme-registry.ts'
 import type { StylesheetRef } from 'modules/render/css-manifest.ts'
 import type { PwaConfig } from './pwa.ts'
 import type { ValidationConfig } from 'modules/validation/engine.ts'
-import type { AssetsOptimizeOptions } from 'modules/bundler/assets-plugin.ts'
-import type { MediaOptimizeOptions } from 'modules/bundler/media-plugin.ts'
-import type { AssetsControllerOptions } from 'modules/assets-api/controllers/assets.controller.ts'
+import type { AssetsOptimizeOptions } from 'modules/bundler/assets-plugin-types.ts'
+import type { MediaOptimizeOptions } from 'modules/bundler/media-plugin-types.ts'
+import type { AssetsControllerOptions } from 'modules/assets-api/controllers/assets-controller-types.ts'
 import type { LogApiControllerOptions } from 'modules/log-api/controllers/log.controller.ts'
 
 // Re-exported (not just imported) because `SpaceAppConfig.setup` below references

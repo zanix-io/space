@@ -322,6 +322,12 @@ export async function buildSpaceClient(
   await build({
     root,
     configFile: false,
+    // An empty worker plugin array keeps `deno()`'s own self-resolution out of the nested worker
+    // sub-build Vite spins up for `?worker`/`?sharedworker` imports — without this, that
+    // sub-build hangs resolving `picomatch` inside `@zanix/utils`'s own worker (see
+    // `cjs-interop.ts`). `worker` is a top-level `UserConfig` property, a sibling of `build`, not
+    // nested inside `BuildEnvironmentOptions`.
+    worker: { plugins: () => [] },
     build: {
       write: true,
       outDir: resolvedOutDir,

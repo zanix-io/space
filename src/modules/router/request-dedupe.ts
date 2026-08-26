@@ -1,7 +1,7 @@
 /**
  * The request-scoped dedup primitive behind `PageContext.dedupe` (`typings/page.ts`) — one plain
  * `Map`, keyed by whatever string a caller picks, created once per request by `toPageContext`
- * (`space-page-controller.tsx`) and shared by construction across every `loader` that request's
+ * (`space-page-controller.ts`) and shared by construction across every `loader` that request's
  * composition chain runs: the page's own AND every `layout.tsx` in it (see `LayoutProps.data`'s own
  * doc, same file, for how segment-level loaders share this same `ctx`).
  *

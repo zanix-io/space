@@ -24,15 +24,51 @@
  * body in, a small JSON ack out), the same shape `assets.controller.ts` uses, not a byte/text
  * route.
  *
+ * `@zanix/auth` (`rateLimitGuard`) is reached through a DELIBERATELY non-literal, fully-qualified
+ * `jsr:` `import()` specifier, INSIDE {@linkcode resolveDefaultGuard} — never a top-level `import`,
+ * and never `typeof import('@zanix/auth')` for its type either (see {@link AuthExports}'s own
+ * doc). Confirmed real, not theoretical: `@zanix/auth`'s own real dependency on `@zanix/datamaster`
+ * (for THIS guard's Redis-backed rate-limit counters) used to drag `mongoose`/`mongodb`/`bson`/
+ * `redis`/`@redis/*` into the module graph of every `@zanix/space` app's build, whether or not it
+ * ever used the Log API's rate limiting — same root cause `zanix-io/app`'s own `activateApps` had
+ * (a bare alias declared in `deno.jsonc`'s own `imports` is, on its own, enough to trigger
+ * `nodeModulesDir: "auto"`-style npm-install materialization, independent of whether reachable code
+ * ever imports it) — see `deno.jsonc`'s own doc comment at the spot `@zanix/auth` used to be
+ * declared. The real guard is constructed on its first genuine invocation (a real `POST /api/log`
+ * request), memoized per `createLogApiController` call, never at controller-construction time —
+ * `createLogApiController` itself stays fully synchronous either way.
+ *
  * @module
  */
 
 import type { GuardResponse, HandlerContext, MiddlewareGuard } from '@zanix/server'
 import { Controller, Guard, Post, ZanixController } from '@zanix/server'
-import { rateLimitGuard } from '@zanix/auth'
 import { InternalError } from '@zanix/errors'
 import logger from '@zanix/logger'
 import { LogIngestRTO } from './rtos/log.rto.ts'
+
+/** Fully-qualified, deliberately non-literal `jsr:` specifier for `@zanix/auth` — see
+ * {@linkcode resolveDefaultGuard}'s own doc for why this package is reached this way instead of a
+ * normal top-level `import`. Kept in sync with `deno.jsonc`'s own doc comment at the spot
+ * `@zanix/auth` used to be declared. */
+const AUTH_SPECIFIER = 'jsr:@zanix/auth@^0.8.0'
+
+/** Narrow, hand-declared shape for exactly the one `@zanix/auth` export this module calls —
+ * deliberately NOT `typeof import('@zanix/auth')`, which would force resolving that package's
+ * entire export surface (and its own real `@zanix/datamaster` dependency, which itself pulls
+ * `mongoose`/`redis`) for type-checking alone, even though `rateLimitGuard` is the only thing
+ * used here. */
+interface AuthExports {
+  rateLimitGuard: (
+    options?: {
+      app?: string
+      windowSeconds?: number
+      anonymousLimit?: number | false
+      trustProxyHeader?: boolean
+      trustedHeaders?: string[]
+    },
+  ) => MiddlewareGuard
+}
 
 /**
  * The rate-limit window this endpoint's own default guard counts requests over. Kept small and
@@ -171,16 +207,19 @@ async function runDefaultRateLimitGuard(
   }
 }
 
-/** Combines this endpoint's own mandatory default guard with any integrator-provided extras from
- * {@linkcode LogApiControllerOptions.guards} — runs each in order, short-circuiting on the first
- * denial. See that option's own doc for why the default is never dropped, unlike
- * `createAssetsController`'s own `combineGuards`.
- * @param rateLimitOptions - See {@link LogApiRateLimitOptions} — every field falls back to this
- * endpoint's own current default when omitted. */
-function combineGuards(
-  extraGuards: MiddlewareGuard[] | undefined,
+/**
+ * Builds (once, lazily, memoized) the real `rateLimitGuard` this endpoint's default guard wraps —
+ * never at `combineGuards`-call time, only on this guard's first genuine invocation (a real
+ * `POST /api/log` request reaching it). Promise-memoized, not value-memoized, so two concurrent
+ * first requests racing before the import settles still resolve to the exact same guard instance,
+ * never construct/import twice — same reasoning `ResourceRegistry.resolve()` already documents for
+ * the identical shape of race in `@zanix/app`. Scoped to ONE {@link combineGuards} call (a plain
+ * closure variable, never module-level) so two `createLogApiController()` instances with different
+ * `rateLimit` overrides never share a memoized guard built from the wrong options.
+ */
+function createDefaultGuardResolver(
   rateLimitOptions: LogApiRateLimitOptions | undefined,
-): MiddlewareGuard {
+): () => Promise<MiddlewareGuard> {
   const {
     windowSeconds = LOG_API_RATE_LIMIT_WINDOW_SECONDS,
     anonymousLimit = LOG_API_RATE_LIMIT_ANONYMOUS_LIMIT,
@@ -196,9 +235,32 @@ function combineGuards(
     // behind a trusted proxy can still opt out of this default explicitly.
     trustProxyHeader = true,
   } = rateLimitOptions ?? {}
-  const defaultGuard = rateLimitGuard({ windowSeconds, anonymousLimit, trustProxyHeader })
+
+  let guardPromise: Promise<MiddlewareGuard> | undefined
+  return () => {
+    if (!guardPromise) {
+      guardPromise = import(AUTH_SPECIFIER).then(({ rateLimitGuard }: AuthExports) =>
+        rateLimitGuard({ windowSeconds, anonymousLimit, trustProxyHeader })
+      )
+    }
+    return guardPromise
+  }
+}
+
+/** Combines this endpoint's own mandatory default guard with any integrator-provided extras from
+ * {@linkcode LogApiControllerOptions.guards} — runs each in order, short-circuiting on the first
+ * denial. See that option's own doc for why the default is never dropped, unlike
+ * `createAssetsController`'s own `combineGuards`.
+ * @param rateLimitOptions - See {@link LogApiRateLimitOptions} — every field falls back to this
+ * endpoint's own current default when omitted. */
+function combineGuards(
+  extraGuards: MiddlewareGuard[] | undefined,
+  rateLimitOptions: LogApiRateLimitOptions | undefined,
+): MiddlewareGuard {
+  const resolveDefaultGuard = createDefaultGuardResolver(rateLimitOptions)
   const list: MiddlewareGuard[] = [
-    (context, ...args) => runDefaultRateLimitGuard(defaultGuard, context, args),
+    async (context, ...args) =>
+      await runDefaultRateLimitGuard(await resolveDefaultGuard(), context, args),
     ...(extraGuards ?? []),
   ]
   return async (context, ...args) => {

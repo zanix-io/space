@@ -743,6 +743,68 @@ Deno.test(
 )
 
 Deno.test(
+  'createSpaceDevEngine: a path-scoped `scopes` override wins over a top-level `imports` alias ' +
+    'sharing the same prefix name (real console regression)',
+  async () => {
+    // Reproduces a real, confirmed `zanix space dev` crash (`console`, a real consumer project,
+    // linking a local `@zanix/server` checkout via a raw relative-path `imports` override): that
+    // project's own `deno.json` declares a top-level `utils/` alias for its OWN `./src/utils/`,
+    // AND a separate `scopes["../server/"]["utils/"]` override redirecting `@zanix/server`'s own
+    // bare `utils/` imports to `../server/src/utils/` instead — confirmed correct at the plain
+    // Deno-resolution layer (`deno info --json`), but `bare-specifier-resolve.ts`'s own
+    // `resolveBareSpecifierCanonically` always called `loader.resolveSync` with `referrer:
+    // undefined`, making the `scopes` entry structurally unreachable and silently falling back to
+    // the top-level `imports["utils/"]` entry for EVERY importer, `vendor/mod.ts` included. This
+    // fixture mirrors that exact shape at a much smaller scale: `own-utils/thing.ts` and
+    // `vendor-utils/thing.ts` both export a `marker` under the SAME bare-specifier prefix name
+    // (`utils/`) with a DIFFERENT value, so a wrong resolution shows up as the wrong STRING, not
+    // merely a missing-file crash — a stronger, more direct assertion of the actual defect.
+    await withTempProject(
+      async (root) => {
+        await Deno.writeTextFile(
+          join(root, 'deno.json'),
+          JSON.stringify({
+            imports: { 'utils/': './own-utils/' },
+            scopes: { './vendor/': { 'utils/': './vendor-utils/' } },
+          }),
+        )
+        await Deno.mkdir(join(root, 'own-utils'), { recursive: true })
+        await Deno.writeTextFile(
+          join(root, 'own-utils', 'thing.ts'),
+          `export const marker = 'top-level'\n`,
+        )
+        await Deno.mkdir(join(root, 'vendor-utils'), { recursive: true })
+        await Deno.writeTextFile(
+          join(root, 'vendor-utils', 'thing.ts'),
+          `export const marker = 'scoped'\n`,
+        )
+        await Deno.mkdir(join(root, 'vendor'), { recursive: true })
+        await Deno.writeTextFile(
+          join(root, 'vendor', 'mod.ts'),
+          `export { marker } from 'utils/thing.ts'\n`,
+        )
+        await Deno.writeTextFile(
+          join(root, 'page.tsx'),
+          `export { marker } from './vendor/mod.ts'\n`,
+        )
+      },
+      async (root) => {
+        const engine = await createSpaceDevEngine({ root, isRouteEntry })
+        try {
+          const mod = await engine.ssrLoadModule('/page.tsx')
+          // Must resolve `vendor/mod.ts`'s own `utils/thing.ts` import against the `scopes`
+          // override scoped to `./vendor/`, never the top-level `imports["utils/"]` entry —
+          // `'top-level'` here is exactly the old, broken behavior this test guards against.
+          assertEquals(mod.marker, 'scoped')
+        } finally {
+          await engine.close()
+        }
+      },
+    )
+  },
+)
+
+Deno.test(
   'createSpaceDevEngine: a bare specifier resolving to real, untranspiled .tsx/JSX source still evaluates correctly',
   async () => {
     await withTempProject(

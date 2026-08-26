@@ -45,12 +45,14 @@ nothing else is stubbed ahead of time:
   route outside the file-location convention.
 - ✅ **Layouts, loading and error segments** — a `layout.tsx`/`loading.tsx`/`error.tsx` next to (or
   above) a `page.tsx` wraps it automatically, nested per directory level. See
-  [below](#layouts-loading-and-error-segments) for `error.tsx`'s real current limits during server
-  rendering.
+  [`docs/routing.md`](./docs/routing.md#layouts-loading-and-error-segments) for `error.tsx`'s real
+  current limits during server rendering.
 - ✅ **Document shell** — a root `routes/layout.tsx` renders `<html>`/`<body>` itself (same contract
   as Next.js's App Router); with none at all, a default spec-valid document wraps the page instead.
+  See [`docs/routing.md`](./docs/routing.md#document-shell) for the full contract.
 - ✅ **Not-found page** — `routesDir`'s own `not-found.tsx` renders for any unmatched route, via
-  `createNotFoundHandler()`. See [below](#not-found-page) for the opt-in Orbit-fragment behavior.
+  `createNotFoundHandler()`. See [`docs/routing.md`](./docs/routing.md#not-found-page) for the
+  opt-in Orbit-fragment behavior.
 - ✅ **Static `redirect`/`cacheControl`** on `SpacePageController` — `redirect` runs before
   `loader`/`component`; `cacheControl` computes an automatic `ETag` from the loader's own data
   (never buffers the stream), with `If-None-Match` support.
@@ -81,8 +83,8 @@ nothing else is stubbed ahead of time:
   `(lang, population)` base+override catalog, cached, bypassed under `znx space dev`. See
   [`docs/i18n.md`](./docs/i18n.md) for the full contract.
 - ✅ **Head management** (`SpacePageController.head`) — `<title>`/`<meta>`/`<link>` merged across
-  the whole composition chain, most-specific-wins, deduplicated. See [below](#head-management) for
-  the full precedence/dedup contract.
+  the whole composition chain, most-specific-wins, deduplicated. See
+  [`docs/head.md`](./docs/head.md) for the full precedence/dedup contract.
 - ✅ **SEO helpers** (`buildHreflangLinks`, `buildCanonicalLink`,
   `defineSpaceApp({ sitemap, robots })`) — hreflang/canonical builders plus
   `sitemap.xml`/`robots.txt` as real SSR routes. See [`docs/seo.md`](./docs/seo.md) for the full
@@ -147,14 +149,17 @@ export default class ProductPage extends SpacePageController<{ id: string }> {
 }
 ```
 
-### Layouts, loading and error segments
+### Routing, layouts and the document
+
+A `layout.tsx`/`loading.tsx`/`error.tsx` next to (or above) a `page.tsx` wraps it automatically,
+nested per directory level:
 
 ```
 routes/
   products/
     layout.tsx   # wraps page.tsx and every nested route below it — never a route of its own
     loading.tsx  # Suspense fallback for this segment and everything nested under it
-    error.tsx    # error boundary for this segment (see the limitation below)
+    error.tsx    # error boundary for this segment
     page.tsx
     [id]/
       page.tsx   # wrapped by both routes/products/layout.tsx AND any layout.tsx here too
@@ -169,121 +174,16 @@ export default function ProductsLayout({ children }: LayoutProps) {
 }
 ```
 
-**A real limitation, not a bug**: React's server renderer only recovers a thrown error for content
-inside a `Suspense` boundary (Space always adds one where `error.tsx` exists), so a failing segment
-stays a `200` instead of a shell-breaking `500` — but the fallback's own content only becomes
-visible once the whole page hydrates client-side, which this package's Comet-only hydration story
-doesn't do. Until then, `error.tsx` is real protection against the response breaking; it just
-doesn't render its own UI yet.
+A root `routes/layout.tsx` owns the actual `<html>` document (same contract as Next.js's App
+Router); with none at all, `SpacePageController` wraps every page in a minimal spec-valid default
+instead. `routesDir`'s own `not-found.tsx` renders for any unmatched route, and a thrown `loader`
+recovers into a real rendered document — the nearest `error.tsx`, or `not-found.tsx` for
+`HttpError('NOT_FOUND')` — instead of ever leaking raw JSON.
 
-### Document shell
-
-A root `layout.tsx` (directly under `routesDir`) owns the actual `<html>` document:
-
-```tsx
-// routes/layout.tsx
-import type { LayoutProps } from '@zanix/space'
-
-export default function RootLayout({ children }: LayoutProps) {
-  return (
-    <html lang='en'>
-      <head>
-        <meta charSet='utf-8' />
-        <meta name='viewport' content='width=device-width, initial-scale=1' />
-      </head>
-      <body>{children}</body>
-    </html>
-  )
-}
-```
-
-The layout above is written exactly the same way under `--renderer=preact` — `LayoutProps` is
-renderer-neutral (`children` accepts `SpaceChildren`, a structural type both React's `ReactNode` and
-Preact's `ComponentChildren` satisfy); naming a renderer's own type explicitly
-(`LayoutProps<ReactNode>`) still works for the rarer case that needs it.
-
-**A root layout owns the document's structure and nothing else.** It never receives, and never has
-to render, anything head-related — `@zanix/space` places the resolved head into the document itself,
-under either renderer, so the layout above is complete exactly as written.
-
-If a root layout is present, it's trusted as-is — nothing checks that it actually returns `<html>`/
-`<body>`, the same contract Next.js's own App Router uses. With no root layout at all,
-`SpacePageController` wraps every page in a minimal default document (`<!DOCTYPE html>`, UTF-8
-charset, a responsive viewport meta tag). `zanix generate layout ''` writes the full document shape
-above for exactly this reason — a bare `<div>` wrapper would silently replace a valid document with
-one that has no doctype, `lang`, charset or viewport.
-
-Global UI that should appear on every page (a header, footer, navigation) belongs in this same root
-layout — there's no separate mechanism; nested layouts already compose the way a "global" and a
-"per-section" wrapper would.
-
-### The document contract
-
-Everything `@zanix/space` decides about a response other than the component tree is resolved once,
-into a single renderer-agnostic value, and only then handed to a renderer to serialize:
-
-```
-page + layout chain + loader data
-              ↓
-        DocumentModel          ← resolved once: title/meta/link, css, theme, lang, PWA
-       ↙            ↘
-React serializer   Preact serializer
-       ↘            ↙
-        final document
-              ↓
-     renderer-agnostic validation
-```
-
-Three consequences worth stating plainly:
-
-- **`DocumentModel` is renderer-agnostic.** It and every type it is built from carry no React or
-  Preact type at all — head resolution (`resolveHead`) happens once, in one place; the serializers
-  perform no merging, deduplication or reordering of their own.
-- **React and Preact are two implementations of one contract.** Given the same page, layout chain
-  and resolved data, both produce a document with the same semantics (title/meta/link set, `lang`,
-  stylesheet links) — not the same bytes (attribute order, void-element closing and whitespace
-  legitimately differ) — asserted directly, across React, Preact, and both combined with PWA.
-- **PWA is an orthogonal capability, not a renderer.** No "PWA renderer" and no third document shape
-  — it contributes a manifest link, `theme-color`, and a service-worker registration to whichever
-  renderer's document is already being produced (the real matrix is `renderer × pwa`, four
-  combinations), with its own artifacts validated separately from the HTML.
-
-### Not-found page
-
-`routesDir`'s own `not-found.tsx` (a plain component, same convention as `error.tsx`) is what a
-request with no matching route serves — wrapped in the same root layout as every other page, going
-through the same `DocumentModel`/head resolution as any other page under either renderer:
-
-```tsx
-// routes/not-found.tsx
-export default function NotFound() {
-  return <h1>Page not found</h1>
-}
-
-// Optional — omit and the framework's own default (`{ title: 'Page not found' }`) applies.
-export const head = { title: 'Page not found', meta: [{ name: 'robots', content: 'noindex' }] }
-```
-
-```ts
-// main.ts — opt in explicitly, same as application; @zanix/space never wires this up on its own
-import { createNotFoundHandler } from '@zanix/space'
-import { bootstrapServers } from '@zanix/server'
-
-await bootstrapServers({
-  ssr: { application: 'storefront', onError: createNotFoundHandler() },
-})
-```
-
-`createNotFoundHandler()` only ever handles an actual `404` — any other error still falls through to
-`@zanix/server`'s own default error response, unchanged. With no `not-found.tsx` at all, it renders
-a minimal built-in default instead of failing.
-
-**Orbit-aware, opt-in**: an Orbit navigation to a missing route gets just the outlet fragment, same
-as any other page's own fragment response — but only once `ssr.attachRequestToErrors: true` is also
-set (default `false`, since it's what makes `@zanix/server` hand the original `Request`, which can
-carry `Authorization`/cookies, to `onError` at all). Without the flag, every 404 still gets the full
-document — Orbit's own client runtime already degrades gracefully on any non-`ok` fragment response,
-just one wasted round-trip slower.
+See [`docs/routing.md`](./docs/routing.md) for the full contract: `LayoutProps`'s renderer-neutral
+typing, the renderer-agnostic `DocumentModel` both React and Preact serialize from, `error.tsx`'s
+real current limits during server rendering, `createNotFoundHandler()`'s Orbit-aware behavior, and
+the full loader-error recovery path.
 
 ### Selective hydration ("Comets")
 
@@ -385,7 +285,7 @@ for the full contract.
 
 A page's `<title>`/`<meta>`/`<link>` declaration — a plain `HeadDescriptor`, or a function of
 `loader`'s own resolved data (the same value `component` receives as props) when the head depends on
-it:
+it — merges across the whole layout chain into one resolved value, most-specific-wins, deduplicated:
 
 ```tsx
 @Page()
@@ -399,31 +299,10 @@ export default class ProductPage extends SpacePageController<{ id: string }> {
 }
 ```
 
-A `layout.tsx` may declare its own `head` too — a plain descriptor, or a function of `params` (not
-`loader`'s data, since a layout has no `loader` of its own):
-
-```ts
-// routes/products/layout.tsx
-export const head = () => ({ title: 'Products' })
-```
-
-**Precedence**: the page wins over its nearest layout, which wins over the next one out, ... down to
-the root layout — checked field by field (`title`) or per identity key (`meta`/`link`), never
-whole-descriptor-replaces-whole-descriptor. **Deduplication**: `meta` by identity key (`name`,
-`property`, or `httpEquiv`); `link` by `rel`+`href` (plus `hreflang`, when set — two `alternate`
-links can legitimately share an `href`, e.g. `x-default` and another language's own entry, and both
-survive). The most specific declaration for a given key wins; different keys all survive.
-
-**Coexists with a hand-authored JSX `<title>`/`<meta>`/`<link>` inside `component` — neither is ever
-suppressed**, since this declaration's resolved output always renders BEFORE `component`'s own tree
-— the document's FIRST `<title>` under both renderers (React 19's own hoisting in encounter order;
-Preact places the resolved head at the front of `<head>` after rendering), confirmed by a dedicated
-test asserting the exact ordering, not just presence. A root `layout.tsx` never has to cooperate
-with this placement, and receives no head-related prop to.
-
-Deliberately excludes `style`/`script` in this first iteration — a `<script>` for JSON-LD structured
-data is `@zanix/space-ui`'s `StructuredData` component instead, rendered inline in `component`'s own
-tree; see [SEO helpers](#seo-helpers) below.
+See [`docs/head.md`](./docs/head.md) for the full contract: layout-chain precedence, `meta`/`link`
+deduplication rules, coexistence with a hand-authored JSX `<title>`/`<meta>`/`<link>`, and what's
+deliberately excluded (`style`/`script`) — see [SEO helpers](#seo-helpers) below for what's built on
+top of it instead.
 
 ### SEO helpers
 
@@ -582,11 +461,14 @@ mandatory default `rateLimitGuard` bounds anonymous write volume. See
 
 ## Documentation
 
+- [`docs/routing.md`](./docs/routing.md) — file-based routing, layout nesting, the document shell,
+  and error/not-found recovery.
 - [`docs/comets.md`](./docs/comets.md) — selective hydration: wiring, mount modes, `persist`.
 - [`docs/orbit.md`](./docs/orbit.md) — client-side navigation, prefetch, and manual rendering.
 - [`docs/middleware.md`](./docs/middleware.md) — CSP/security headers, `csrfGuard`, language
   routing, population resolution.
 - [`docs/i18n.md`](./docs/i18n.md) — `loadMessages`'s content-resolution contract.
+- [`docs/head.md`](./docs/head.md) — `<title>`/`<meta>`/`<link>` precedence and deduplication.
 - [`docs/css.md`](./docs/css.md) — the `cssPlugin` build mechanics (Tailwind, CSS Modules, fonts).
 - [`docs/theming.md`](./docs/theming.md) — design tokens, base → host precedence, light/dark, and
   runtime per-request personalization (`theme.resolve`).

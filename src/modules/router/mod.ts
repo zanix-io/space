@@ -3,12 +3,12 @@
  *
  * @module
  */
-export { SpacePageController, ZanixSsrController } from './space-page-controller.tsx'
+export { SpacePageController, ZanixSsrController } from './space-page-controller.ts'
 export type {
   HandlerContext,
   PageHeaderOptions,
   SpacePageExtensions,
-} from './space-page-controller.tsx'
+} from './space-page-controller.ts'
 export { Page } from './page-decorator.ts'
 export type { PageOptions } from './page-decorator.ts'
 /** Re-exported because `PageOptions.action` (above) references it — see `@zanix/server`'s own
@@ -32,8 +32,8 @@ export { loadRoutes } from './load-routes.ts'
 export type { ImportedModule, LoadRoutesOptions } from './load-routes.ts'
 export { scanPageFiles } from './scan-page-files.ts'
 export type { DiscoveredPage, PageSegmentFiles } from './scan-page-files.ts'
-export { createNotFoundHandler } from './not-found-handler.tsx'
-export type { OnErrorHandler } from './not-found-handler.tsx'
+export { createNotFoundHandler } from './not-found-handler.ts'
+export type { OnErrorHandler } from './not-found-handler.ts'
 export { getDefaultPageHeaders, setDefaultPageHeaders } from './default-page-headers.ts'
 export { getActiveRenderer } from './active-renderer.ts'
 export type { RendererKind } from './active-renderer.ts'

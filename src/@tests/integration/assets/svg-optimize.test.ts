@@ -1,5 +1,6 @@
 import { assert, assertEquals } from '@std/assert'
 import { extractSymbolIds, optimizeSvgAsset } from 'modules/assets/svg-optimize.ts'
+import { SVGO_SPECIFIER } from 'modules/lazy/specifiers.ts'
 
 /** Real `svgo` calls, not mocks — confirmed to run cleanly under Deno with no native binary
  * (a real spike during design: import, run, verified output). */
@@ -160,7 +161,7 @@ Deno.test(
 // ================================================================================================
 
 async function optimizeWithOriginalConfig(text: string): Promise<string> {
-  const svgo = await import('npm:svgo@^3') as unknown as {
+  const svgo = await import(SVGO_SPECIFIER) as unknown as {
     optimize(input: string, config?: unknown): { data: string }
   }
   return svgo.optimize(text, {

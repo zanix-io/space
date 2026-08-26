@@ -19,6 +19,7 @@ import { CSRF_TOKEN_LOCALS_KEY } from '../middleware/csrf-guard.ts'
 import { POPULATION_LOCALS_KEY } from '../middleware/population-guard.ts'
 import { getThemeResolver } from '../theme/theme-registry.ts'
 import { createDedupeCache } from './request-dedupe.ts'
+import { renderLoaderErrorPage } from './loader-error-handler.ts'
 
 /** `Page()`'s combined header options — `SecurityHeadersOptions`'s own flat fields (`frameOptions`,
  * `referrerPolicy`, ...) plus `csp`, all under one `headers` option. `csp` is kept as its own field
@@ -291,6 +292,15 @@ export abstract class SpacePageController<
    * full document — see `render-page-react.ts`'s own `composeSegments` doc (or `render-page-preact.ts`'s,
    * under `--renderer=preact`) for the composition itself; this method only ever calls whichever one
    * `getPageRenderer()` currently returns. Not meant to be called or overridden directly.
+   *
+   * **A thrown `loader`** — this page's own, or a nested layout segment's own (via
+   * `resolveSegmentData`, reached from inside the render call below and surfacing through this SAME
+   * `await` chain) — is recovered by {@linkcode renderLoaderErrorPage} rather than left to propagate
+   * to `@zanix/server`'s own generic JSON error response: an `HttpError('NOT_FOUND')` renders this
+   * app's `not-found.tsx`, any other error renders this route's own nearest `error.tsx`, and a route
+   * with no `error.tsx` at all still gets a real, rendered document — this package's own built-in
+   * `DefaultErrorView`. See that function's own doc for the full contract, including how the real
+   * HTTP status survives.
    */
   public async handleGet(ctx: HandlerContext): Promise<Response> {
     const Ctor = this.constructor as typeof SpacePageController
@@ -308,31 +318,47 @@ export abstract class SpacePageController<
       return applySecurity(buildRedirectResponse(redirect, pageCtx.url))
     }
 
-    const data = await this.loader?.(pageCtx)
-
     const Target = Ctor as unknown as ClassConstructor<SpacePageController>
 
-    const { cacheControl } = Ctor
-    if (cacheControl) {
-      // `population` folded in ONLY when a theme resolver is configured — see `computeEtag`'s own
-      // `extra` param doc for exactly what this does and does not fix (a same-origin ETag/304
-      // collision between two populations sharing the same loader data but a different resolved
-      // theme; explicitly NOT a fix for a shared/CDN cache's own partitioning, which stays the
-      // already-documented responsibility this package has never claimed to handle — see
-      // `populationGuard`'s own doc).
-      const etag = await computeEtag(data, getThemeResolver() ? pageCtx.population : undefined)
-      // A full document and an Orbit fragment share the same ETag (both derive it from the same
-      // loader data) but never the same body — `Vary` is what keeps a cache (browser or otherwise)
-      // from serving one shape to a request that asked for the other.
-      const headers = {
-        etag,
-        'cache-control': cacheControl,
-        vary: ORBIT_FRAGMENT_HEADER,
+    try {
+      const data = await this.loader?.(pageCtx)
+
+      const { cacheControl } = Ctor
+      if (cacheControl) {
+        // `population` folded in ONLY when a theme resolver is configured — see `computeEtag`'s own
+        // `extra` param doc for exactly what this does and does not fix (a same-origin ETag/304
+        // collision between two populations sharing the same loader data but a different resolved
+        // theme; explicitly NOT a fix for a shared/CDN cache's own partitioning, which stays the
+        // already-documented responsibility this package has never claimed to handle — see
+        // `populationGuard`'s own doc).
+        const etag = await computeEtag(data, getThemeResolver() ? pageCtx.population : undefined)
+        // A full document and an Orbit fragment share the same ETag (both derive it from the same
+        // loader data) but never the same body — `Vary` is what keeps a cache (browser or otherwise)
+        // from serving one shape to a request that asked for the other.
+        const headers = {
+          etag,
+          'cache-control': cacheControl,
+          vary: ORBIT_FRAGMENT_HEADER,
+        }
+        if (ctx.req.headers.get('if-none-match') === etag) {
+          return applySecurity(new Response(null, { status: 304, headers }))
+        }
+        const response = await getPageRenderer()(
+          Target,
+          this.component,
+          pageCtx,
+          data,
+          fragmentOnly,
+          nonce,
+          themeStyle,
+        )
+        for (const [key, value] of Object.entries(headers)) {
+          response.headers.set(key, value)
+        }
+        return applySecurity(response)
       }
-      if (ctx.req.headers.get('if-none-match') === etag) {
-        return applySecurity(new Response(null, { status: 304, headers }))
-      }
-      const response = await getPageRenderer()(
+
+      return await renderPageResponse(
         Target,
         this.component,
         pageCtx,
@@ -340,23 +366,13 @@ export abstract class SpacePageController<
         fragmentOnly,
         nonce,
         themeStyle,
+        applySecurity,
       )
-      for (const [key, value] of Object.entries(headers)) {
-        response.headers.set(key, value)
-      }
-      return applySecurity(response)
+    } catch (error) {
+      return applySecurity(
+        await renderLoaderErrorPage(Target, pageCtx as PageContext<unknown>, fragmentOnly, error),
+      )
     }
-
-    return await renderPageResponse(
-      Target,
-      this.component,
-      pageCtx,
-      data,
-      fragmentOnly,
-      nonce,
-      themeStyle,
-      applySecurity,
-    )
   }
 
   /**
@@ -421,6 +437,12 @@ export abstract class SpacePageController<
    * form again, which is what keeps a plain `<form>` working with scripting disabled. The page's
    * own `loader` receives `fieldErrors`/`submitted` and surfaces them exactly the way it already
    * forwards `csrfToken` — an established path, not a second mechanism.
+   *
+   * **A thrown `loader`** here is recovered by the SAME {@linkcode renderLoaderErrorPage}
+   * `handleGet` itself uses, not a second implementation: an `HttpError('NOT_FOUND')` renders this
+   * app's `not-found.tsx`, any other error renders this route's own nearest `error.tsx` with the
+   * real status, and a route with no `error.tsx` at all still gets a real, rendered document — this
+   * package's own built-in `DefaultErrorView` (see that function's own doc for the full contract).
    */
   // Native `#`-private, not TypeScript's `private` keyword — `HandlerBaseClass` (`@zanix/server`)
   // declares `[key: string | symbol]: HandlerPrototype<Interactor, Extensions>` on every handler
@@ -439,25 +461,32 @@ export abstract class SpacePageController<
     submitted: Record<string, string>,
   ): Promise<Response> {
     const Ctor = this.constructor as typeof SpacePageController
+    const Target = Ctor as unknown as ClassConstructor<SpacePageController>
 
     const pageCtx: PageContext<Params> = { ...actionCtx, fieldErrors, submitted }
 
     const { applySecurity, nonce, themeStyle } = await resolvePageChrome(ctx, Ctor.headers, pageCtx)
 
-    // `loader` runs exactly as it does for a GET — the page renders with its real data, plus the
-    // errors. A form that needs its own options/lists back is therefore whole again, not empty.
-    const data = await this.loader?.(pageCtx)
+    try {
+      // `loader` runs exactly as it does for a GET — the page renders with its real data, plus the
+      // errors. A form that needs its own options/lists back is therefore whole again, not empty.
+      const data = await this.loader?.(pageCtx)
 
-    return await renderPageResponse(
-      this.constructor as unknown as ClassConstructor<SpacePageController>,
-      this.component,
-      pageCtx,
-      data,
-      false,
-      nonce,
-      themeStyle,
-      applySecurity,
-      422,
-    )
+      return await renderPageResponse(
+        Target,
+        this.component,
+        pageCtx,
+        data,
+        false,
+        nonce,
+        themeStyle,
+        applySecurity,
+        422,
+      )
+    } catch (error) {
+      return applySecurity(
+        await renderLoaderErrorPage(Target, pageCtx as PageContext<unknown>, false, error),
+      )
+    }
   }
 }

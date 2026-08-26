@@ -4,6 +4,10 @@ import { getActiveRenderer } from './active-renderer.ts'
 import { getNotFoundComponent, getNotFoundHead, getRootLayout } from './app-shell-registry.ts'
 import { DEFAULT_NOT_FOUND_HEAD, getNotFoundRenderer } from './not-found-renderer-registry.ts'
 import { ORBIT_FRAGMENT_HEADER } from './orbit-protocol.ts'
+import {
+  DEFAULT_NOT_FOUND_VIEW_PREACT_SPECIFIER,
+  DEFAULT_NOT_FOUND_VIEW_REACT_SPECIFIER,
+} from './default-view-specifiers.ts'
 
 // Renderer-agnostic. This file used to import React's own `renderToResponse`/`applyDocumentShell`
 // directly and throw outright under `--renderer=preact`, which meant a Preact app had no not-found
@@ -25,13 +29,60 @@ import { ORBIT_FRAGMENT_HEADER } from './orbit-protocol.ts'
 export type OnErrorHandler = NonNullable<Deno.ServeOptions['onError']>
 
 /**
+ * Renders this app's own not-found document — the app's `not-found.tsx` (if `loadRoutes()` found
+ * one) or this package's built-in fallback view, wrapped in the root layout, with a real `404`
+ * status. The one real implementation of "how do we find and render this app's `not-found.tsx`" —
+ * `createNotFoundHandler` (below) calls this after extracting `fragmentOnly` from the original
+ * unmatched request; `loader-error-handler.ts`'s own recovery path calls it directly with the
+ * `fragmentOnly` it already has, for an `HttpError('NOT_FOUND')` thrown by a page's own `loader` or
+ * a nested layout segment's own `loader` — so there is only ever one lookup/render path for a 404
+ * document, never two independently-maintained ones.
+ *
+ * @param fragmentOnly - `true` renders just the outlet fragment (an Orbit navigation) — see
+ * {@linkcode createNotFoundHandler}'s own doc for the full Orbit-aware contract.
+ */
+export async function renderNotFoundResponse(fragmentOnly: boolean): Promise<Response> {
+  // Resolved here, renderer-agnostically, and handed to whichever renderer is active. The
+  // built-in fallback view is selected per renderer for the same reason every other component in
+  // this package is: a React component and a Preact one are not interchangeable values.
+  let NotFound = getNotFoundComponent()
+  if (NotFound === undefined) {
+    NotFound = getActiveRenderer() === 'preact'
+      ? (await import(DEFAULT_NOT_FOUND_VIEW_PREACT_SPECIFIER)).DefaultNotFoundView
+      : (await import(DEFAULT_NOT_FOUND_VIEW_REACT_SPECIFIER)).DefaultNotFoundView
+  }
+
+  const response = await getNotFoundRenderer()({
+    NotFound,
+    RootLayout: getRootLayout(),
+    // The app's own `not-found.tsx` `head` export when it declares one, this package's default
+    // otherwise — resolved through the same `resolveHead` a page's head goes through, with no
+    // not-found-specific mechanism anywhere.
+    head: getNotFoundHead() ?? DEFAULT_NOT_FOUND_HEAD,
+    fragmentOnly,
+  })
+
+  const headers = new Headers(response.headers)
+  // Same reasoning as `SpacePageController.handleGet`'s own unconditional `Vary` — this
+  // response's body shape depends on `ORBIT_FRAGMENT_HEADER` (full document vs. bare outlet
+  // fragment) whenever `attachRequestToErrors` is on, so a shared HTTP cache must be told, not
+  // just Orbit's own client runtime (which never relies on caching to get this right).
+  headers.set('vary', ORBIT_FRAGMENT_HEADER)
+
+  return new Response(response.body, {
+    status: 404,
+    headers,
+  })
+}
+
+/**
  * Builds the `onError` handler `bootstrapServers({ ssr: { onError } })` needs to serve a real,
  * rendered not-found page instead of the generic JSON error response `@zanix/server` falls back to
  * by default.
  *
  * Renders `routesDir`'s own `not-found.tsx`, if `loadRoutes()` found one, or a minimal built-in
  * default otherwise — wrapped in the app's root layout (or the default document shell) exactly like
- * any other page, via {@linkcode applyDocumentShell}.
+ * any other page, via {@linkcode renderNotFoundResponse}.
  *
  * **Orbit-aware, when opted in**: a 404 hit via an Orbit navigation (`ORBIT_FRAGMENT_HEADER`) gets
  * just the outlet fragment, same as any other page's own `fragmentOnly` branch in
@@ -71,47 +122,17 @@ export type OnErrorHandler = NonNullable<Deno.ServeOptions['onError']>
  * ```
  */
 export function createNotFoundHandler(): OnErrorHandler {
-  const handleNotFound = async (
+  const handleNotFound = (
     error: unknown,
   ): Promise<Response | undefined> => {
     if (!(error instanceof HttpError) || error.status.code !== 'NOT_FOUND') {
-      return undefined
+      return Promise.resolve(undefined)
     }
 
     const request = getRequestFromError(error)
     const fragmentOnly = request?.headers.has(ORBIT_FRAGMENT_HEADER) ?? false
 
-    // Resolved here, renderer-agnostically, and handed to whichever renderer is active. The
-    // built-in fallback view is selected per renderer for the same reason every other component in
-    // this package is: a React component and a Preact one are not interchangeable values.
-    let NotFound = getNotFoundComponent()
-    if (NotFound === undefined) {
-      NotFound = getActiveRenderer() === 'preact'
-        ? (await import('./default-not-found-view-preact.ts')).DefaultNotFoundView
-        : (await import('./default-not-found-view.tsx')).DefaultNotFoundView
-    }
-
-    const response = await getNotFoundRenderer()({
-      NotFound,
-      RootLayout: getRootLayout(),
-      // The app's own `not-found.tsx` `head` export when it declares one, this package's default
-      // otherwise — resolved through the same `resolveHead` a page's head goes through, with no
-      // not-found-specific mechanism anywhere.
-      head: getNotFoundHead() ?? DEFAULT_NOT_FOUND_HEAD,
-      fragmentOnly,
-    })
-
-    const headers = new Headers(response.headers)
-    // Same reasoning as `SpacePageController.handleGet`'s own unconditional `Vary` — this
-    // response's body shape depends on `ORBIT_FRAGMENT_HEADER` (full document vs. bare outlet
-    // fragment) whenever `attachRequestToErrors` is on, so a shared HTTP cache must be told, not
-    // just Orbit's own client runtime (which never relies on caching to get this right).
-    headers.set('vary', ORBIT_FRAGMENT_HEADER)
-
-    return new Response(response.body, {
-      status: 404,
-      headers,
-    })
+    return renderNotFoundResponse(fragmentOnly)
   }
 
   return handleNotFound as OnErrorHandler

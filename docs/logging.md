@@ -94,7 +94,7 @@ below) bounding write-volume/storage amplification from any one anonymous origin
 ```ts
 rateLimitGuard({
   windowSeconds: 60,
-  anonymousLimit: 30, // "poco límite" — sized for one human's own browser tab, not bulk traffic
+  anonymousLimit: 30, // sized for one human's own browser tab, not bulk traffic
   trustProxyHeader: true, // per-caller (IP+User-Agent hashed) buckets, not one shared bucket
 })
 ```

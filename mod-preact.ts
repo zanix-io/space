@@ -2,11 +2,11 @@
  * `@zanix/space/preact` — the Preact-core implementation of `@zanix/space`.
  *
  * **Import this once, from an app's own main module, when `defineSpaceApp({ renderer: 'preact' })`.**
- * Importing it installs Preact's page renderer, not-found renderer and Comet element factory into
- * the core's own registries (`router/renderer-runtime.ts`). It does NOT decide which renderer the
- * project uses — `defineSpaceApp({ renderer })` remains the single answer to that, and it verifies
- * the two agree, failing loudly when a project declares one renderer and imports the other's entry
- * point.
+ * Importing it installs Preact's page renderer, not-found renderer, loader-error renderer and Comet
+ * element factory into the core's own registries (`router/renderer-runtime.ts`). It does NOT decide
+ * which renderer the project uses — `defineSpaceApp({ renderer })` remains the single answer to
+ * that, and it verifies the two agree, failing loudly when a project declares one renderer and
+ * imports the other's entry point.
  *
  * Preact CORE, never `preact/compat`. Two capabilities are therefore absent by contract rather
  * than by omission, and both fail loudly rather than silently:
@@ -31,6 +31,7 @@ import { installRendererRuntime } from 'modules/router/renderer-runtime.ts'
 import type { CometElementFactory } from 'modules/comets/element-factory.ts'
 import { renderPageResponse } from 'modules/router/render-page-preact.ts'
 import { renderNotFoundResponse } from 'modules/router/render-not-found-preact.ts'
+import { renderLoaderErrorResponse } from 'modules/router/render-loader-error-preact.ts'
 
 /**
  * Installs Preact's implementations into `@zanix/space`'s own registries. See
@@ -41,6 +42,7 @@ export function installPreactRuntime(): void {
   installRendererRuntime('preact', {
     renderPage: renderPageResponse,
     renderNotFound: renderNotFoundResponse,
+    renderLoaderError: renderLoaderErrorResponse,
     // See `@zanix/space/react`'s own identical assertion for why this one exists and what it does
     // and does not claim.
     createElement: createElement as CometElementFactory,

@@ -59,8 +59,8 @@ async function moduleGraph(entry: string): Promise<ModuleGraph> {
 /** The SOUND version: real BFS from `entry`'s own resolved root, following ONLY `code` edges —
  * exactly what a real `deno run`/bundler would actually load at runtime. A module reachable from
  * `entry` ONLY through a `type`-only edge (e.g. `import type { AssetService } from
- * '../asset-service.ts'`) is correctly EXCLUDED here, along with everything asset-service.ts's own
- * CODE imports (ffmpeg included) — because none of that is ever really loaded when only the
+ * '../asset-service-types.ts'`) is correctly EXCLUDED here, along with everything asset-service.ts's
+ * own CODE imports (ffmpeg included) — because none of that is ever really loaded when only the
  * controller itself runs. This is what {@linkcode moduleGraph}'s own flat aggregation cannot
  * distinguish. */
 async function codeReachableFrom(entry: string): Promise<Set<string>> {
@@ -108,9 +108,10 @@ Deno.test(
       'assets.controller.ts must never resolve asset-service.ts as code — `service` is injected',
     )
     assert(
-      includesLocalPathSegment(graph.type, 'asset-service.ts'),
+      includesLocalPathSegment(graph.type, 'asset-service-types.ts'),
       'sanity check: the controller must still reference AssetService as a TYPE (its own ' +
-        '`options.service` parameter) — a fully absent reference would mean this test stopped ' +
+        '`options.service` parameter, sourced from the narrow `asset-service-types.ts` sibling, ' +
+        'never `asset-service.ts` itself) — a fully absent reference would mean this test stopped ' +
         'checking anything real',
     )
   },

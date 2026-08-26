@@ -3,11 +3,11 @@
  * under React.
  *
  * **Import this once, from an app's own main module, when `defineSpaceApp({ renderer: 'react' })`.**
- * Importing it installs React's page renderer, not-found renderer and Comet element factory into
- * the core's own registries (`router/renderer-runtime.ts`). It does NOT decide which renderer the
- * project uses — `defineSpaceApp({ renderer })` remains the single answer to that, and it verifies
- * the two agree, failing loudly when a project declares one renderer and imports the other's entry
- * point.
+ * Importing it installs React's page renderer, not-found renderer, loader-error renderer and Comet
+ * element factory into the core's own registries (`router/renderer-runtime.ts`). It does NOT decide
+ * which renderer the project uses — `defineSpaceApp({ renderer })` remains the single answer to
+ * that, and it verifies the two agree, failing loudly when a project declares one renderer and
+ * imports the other's entry point.
  *
  * **Why this module exists.** `@zanix/space` itself contains no renderer implementation and no path
  * that can load one, so that a `renderer: 'preact'` app never evaluates `react` or
@@ -35,6 +35,7 @@ import { installRendererRuntime } from 'modules/router/renderer-runtime.ts'
 import type { CometElementFactory } from 'modules/comets/element-factory.ts'
 import { renderPageResponse } from 'modules/router/render-page-react.tsx'
 import { renderNotFoundResponse } from 'modules/router/render-not-found-react.tsx'
+import { renderLoaderErrorResponse } from 'modules/router/render-loader-error-react.tsx'
 
 /**
  * Installs React's implementations into `@zanix/space`'s own registries.
@@ -51,6 +52,7 @@ export function installReactRuntime(): void {
   installRendererRuntime('react', {
     renderPage: renderPageResponse,
     renderNotFound: renderNotFoundResponse,
+    renderLoaderError: renderLoaderErrorResponse,
     // The same single assertion the Preact entry point makes, for the same reason and in the same
     // shape: `CometElementFactory` is deliberately loose (`unknown` parameters) because no concrete
     // signature describes both renderers' `createElement`, and NEITHER renderer's own overloaded

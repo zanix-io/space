@@ -33,14 +33,16 @@ export type {
   SpaceAppConfig,
 } from 'typings/manifest.ts'
 export type { PwaConfig, PwaShortcut } from 'typings/pwa.ts'
-// Re-exported (type-only — zero runtime cost, confirmed via the same real code-only-edge BFS
-// `assets-api/dependency-boundary.test.ts` uses: root `mod.ts` does NOT code-reach ffmpeg/sharp
-// through this) because `SpaceAppConfig.assetsApi` references `AssetsControllerOptions`, and
-// `AssetsControllerOptions.service` references `AssetService` — same "every type reachable from a
-// public export must itself be public" doc-lint rule this file's own `AppSetupContext`/
-// `ConfigAccessor`/`RuntimeContext` re-export above already exists for.
-export type { AssetsControllerOptions } from 'modules/assets-api/controllers/assets.controller.ts'
-export type { AssetService, CreateAssetCommand } from 'modules/assets-api/asset-service.ts'
+// Re-exported (type-only — zero runtime cost, confirmed via `deno info --json --min-dep-age=0`:
+// this entry point resolves no npm package through this) because `SpaceAppConfig.assetsApi`
+// references `AssetsControllerOptions`, and `AssetsControllerOptions.service` references
+// `AssetService` — same "every type reachable from a public export must itself be public" doc-lint
+// rule this file's own `AppSetupContext`/`ConfigAccessor`/`RuntimeContext` re-export above already
+// exists for. Sourced from each type's own narrow `-types.ts` sibling (not the real controller/
+// service implementation file, which value-imports `@zanix/server` decorators and `sharp`) so this
+// entry point's own reachable graph never touches them.
+export type { AssetsControllerOptions } from 'modules/assets-api/controllers/assets-controller-types.ts'
+export type { AssetService, CreateAssetCommand } from 'modules/assets-api/asset-service-types.ts'
 // Same "every type reachable from a public export must itself be public" rule, for
 // `SpaceAppConfig.logApi` — type-only, no code edge into `modules/log-api/` (this module never
 // imports `@zanix/auth`/`@zanix/logger` itself, so this adds none either).
@@ -49,11 +51,11 @@ export type {
   LogApiRateLimitOptions,
 } from 'modules/log-api/controllers/log.controller.ts'
 // Same "every type reachable from a public export must itself be public" rule, for
-// `SpaceAppConfig.optimize`/`SpaceAppConfig.media` below — type-only (`export type`), so this adds
-// no code edge into `modules/bundler/` (verified the same way as `AssetsControllerOptions` above:
-// `deno info --json` shows only a `type` dependency, never a `code` one).
-export type { AssetsOptimizeOptions } from 'modules/bundler/assets-plugin.ts'
-export type { MediaOptimizeOptions } from 'modules/bundler/media-plugin.ts'
+// `SpaceAppConfig.optimize`/`SpaceAppConfig.media` below — sourced from each plugin's own narrow
+// `-types.ts` sibling (not the real plugin file, which value-imports `sharp`/`vite`) so this entry
+// point's own reachable graph never touches them (verified via `deno info --json --min-dep-age=0`).
+export type { AssetsOptimizeOptions } from 'modules/bundler/assets-plugin-types.ts'
+export type { MediaOptimizeOptions } from 'modules/bundler/media-plugin-types.ts'
 export type {
   AssetKind,
   AssetRecord,

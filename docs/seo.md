@@ -2,7 +2,7 @@
 
 This is the full reference the README's ["SEO helpers"](../README.md#seo-helpers) section points to.
 Two pure link builders (`buildCanonicalLink`, `buildHreflangLinks`) feed into
-[Head management](../README.md#head-management) through a page's `loader`, and two build/serve pairs
+[Head management](./head.md) through a page's `loader`, and two build/serve pairs
 (`buildRobotsTxt`/`registerRobots`, `buildSitemapXml`/`registerSitemap`) back the
 `robots.txt`/`sitemap.xml` routes `defineSpaceApp({ robots, sitemap })` registers. Structured data
 (JSON-LD) is deliberately not part of this module — that's `@zanix/space-ui`'s `StructuredData`
@@ -223,5 +223,7 @@ self-inclusion, so each `<url>` block only ever lists exactly what its own `alte
 
 - [`README.md`](../README.md#seo-helpers) — the "SEO helpers" section this guide is the full
   reference for.
+- [`docs/head.md`](./head.md) — the head precedence/deduplication contract these link builders feed
+  into.
 - [`docs/theming.md`](./theming.md) — design tokens and per-request theme resolution.
 - [`docs/validation.md`](./validation.md) — build-time document validation.

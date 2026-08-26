@@ -1,7 +1,7 @@
 /**
  * The one seam a renderer's implementation is installed through — `@zanix/space/react` and
  * `@zanix/space/preact` each call {@linkcode installRendererRuntime} once, at module load, with
- * their own three implementations.
+ * their own four implementations.
  *
  * **Infrastructure, not configuration.** This module answers "which implementation is loaded in
  * this process", never "which renderer did this project choose" — that question has exactly one
@@ -13,7 +13,7 @@
  *
  * **Why installation exists at all.** `@zanix/space` itself must not contain a runtime path that
  * can load React or Preact — not a static import, and not a lazy one with a renderer as fallback.
- * So the core ships the seams (this module and the three registries it writes) and neither
+ * So the core ships the seams (this module and the four registries it writes) and neither
  * implementation; whichever entry point an app imports brings exactly one of them. That is what
  * makes it structurally impossible for a Preact app to evaluate React through this package.
  *
@@ -27,6 +27,8 @@ import type { PageRenderer } from './page-renderer-registry.ts'
 import { setPageRenderer } from './page-renderer-registry.ts'
 import type { NotFoundRenderer } from './not-found-renderer-registry.ts'
 import { setNotFoundRenderer } from './not-found-renderer-registry.ts'
+import type { LoaderErrorRenderer } from './loader-error-renderer-registry.ts'
+import { setLoaderErrorRenderer } from './loader-error-renderer-registry.ts'
 import type { CometElementFactory } from '../comets/element-factory.ts'
 import { setCometElementFactory } from '../comets/element-factory.ts'
 
@@ -40,6 +42,8 @@ export type RendererRuntime = {
   renderPage: PageRenderer
   /** Renders a not-found document. See {@linkcode NotFoundRenderer}. */
   renderNotFound: NotFoundRenderer
+  /** Renders a thrown `loader`'s fallback document. See {@linkcode LoaderErrorRenderer}. */
+  renderLoaderError: LoaderErrorRenderer
   /** This renderer's own `createElement`, used to build a Comet boundary. See
    * {@linkcode CometElementFactory}. */
   createElement: CometElementFactory
@@ -64,6 +68,7 @@ let installedRenderer: RendererKind | undefined
 export function installRendererRuntime(kind: RendererKind, runtime: RendererRuntime): void {
   setPageRenderer(runtime.renderPage)
   setNotFoundRenderer(runtime.renderNotFound)
+  setLoaderErrorRenderer(runtime.renderLoaderError)
   setCometElementFactory(kind, runtime.createElement)
   installedRenderer = kind
 }

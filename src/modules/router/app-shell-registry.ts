@@ -6,7 +6,7 @@ import type { HeadDescriptor } from './head-descriptor.ts'
 // renderer's own `ComponentType` over the other's: the two are nominally incompatible types
 // (confirmed empirically — a React `ComponentType` and a Preact one fail to structurally unify,
 // even both instantiated with the same props type). `unknown` (not `any`) is deliberate: every real
-// reader of these values (`not-found-handler.tsx`, `render-page-react.tsx`/`render-page-preact.ts`)
+// reader of these values (`not-found-handler.ts`, `render-page-react.tsx`/`render-page-preact.ts`)
 // already casts back to its OWN renderer's real type before using it as a component — `unknown`
 // forces that cast to happen at the point of use instead of silently trusting an unchecked value in
 // between.

@@ -19,7 +19,12 @@ import {
   hashSourceBytes,
   type TransformCacheStore,
 } from './transform-cache.ts'
-import type { ImagesOptimizeOptions, OptimizedAssetEntry } from './image-optimize.ts'
+import type {
+  ImagesOptimizeOptions,
+  OptimizedAssetEntry,
+  OptimizeImageAssetFn,
+} from './image-optimize-types.ts'
+export type { OptimizeImageAssetFn } from './image-optimize-types.ts'
 
 /** Bumped whenever `image-optimize.ts`'s own optimization policy changes in a way that would
  * produce different bytes for the same input — quality defaults, format-specific encode options,
@@ -42,14 +47,6 @@ function buildImageTransformId(options: true | ImagesOptimizeOptions): string {
   if (opts.width !== undefined) id += `:w${JSON.stringify(opts.width)}`
   return id
 }
-
-/** The real shape of `optimizeImageAsset` — matched by any caller-supplied override
- * (`createCachedImageOptimizer`'s own `imageOptimizer` option). */
-export type OptimizeImageAssetFn = (
-  relativePath: string,
-  source: Uint8Array,
-  options: true | ImagesOptimizeOptions,
-) => Promise<OptimizedAssetEntry[]>
 
 /**
  * Wraps `optimize` (normally `optimizeImageAsset` itself) with the shared transform cache. Same

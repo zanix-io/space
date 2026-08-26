@@ -10,6 +10,7 @@ import { defineSpaceApp } from 'modules/runtime/mod.ts'
 import { Page, SpacePageController } from 'modules/router/mod.ts'
 import { setDevImportModule } from 'modules/dev/dev-engine-registry.ts'
 import { resetResolvedAssets } from 'modules/assets/asset-registry.ts'
+import { ZANIX_APP_RUNTIME_SERVER_SKEW_BLOCKED } from '../../support/zanix-app-runtime-server-skew.ts'
 
 const TMP_ROOT = getTemporaryFolder(import.meta.url)
 
@@ -54,11 +55,12 @@ async function cleanup(...dirs: string[]): Promise<void> {
   await Promise.all(dirs.map((dir) => Deno.remove(dir, { recursive: true })))
 }
 
-Deno.test(
-  "assets end-to-end: a host's assetsDir[] override wins for a shared asset, an asset the " +
+Deno.test({
+  ignore: ZANIX_APP_RUNTIME_SERVER_SKEW_BLOCKED,
+  name: "assets end-to-end: a host's assetsDir[] override wins for a shared asset, an asset the " +
     "override doesn't have falls back to the base directory, and the page/component (never " +
     'touched) keeps referencing the same stable /assets/logo.svg path throughout',
-  async () => {
+  fn: async () => {
     const routesDir = await Deno.makeTempDir({ dir: TMP_ROOT })
     const overrideAssets = await Deno.makeTempDir({ dir: TMP_ROOT })
     const baseAssets = await Deno.makeTempDir({ dir: TMP_ROOT })
@@ -114,48 +116,53 @@ Deno.test(
       await cleanup(routesDir, overrideAssets, baseAssets)
     }
   },
-)
-
-Deno.test('assets: 404 for a path never resolved by assetsDir', async () => {
-  const routesDir = await Deno.makeTempDir({ dir: TMP_ROOT })
-  const assetsDir = await Deno.makeTempDir({ dir: TMP_ROOT })
-  try {
-    await touch(join(routesDir, 'page.tsx'), 'export default null\n')
-    await touch(join(assetsDir, 'logo.svg'), '<svg>base-logo</svg>')
-
-    setDevImportModule(fakeImportModule())
-    try {
-      const app = defineSpaceApp({
-        name: 'shop-assets-404',
-        routesDir,
-        assetsDir,
-      })
-      await activateApps([app])
-
-      const servers = await bootstrapServers({
-        ssr: { port: 22002, application: 'shop-assets-404' },
-      })
-      try {
-        const res = await fetch(
-          'http://localhost:22002/assets/does-not-exist.svg',
-        )
-        assertEquals(res.status, 404)
-      } finally {
-        await webServerManager.stop(servers)
-      }
-    } finally {
-      setDevImportModule(undefined)
-      resetResolvedAssets()
-    }
-  } finally {
-    await cleanup(routesDir, assetsDir)
-  }
 })
 
-Deno.test(
-  'assets: case-sensitive names — a request for a different case than the real file 404s, ' +
+Deno.test({
+  ignore: ZANIX_APP_RUNTIME_SERVER_SKEW_BLOCKED,
+  name: 'assets: 404 for a path never resolved by assetsDir',
+  fn: async () => {
+    const routesDir = await Deno.makeTempDir({ dir: TMP_ROOT })
+    const assetsDir = await Deno.makeTempDir({ dir: TMP_ROOT })
+    try {
+      await touch(join(routesDir, 'page.tsx'), 'export default null\n')
+      await touch(join(assetsDir, 'logo.svg'), '<svg>base-logo</svg>')
+
+      setDevImportModule(fakeImportModule())
+      try {
+        const app = defineSpaceApp({
+          name: 'shop-assets-404',
+          routesDir,
+          assetsDir,
+        })
+        await activateApps([app])
+
+        const servers = await bootstrapServers({
+          ssr: { port: 22002, application: 'shop-assets-404' },
+        })
+        try {
+          const res = await fetch(
+            'http://localhost:22002/assets/does-not-exist.svg',
+          )
+          assertEquals(res.status, 404)
+        } finally {
+          await webServerManager.stop(servers)
+        }
+      } finally {
+        setDevImportModule(undefined)
+        resetResolvedAssets()
+      }
+    } finally {
+      await cleanup(routesDir, assetsDir)
+    }
+  },
+})
+
+Deno.test({
+  ignore: ZANIX_APP_RUNTIME_SERVER_SKEW_BLOCKED,
+  name: 'assets: case-sensitive names — a request for a different case than the real file 404s, ' +
     "the exact case resolves correctly (the catch-all preserves the request's own casing)",
-  async () => {
+  fn: async () => {
     const routesDir = await Deno.makeTempDir({ dir: TMP_ROOT })
     const assetsDir = await Deno.makeTempDir({ dir: TMP_ROOT })
     try {
@@ -202,14 +209,15 @@ Deno.test(
       await cleanup(routesDir, assetsDir)
     }
   },
-)
+})
 
-Deno.test(
-  'assets: dev and production use the exact same resolution/serving mechanism — two ' +
+Deno.test({
+  ignore: ZANIX_APP_RUNTIME_SERVER_SKEW_BLOCKED,
+  name: 'assets: dev and production use the exact same resolution/serving mechanism — two ' +
     'independent app activations of the identical assetsDir produce identical results, since ' +
     "`scanAssets`/`registerAssets` never consult dev-vs-prod state at all (unlike globalCss's " +
     'own two-path split, this mechanism has exactly one code path, period)',
-  async () => {
+  fn: async () => {
     const routesDir = await Deno.makeTempDir({ dir: TMP_ROOT })
     const assetsDir = await Deno.makeTempDir({ dir: TMP_ROOT })
     try {
@@ -271,12 +279,14 @@ Deno.test(
       await cleanup(routesDir, assetsDir)
     }
   },
-)
+})
 
-Deno.test(
-  'assets: backward compatibility — an app that never declares assetsDir never registers the ' +
+Deno.test({
+  ignore: ZANIX_APP_RUNTIME_SERVER_SKEW_BLOCKED,
+  name:
+    'assets: backward compatibility — an app that never declares assetsDir never registers the ' +
     '/assets route at all; a request there gets a normal 404, same as any other undeclared route',
-  async () => {
+  fn: async () => {
     const routesDir = await Deno.makeTempDir({ dir: TMP_ROOT })
     try {
       await touch(join(routesDir, 'page.tsx'), 'export default null\n')
@@ -307,4 +317,4 @@ Deno.test(
       await cleanup(routesDir)
     }
   },
-)
+})

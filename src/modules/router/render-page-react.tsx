@@ -12,7 +12,7 @@ import { getPageTree } from './page-tree-registry.ts'
 import { resolveSegmentData } from './segment-loader.ts'
 import { applyDocumentShell } from './document-shell.tsx'
 import { ORBIT_OUTLET_ATTR } from './orbit-protocol.ts'
-import type { SpacePageController } from './space-page-controller.tsx'
+import type { SpacePageController } from './space-page-controller.ts'
 import { resolveHead } from './head-descriptor.ts'
 import type { DocumentModel } from '../render/document-model.ts'
 import type { HeadDescriptor, ResolvedHead } from './head-descriptor.ts'
@@ -21,7 +21,7 @@ import type { StylesheetRef } from '../render/css-manifest.ts'
 /**
  * React's own page-composition + render implementation — the `PageRenderer` registered by default
  * (`page-renderer-registry.ts`), unchanged from before this package had a Preact counterpart. Moved out
- * of `space-page-controller.tsx` (not rewritten) specifically so that file could become fully
+ * of `space-page-controller.ts` (not rewritten) specifically so that file could become fully
  * renderer-agnostic: `handleGet` now only ever calls whatever `getPageRenderer()` returns, never
  * this function (or `render-page-preact.ts`'s own) by name — see `page-renderer-registry.ts`'s own doc
  * for why that indirection is the seam, not a per-call `if (renderer === ...)` inside shared code.

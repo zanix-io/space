@@ -5,9 +5,9 @@ import { resolvePageHeaders } from './default-page-headers.ts'
 import { applySecurityGuards } from './page-security.ts'
 import { getThemeResolver } from '../theme/theme-registry.ts'
 import { serializeThemeStyle } from '../theme/theme-style.ts'
-import type { PageHeaderOptions } from './space-page-controller.tsx'
+import type { PageHeaderOptions } from './space-page-controller.ts'
 import { ORBIT_FRAGMENT_HEADER } from './orbit-protocol.ts'
-import type { SpacePageController } from './space-page-controller.tsx'
+import type { SpacePageController } from './space-page-controller.ts'
 
 /**
  * The tail every page render finishes with — renderer indirection, `Vary`, optional status

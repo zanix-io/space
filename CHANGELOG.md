@@ -5,6 +5,140 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-08-26
+
+### Added
+
+- **`@zanix/space/vite/assets` and `@zanix/space/vite/media`** — narrower siblings of `./vite`'s own
+  barrel (`bundler/mod.ts`), for a consumer that only ever needs ONE of `assetsPlugin`/
+  `mediaPlugin`. `./vite` itself re-exports both from the same file, and a plain ES module barrel
+  resolves every one of its own export statements' source files the moment anything is imported from
+  it — so importing only `mediaPlugin` from `./vite` still resolved `assets-plugin.ts`, and
+  transitively `sharp`/`svgo`, purely as a side effect of the barrel shape. `./vite/media` points
+  directly at `media-plugin.ts` and resolves neither (confirmed via `deno info --json`: zero `npm:`
+  specifiers beyond `vite` itself, down from `sharp`+`vite`); `./vite/assets` points at
+  `assets-plugin.ts` and never resolves anything `mediaPlugin` alone would pull in. `./vite` is
+  unchanged — same symbols, same cost, for every existing consumer already importing both from
+  there.
+
+### Fixed
+
+- **`mediaPlugin` (`@zanix/space/vite`) materialized `sharp` even though its own video/audio
+  transcoding is entirely FFMPEG-backed and npm-free** — traced to
+  `modules/asset-transform/
+  asset-transformer.ts`'s single-file `createAssetTransformer`, which
+  unconditionally, statically imported `optimizeImageAsset` (`modules/assets/image-optimize.ts`,
+  `sharp`-backed) as its default `transformImage` implementation, even for a caller (`mediaPlugin`)
+  that never calls `transformImage` at all. Merely loading that one shared file — needed for its
+  `transformVideo`/ `transformThumbnail`/`transformAudio` — forced `sharp`'s own resolution
+  regardless. Split into `image-transformer.ts` (`createImageTransformer`, sharp-backed,
+  `transformImage` only) and `media-transformer.ts` (`createMediaTransformer`, entirely
+  FFMPEG-backed, `transformVideo`/ `transformThumbnail`/`transformAudio` only) — `assetsPlugin` and
+  `mediaPlugin` each construct their own narrow transformer directly instead of the combined one.
+  `createAssetTransformer` itself stays public, unchanged in shape
+  (`AssetTransformer`/`AssetTransformerOptions`), now a thin compositor of both for a caller that
+  genuinely needs all four kinds together in one instance (`assets-api`'s `AssetService`, and this
+  suite's own tests) — sharing exactly one resolved cache store across every kind, matching the
+  pre-split single-instance contract those callers already expect. Confirmed via `deno info --json`:
+  `media-plugin.ts` alone dropped from `sharp`+`vite` to `vite` only; `assets-plugin.ts` alone is
+  unaffected (`sharp`+`vite`, unchanged).
+- **`assetsPlugin({ optimize: { images: true } })` (raster-only, `optimize.svg` never configured)
+  still materialized `svgo`** — `modules/assets/optimize-runner.ts`'s `createOptimizeRunner`
+  unconditionally, statically imports `optimizeSvgAsset` (`svg-optimize.ts`) alongside
+  `optimizeImageAsset`, regardless of which one a given build actually calls, and
+  `svg-optimize.ts`'s own `getSvgo()` resolved `svgo` via a LITERAL `await
+  import('npm:svgo@^3')`
+  — a literal dynamic-import specifier is followed by Deno's static dependency-graph analysis (and,
+  transitively, a real `zanix space build`'s own Rolldown scan) regardless of whether the call is
+  ever reached at runtime. The real gate (`optimize?.svg` truthy, checked before
+  `runner.optimizeSvg` is ever called) was already correct — only the IMPORT itself was
+  unconditionally reachable. Fixed by centralizing the specifier as `SVGO_SPECIFIER` in the new
+  `src/modules/lazy/specifiers.ts` (matching the same convention
+  `@zanix/admin`/`@zanix/core`/`@zanix/cli` already use) and routing `getSvgo()`'s `import()`
+  through that non-literal constant instead. Confirmed via `deno info --json`: `svg-optimize.ts`,
+  `optimize-runner.ts`, and `assets-plugin.ts`, checked individually, all dropped `svgo` entirely
+  (from 16 to 15 total `npm:` specifiers on the full `./vite` barrel); `sharp` is unaffected on all
+  three — it is a genuine, always-needed cost of `assetsPlugin`'s own raster-image feature, not
+  further separable the way `svgo` (a distinct, independently-configurable `optimize.svg` feature)
+  was.
+- `log.controller.ts`'s default `rateLimitGuard` statically, unconditionally imported `@zanix/auth`
+  at module top level — and `@zanix/auth` itself has a real dependency on `@zanix/datamaster` (for
+  this guard's own Redis-backed counter storage), which pulls
+  `mongoose`/`mongodb`/`bson`/`redis`/`@redis/*`. Because `log.controller.ts` is registered as part
+  of every `defineSpaceApp()`'s own `setup()` (core, non-opt-in plumbing, per this file's own doc),
+  this dragged that whole dependency tree into EVERY `@zanix/space` app's build, whether or not it
+  ever used the Log API's rate limiting — confirmed as the one remaining real source after fixing
+  the identical root cause in `zanix-io/app`'s own `activateApps`/`registerApp` (see that package's
+  own `[Unreleased]` entry): a real `zanix space build` against a project linked to the fixed `app`
+  checkout still materialized `mongoose`/`redis` into `node_modules/.deno`, traced via
+  `deno info --json`'s own dependency graph to this file.
+  - The real `rateLimitGuard` is now constructed lazily, on this guard's first genuine invocation (a
+    real `POST /api/log` request), through a deliberately non-literal, fully-qualified `jsr:`
+    `import()` specifier — never a bare alias, never at `createLogApiController`-call time.
+    Promise-memoized per `createLogApiController()` call (never module-level), so two concurrent
+    first requests never construct/import twice, and two controller instances with different
+    `rateLimit` overrides never share a memoized guard built from the wrong options.
+    `createLogApiController` itself stays fully synchronous — no public API change.
+  - `@zanix/auth`, `@zanix/datamaster/storage`, and `@zanix/datamaster/core` are now absent from
+    `deno.jsonc`'s own top-level `imports` entirely (moved to a `scopes` entry for `./src/@tests/`
+    only) — confirmed, via the identical experiment already run against `zanix-io/app`, that a bare
+    alias declared there is, on its own, enough to trigger Deno's `nodeModulesDir: "auto"`-style
+    npm-install materialization regardless of whether any reachable code imports it.
+    `@zanix/app/runtime` (declared but, it turns out, never actually used outside this package's own
+    test suite) moved to the same `scopes` entry for the same reason — `@zanix/app` (bare) stays,
+    since `define-space-app.ts`'s own real use resolves through `@zanix/app`'s genuinely
+    dependency-free pure-manifest entry point.
+  - Real behavior confirmed unchanged: the existing fail-open-when-no-cache-provider test, and the
+    rate-limit-enforcement/override/extra-guards tests, all still pass unmodified.
+  - **Related, real, and NOT fixed here**: `zanix-io/space`'s own separate GitHub issue
+    (`zanix-io/space#2`) tracked this exact finding before this fix landed — closing that issue is
+    this same change.
+- **The root entry point (`.`) materialized `sharp` even though its own top-level doc already
+  claimed "importing it never evaluates `react`, `react-dom/server` or `preact`" and, implicitly,
+  never touches sharp either** — traced to a single misplaced type, `AssetKind`
+  (`modules/asset-transform/asset-transformer.ts`), whose own file also unconditionally
+  value-imports `sharp`-backed `image-optimize.ts`. Every public option type that referenced
+  `AssetKind` transitively — `AssetService`/`CreateAssetCommand`/`AssetsControllerOptions`/
+  `AssetsOptimizeOptions`/`MediaOptimizeOptions`, each declared inline in its own real,
+  value-importing implementation file (`asset-service.ts`, `assets.controller.ts`,
+  `assets-plugin.ts`, `media-plugin.ts`) — carried the same cost merely by being `import type`-ed
+  from `.`, `typings/manifest.ts`, and `modules/assets/asset-registry.ts`: Deno/TypeScript must
+  still fully resolve a referenced file's own imports to extract its type shape, regardless of the
+  importing statement's own `import type` keyword. Fixed by extracting every one of these interfaces
+  into a narrow, sibling `-types.ts` file with zero heavy imports of its own
+  (`asset-transform/types.ts`, `assets/image-optimize-types.ts`,
+  `assets-api/asset-service-types.ts`, `assets-api/controllers/assets-controller-types.ts`,
+  `bundler/assets-plugin-types.ts`, `bundler/media-plugin-types.ts`) and repointing every
+  `import type` site — including `.`, `typings/manifest.ts`, and `asset-registry.ts` — at these new
+  files instead. Each original implementation file re-exports its own type unchanged from the new
+  sibling, so no existing consumer's import path changes. Confirmed via
+  `deno info --json --min-dep-age=0 mod.ts`: `sharp` no longer appears among `.`'s reachable `npm:`
+  specifiers.
+- **The root entry point (`.`) also materialized `react` and `preact` themselves — the exact
+  package's own claim the previous entry only partly closed** — two separate, unrelated causes:
+  - `modules/router/space-page-controller.tsx` and `modules/router/not-found-handler.tsx` — both
+    exported (directly or via `typings/manifest.ts`'s `PageHeaderOptions`) from `.` — contained no
+    JSX syntax at all, yet, as `.tsx` files under this project's global `jsxImportSource: "react"`
+    compiler option, each still carried an implicitly injected `react/jsx-runtime` dependency, as
+    both a code AND a type edge — confirmed empirically with an isolated `.tsx`/`.ts` pair of
+    otherwise-identical files: only the `.tsx` one resolves `react/jsx-runtime`, regardless of
+    whether it contains a single JSX element. Fixed by renaming both to `.ts` — Deno's `.tsx`
+    handling injects this pragma import purely from the file extension, never from actually
+    detecting JSX usage first, so a `.tsx` file with zero JSX content pays the cost for nothing.
+  - `not-found-handler.ts`'s `renderNotFoundResponse` and `loader-error-handler.ts`'s
+    `renderLoaderErrorPage` each select their own built-in fallback view (`DefaultNotFoundView`/
+    `DefaultErrorView`) per `getActiveRenderer()`, via `await import('./default-*-view.tsx')` for
+    React or `await import('./default-*-view-preact.ts')` for Preact — but both branches used a
+    LITERAL specifier, so Deno's static dependency-graph analysis resolved both, unconditionally,
+    regardless of which renderer a given app actually activates — the identical root cause already
+    fixed for `svgo` above. Fixed by centralizing all four specifiers in the new
+    `modules/router/default-view-specifiers.ts` (a router-scoped sibling of `lazy/specifiers.ts`,
+    since these are RELATIVE specifiers resolved against the calling module's own location, not
+    `npm:` ones) and routing every `import()` call through its own non-literal constant instead.
+  - Confirmed via `deno info --json --min-dep-age=0 mod.ts`: `react` and `preact` are both fully
+    absent from `.`'s reachable `npm:` specifiers — the doc's own "importing it never evaluates
+    `react`, `react-dom/server` or `preact`" claim is now checked, not just asserted.
+
 ## [0.1.0] - 2026-08-24
 
 ### Added
@@ -383,6 +517,44 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
     Refresh. Verified as a real, disposable spike (same convention already used for the original
     Preact renderer decision) — not a permanent Playwright dependency added to this package's own
     test suite.
+  - **Real end-to-end validation against the actual published packages, outside the monorepo — this
+    roadmap item's last open piece (P3-4), corrected below, NOT actually closed by this entry as
+    originally written**: `@zanix/cli`'s own permanent functional suite
+    (`src/@tests/functional/space-build-react-compiler-live.test.ts`) scaffolds a real
+    `zanix new
+    space` project in a fresh temp directory outside this monorepo, resolving
+    `"@zanix/space":
+    "jsr:@zanix/space@^0.1.0"` from the real JSR registry (no local link/path
+    override anywhere — verified), then runs the real `zanix space build` subprocess against it and
+    confirms the built comet chunk carries React Compiler's own `useMemoCache` runtime helper and a
+    real per-component memo-cache-array pattern — the same evidence this package's own
+    `react-compiler.test.ts` (above) uses. The TEST ITSELF was real and correctly written from the
+    moment `@zanix/space`/`@zanix/space-ui` first published at `0.1.0` — what this entry got wrong
+    was declaring the roadmap item closed on that basis alone, without actually running it in
+    isolation first. Doing that surfaced two real, unrelated bugs that made a genuine
+    `zanix space
+    build` resolve a dependency tree dozens of times larger than necessary
+    (`mongoose`/`mongodb`/ `bson`/`redis`/`@redis/*`/`amqplib`/`@aws-sdk/client-s3`, downloaded and
+    materialized into `node_modules/.deno` for a project that used none of them), which is almost
+    certainly why real runs of this exact test/of `zanix space build` in general have taken 60–85+
+    minutes instead of seconds:
+    1. `zanix-io/app`'s own `activateApps`/`registerApp` statically, unconditionally imported
+       `@zanix/asyncmq`/`@zanix/datamaster`/`@zanix/auth` regardless of whether a manifest declared
+       `jobs`/`resources`/`operations` — fixed (`zanix-io/app`'s own `[Unreleased]` CHANGELOG
+       entry), unreleased as of this writing.
+    2. This package's own `log.controller.ts` had the identical pattern for `@zanix/auth`
+       (`rateLimitGuard`, unconditionally registered by every `defineSpaceApp()`) — fixed in this
+       same `[Unreleased]` entry (above), unreleased as of this writing. Both fixes are real,
+       tested, and confirmed at the code/module-graph level (`deno info`, a full test-suite pass,
+       and — for `zanix-io/app` specifically — a real end-to-end `zanix space build` run via a local
+       link that stopped materializing the packages above). **What genuinely remains open, and is
+       the real reason P3-4 is not being marked closed here**: neither fix has been published yet,
+       and this live test resolves `@zanix/app`/`@zanix/space` from the real JSR registry by design
+       (no local override) — so re-running it as written, against what's CURRENTLY published, would
+       still reproduce the same slow/download-heavy behavior. P3-4 closes for real once `@zanix/app`
+       publishes (a MINOR bump — a public function's signature changed from sync to async — see that
+       package's own entry) and this package publishes with the `log.controller.ts` fix, and this
+       test is then re-run in isolation and confirmed both fast and passing.
   - **One separate, pre-existing gap explicitly NOT closed by this work**: a full `zanix space dev`
     session against this repo's own already-existing local cross-package dev configuration
     (`@zanix/server`: `../server/mod.ts`, unrelated to React Compiler) currently fails —
@@ -1346,3 +1518,60 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
   (e.g. `P2-12a`) from CHANGELOG entry titles and cross-references, replacing them with plain
   descriptive text. `docs/see-more.md` (an empty placeholder) was removed, and its README link
   retargeted. No code or public API changed.
+
+### Fixed
+
+- **A page's own `loader`, or a nested layout segment's own `loader` (`resolveSegmentData`), that
+  throws is no longer left uncaught** — the throw used to propagate straight out of
+  `SpacePageController.handleGet`, past every render-phase-only recovery mechanism this package
+  already had (`error.tsx`/`SpaceErrorBoundary` only ever wrapped the RENDER phase, which starts
+  AFTER data has already resolved), and land in `@zanix/server`'s own generic `routerInterceptor`,
+  which turned it into a raw JSON error response even though the route is a real HTML page — a real,
+  reachable case any time a `loader` calls a remote dependency through `@zanix/server`'s own
+  `RestClient` and that call fails (a `RestClientError`), or throws for any other reason, domain or
+  bug alike. `handleGet` now catches any such throw and recovers it into a real, rendered response:
+  an `HttpError` whose `status.code` is `'NOT_FOUND'` renders this app's own `not-found.tsx`,
+  reusing `createNotFoundHandler`'s exact lookup/render path (now factored out as
+  `renderNotFoundResponse`, `not-found-handler.tsx`) so there is only one implementation of "find
+  and render this app's `not-found.tsx`"; any other error renders this route's own nearest
+  `error.tsx`, via a new `findNearestErrorBoundary` (`page-tree-registry.ts`) that reuses the exact
+  same leaf-to-root resolution order `composeSegments` already established for a render-phase throw,
+  wrapped directly in the app's root layout (a new `LoaderErrorRenderer`/`renderLoaderErrorResponse`
+  pair,
+  `loader-error-renderer-registry.ts`/`render-loader-error-react.tsx`/`render-loader-error-preact.ts`,
+  installed by both `@zanix/space/react` and `@zanix/space/preact` alongside the existing page/
+  not-found renderers). The real HTTP status always survives unchanged — `error.status.value` for an
+  `HttpError` (e.g. `502` for a failed `RestClient` call), `500` for anything else — only the
+  response BODY changes, from raw JSON to a rendered document. The real error is always logged
+  first, so the browser gets a friendly page while the server's own logs/observability still get the
+  full error. Purely additive: a route with no `error.tsx` anywhere in its own composition chain
+  still gets a real, rendered document — this package's own new built-in `DefaultErrorView` fallback
+  (see the next entry) — never a raw, uncaught throw leaking to `@zanix/server`'s own generic JSON
+  error response. No REST/GraphQL/socket handler is affected (`@zanix/server`'s own
+  `routerInterceptor` is untouched).
+- **The same uncaught-`loader` gap also existed on the `POST` path**: `SpacePageController`'s
+  private `#renderInvalidAction` (the `422` re-render `handlePost` triggers when a page's own
+  `@Page({ action: { Body } })` validation fails) re-runs the page's own `loader` a second time, and
+  that call had no protection either — a `loader` throwing while re-rendering the form with field
+  errors still leaked straight to `@zanix/server`'s own raw JSON error response.
+  `#renderInvalidAction` now wraps its own `loader` call and render in the SAME `try`/`catch` shape
+  as `handleGet`, calling the exact same `renderLoaderErrorPage` (`loader-error-handler.ts`) — no
+  second implementation, no behavior drift between the two call sites.
+- **`renderLoaderErrorPage` used to `throw error` raw when a route declares no `error.tsx` anywhere
+  in its own composition chain** — a real, confirmed gap in the fix above (not a deliberate design),
+  letting a `loader` throw from exactly that one case leak past this package's own contract of never
+  handing an SSR page's client raw JSON on a failure (the same compromise `page-decorator.ts`
+  already documents for a failed `422` re-render). Fixed with a new built-in `DefaultErrorView`
+  (`default-error-view.tsx`/`default-error-view-preact.ts`, one per renderer, selected the same way
+  `DefaultNotFoundView` already is) — the exact mirror of the not-found path's own built-in
+  fallback, applied to the other document `loader-error-handler.ts` renders on its own. Deliberately
+  renders nothing about the underlying error itself (the real error is already logged); an app that
+  wants to surface real detail still writes its own `error.tsx`.
+- **`DefaultNotFoundView` and the new `DefaultErrorView` now carry a stable
+  `data-space="not-found"`/ `data-space="error"` hook** on their root element — an `@zanix/space`
+  attribute (never `data-space-ui`; that one belongs to `@zanix/space-ui`, a different package and a
+  different audience) an optional stylesheet can target, the same selector-hook convention
+  `@zanix/space-ui`'s own components already establish for themselves.
+  `zanix new space --template
+  themed` (`@zanix/cli`) is the first real consumer, via its own
+  `assets/theme/space-defaults.css`.

@@ -22,19 +22,6 @@ jobs:
       contents: read # Allows reading of the repository's contents.
       id-token: write # Allows the creation of an ID token for authentication with JSR.
 
-    # A real S3-compatible gateway for the `*-s3.test.ts` functional suite
-    # (`src/@tests/functional/assets-api/`) — same image/command this repo's own local dev setup
-    # runs (`chrislusf/seaweedfs`, `server -s3`), so CI exercises the exact same real backend those
-    # tests are meant to prove against, not a mock. Without this service, every one of those tests
-    # stays permanently `ignore`d (gated on `RUN_S3_TESTS`) even in CI — confirmed empirically: they
-    # were never actually run here before this, on any prior workflow run.
-    services:
-      seaweedfs:
-        image: chrislusf/seaweedfs
-        ports:
-          - 8333:8333
-        command: server -s3
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v5

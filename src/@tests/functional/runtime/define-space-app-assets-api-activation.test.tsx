@@ -8,7 +8,6 @@ import { defineSpaceApp } from 'modules/runtime/mod.ts'
 import { createAssetService } from 'modules/assets-api/asset-service.ts'
 import { createInMemoryAssetStorage } from 'modules/assets-api/adapters/in-memory-asset-storage.ts'
 import { createInMemoryAssetRepository } from 'modules/assets-api/adapters/in-memory-asset-repository.ts'
-import { ZANIX_APP_RUNTIME_SERVER_SKEW_BLOCKED } from '../../support/zanix-app-runtime-server-skew.ts'
 
 /**
  * Real, end-to-end proof that `SpaceAppConfig.assetsApi` actually activates the Asset API —
@@ -29,12 +28,10 @@ import { ZANIX_APP_RUNTIME_SERVER_SKEW_BLOCKED } from '../../support/zanix-app-r
  */
 const allowAllGuard = () => Promise.resolve({})
 
-Deno.test({
-  ignore: ZANIX_APP_RUNTIME_SERVER_SKEW_BLOCKED,
-  name:
-    "defineSpaceApp({ assetsApi }) + activateApps: the Asset API registers under this app's own " +
+Deno.test(
+  "defineSpaceApp({ assetsApi }) + activateApps: the Asset API registers under this app's own " +
     'Application and reaches the exact AssetService instance handed to it',
-  fn: async () => {
+  async () => {
     const repository = createInMemoryAssetRepository()
     const service = createAssetService({
       storage: createInMemoryAssetStorage(),
@@ -96,4 +93,4 @@ Deno.test({
       await deactivateApps(activated)
     }
   },
-})
+)

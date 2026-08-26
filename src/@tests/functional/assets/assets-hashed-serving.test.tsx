@@ -11,7 +11,6 @@ import { Page, SpacePageController } from 'modules/router/mod.ts'
 import { setDevImportModule } from 'modules/dev/dev-engine-registry.ts'
 import { resetResolvedAssets } from 'modules/assets/asset-registry.ts'
 import { loadAssetsBuildOutput, setAssetsManifestState } from 'modules/assets/assets-manifest.ts'
-import { ZANIX_APP_RUNTIME_SERVER_SKEW_BLOCKED } from '../../support/zanix-app-runtime-server-skew.ts'
 
 const TMP_ROOT = getTemporaryFolder(import.meta.url)
 
@@ -40,12 +39,11 @@ async function cleanup(...dirs: string[]): Promise<void> {
   await Promise.all(dirs.map((dir) => Deno.remove(dir, { recursive: true })))
 }
 
-Deno.test({
-  ignore: ZANIX_APP_RUNTIME_SERVER_SKEW_BLOCKED,
-  name: 'assets hashed serving end to end: a request matching the loaded build output gets ' +
+Deno.test(
+  'assets hashed serving end to end: a request matching the loaded build output gets ' +
     'Cache-Control: immutable + a real ETag; a request only the LIVE source has still falls ' +
     'through to the original, unhashed behavior with no special caching',
-  fn: async () => {
+  async () => {
     const routesDir = await Deno.makeTempDir({ dir: TMP_ROOT })
     const assetsDir = await Deno.makeTempDir({ dir: TMP_ROOT })
     const buildOutputDir = await Deno.makeTempDir({ dir: TMP_ROOT })
@@ -108,4 +106,4 @@ Deno.test({
       await cleanup(routesDir, assetsDir, buildOutputDir)
     }
   },
-})
+)

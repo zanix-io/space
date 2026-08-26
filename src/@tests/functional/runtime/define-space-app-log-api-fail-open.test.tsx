@@ -9,7 +9,6 @@ import { assert, assertEquals } from '@std/assert'
 import { activateApps, deactivateApps } from '@zanix/app/runtime'
 import { bootstrapServers, webServerManager } from '@zanix/server'
 import { defineSpaceApp } from 'modules/runtime/mod.ts'
-import { ZANIX_APP_RUNTIME_SERVER_SKEW_BLOCKED } from '../../support/zanix-app-runtime-server-skew.ts'
 
 /**
  * Real, end-to-end proof of `runDefaultRateLimitGuard`'s own fail-open path
@@ -34,13 +33,12 @@ import { ZANIX_APP_RUNTIME_SERVER_SKEW_BLOCKED } from '../../support/zanix-app-r
  * longer both returning 200, the second by the 2nd request suddenly 429ing like the "with a real
  * cache provider" sibling.
  */
-Deno.test({
-  ignore: ZANIX_APP_RUNTIME_SERVER_SKEW_BLOCKED,
-  name: "defineSpaceApp({ logApi: { rateLimit } }) + activateApps: with NO 'cache' core provider " +
+Deno.test(
+  "defineSpaceApp({ logApi: { rateLimit } }) + activateApps: with NO 'cache' core provider " +
     "registered, the route's own default rateLimitGuard fails OPEN — a tightened " +
     'anonymousLimit of 1 does NOT actually get enforced, unlike the identical override WITH a ' +
     'real cache provider (see the sibling rate-limit-override.test.tsx file)',
-  fn: async () => {
+  async () => {
     const app = defineSpaceApp({
       name: 'fixture-log-api-fail-open-app',
       logApi: { rateLimit: { anonymousLimit: 1, windowSeconds: 60, trustProxyHeader: true } },
@@ -93,4 +91,4 @@ Deno.test({
       await deactivateApps(activated)
     }
   },
-})
+)

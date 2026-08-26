@@ -12,7 +12,6 @@ import { setDevImportModule } from 'modules/dev/dev-engine-registry.ts'
 import { setDevClientEnabled } from 'modules/dev/dev-client-registry.ts'
 import { resetSitemapCache } from 'modules/seo/sitemap.ts'
 import type { SitemapEntry } from 'modules/seo/sitemap.ts'
-import { ZANIX_APP_RUNTIME_SERVER_SKEW_BLOCKED } from '../../support/zanix-app-runtime-server-skew.ts'
 
 const TMP_ROOT = getTemporaryFolder(import.meta.url)
 
@@ -41,13 +40,11 @@ async function cleanup(...dirs: string[]): Promise<void> {
   await Promise.all(dirs.map((dir) => Deno.remove(dir, { recursive: true })))
 }
 
-Deno.test({
-  ignore: ZANIX_APP_RUNTIME_SERVER_SKEW_BLOCKED,
-  name:
-    'sitemap.xml + robots.txt end to end: a function sitemap source is called once and CACHED for ' +
+Deno.test(
+  'sitemap.xml + robots.txt end to end: a function sitemap source is called once and CACHED for ' +
     "the process lifetime (not re-run per request), and robots.txt's auto-appended Sitemap: " +
     'line, both served as real routes',
-  fn: async () => {
+  async () => {
     resetSitemapCache()
     const routesDir = await Deno.makeTempDir({ dir: TMP_ROOT })
     try {
@@ -106,7 +103,7 @@ Deno.test({
       await cleanup(routesDir)
     }
   },
-})
+)
 
 @Page()
 class DevBypassSitemapPage extends SpacePageController {
@@ -114,12 +111,10 @@ class DevBypassSitemapPage extends SpacePageController {
 }
 void DevBypassSitemapPage
 
-Deno.test({
-  ignore: ZANIX_APP_RUNTIME_SERVER_SKEW_BLOCKED,
-  name:
-    'sitemap.xml: under znx space dev (isDevClientEnabled), the cache is bypassed — a function ' +
+Deno.test(
+  'sitemap.xml: under znx space dev (isDevClientEnabled), the cache is bypassed — a function ' +
     'source is called on every request, same live-edit story loadMessages() already gives',
-  fn: async () => {
+  async () => {
     resetSitemapCache()
     const routesDir = await Deno.makeTempDir({ dir: TMP_ROOT })
     try {
@@ -159,7 +154,7 @@ Deno.test({
       await cleanup(routesDir)
     }
   },
-})
+)
 
 @Page()
 class ConcurrentSitemapPage extends SpacePageController {
@@ -167,12 +162,10 @@ class ConcurrentSitemapPage extends SpacePageController {
 }
 void ConcurrentSitemapPage
 
-Deno.test({
-  ignore: ZANIX_APP_RUNTIME_SERVER_SKEW_BLOCKED,
-  name:
-    'sitemap.xml: concurrent requests racing before the first resolution settles share a single ' +
+Deno.test(
+  'sitemap.xml: concurrent requests racing before the first resolution settles share a single ' +
     'in-flight call — same de-duplication guarantee loadMessages() already gives',
-  fn: async () => {
+  async () => {
     resetSitemapCache()
     const routesDir = await Deno.makeTempDir({ dir: TMP_ROOT })
     try {
@@ -218,7 +211,7 @@ Deno.test({
       await cleanup(routesDir)
     }
   },
-})
+)
 
 @Page()
 class StaticSitemapPage extends SpacePageController {
@@ -226,13 +219,11 @@ class StaticSitemapPage extends SpacePageController {
 }
 void StaticSitemapPage
 
-Deno.test({
-  ignore: ZANIX_APP_RUNTIME_SERVER_SKEW_BLOCKED,
-  name:
-    'sitemap.xml: a static array source is never recomputed — the exact same reference is kept ' +
+Deno.test(
+  'sitemap.xml: a static array source is never recomputed — the exact same reference is kept ' +
     'for the process lifetime, so mutating it after registration is reflected on the very next ' +
     'request (no snapshot at registration, and nothing to re-invoke: arrays are not callable)',
-  fn: async () => {
+  async () => {
     const routesDir = await Deno.makeTempDir({ dir: TMP_ROOT })
     try {
       await touch(join(routesDir, 'page.tsx'), 'export default null\n')
@@ -275,7 +266,7 @@ Deno.test({
       await cleanup(routesDir)
     }
   },
-})
+)
 
 @Page()
 class NoSeoPage extends SpacePageController {
@@ -283,12 +274,10 @@ class NoSeoPage extends SpacePageController {
 }
 void NoSeoPage
 
-Deno.test({
-  ignore: ZANIX_APP_RUNTIME_SERVER_SKEW_BLOCKED,
-  name:
-    'sitemap.xml/robots.txt: an app that never declares either never registers the routes at all — ' +
+Deno.test(
+  'sitemap.xml/robots.txt: an app that never declares either never registers the routes at all — ' +
     'a normal 404, same as any other undeclared route',
-  fn: async () => {
+  async () => {
     const routesDir = await Deno.makeTempDir({ dir: TMP_ROOT })
     try {
       await touch(join(routesDir, 'page.tsx'), 'export default null\n')
@@ -315,4 +304,4 @@ Deno.test({
       await cleanup(routesDir)
     }
   },
-})
+)

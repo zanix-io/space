@@ -44,12 +44,15 @@ export type { PwaConfig, PwaShortcut } from 'typings/pwa.ts'
 export type { AssetsControllerOptions } from 'modules/assets-api/controllers/assets-controller-types.ts'
 export type { AssetService, CreateAssetCommand } from 'modules/assets-api/asset-service-types.ts'
 // Same "every type reachable from a public export must itself be public" rule, for
-// `SpaceAppConfig.logApi` — type-only, no code edge into `modules/log-api/` (this module never
-// imports `@zanix/auth`/`@zanix/logger` itself, so this adds none either).
+// `SpaceAppConfig.logApi` — sourced from the narrow `log-controller-types.ts` sibling, never the
+// real controller file (which value-imports `@zanix/server` decorators, `@zanix/logger`, and
+// `./rtos/log.rto.ts`), so this entry point's own reachable graph never touches them. `defineComet`
+// (this same barrel) is what every Comet imports, so `.` is unavoidably part of every client
+// bundle's own graph — the real controller file has no business being part of it too.
 export type {
   LogApiControllerOptions,
   LogApiRateLimitOptions,
-} from 'modules/log-api/controllers/log.controller.ts'
+} from 'modules/log-api/controllers/log-controller-types.ts'
 // Same "every type reachable from a public export must itself be public" rule, for
 // `SpaceAppConfig.optimize`/`SpaceAppConfig.media` below — sourced from each plugin's own narrow
 // `-types.ts` sibling (not the real plugin file, which value-imports `sharp`/`vite`) so this entry
@@ -225,16 +228,20 @@ export type {
   SecurityHeadersOptions,
 } from 'modules/middleware/mod.ts'
 
+// Sourced from `modules/dev/socket-exports.ts`, not `modules/dev/mod.ts`'s own full barrel — that
+// barrel also co-locates `spacePlugin` (`@vitejs/plugin-react`/`@preact/preset-vite`, both
+// renderers' Fast Refresh tooling, regardless of which one an app installs), which this entry point
+// must never resolve merely by re-exporting `SpaceDevSocket`.
 export {
   broadcastSsrModuleChanged,
   SPACE_DEV_SOCKET_ROUTE,
   SpaceDevSocket,
   ZanixWebSocket,
-} from 'modules/dev/mod.ts'
-export type { SocketPrototype } from 'modules/dev/mod.ts'
+} from 'modules/dev/socket-exports.ts'
+export type { SocketPrototype } from 'modules/dev/socket-exports.ts'
 // `broadcastSsrModuleChanged`'s own parameter type — same "every type reachable from a public
 // export must itself be public" rule as `AssetsOptimizeOptions`/`MediaOptimizeOptions` above.
-export type { SsrModuleChangedEvent } from 'modules/dev/mod.ts'
+export type { SsrModuleChangedEvent } from 'modules/dev/socket-exports.ts'
 
 export { loadMessages } from 'modules/i18n/load-messages.ts'
 export type { LoadMessagesOptions, Messages } from 'modules/i18n/load-messages.ts'

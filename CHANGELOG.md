@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+### Fixed
+
+- **The root entry point (`.`) also materialized `@vitejs/plugin-react`, `@preact/preset-vite`, and
+  `@rolldown/plugin-babel` — build-tooling for BOTH renderers, regardless of which one an app
+  installs — merely by re-exporting `SpaceDevSocket`.** `modules/dev/mod.ts` (the `./dev` subpath's
+  own entry) is a single barrel co-locating `SpaceDevSocket`/`broadcastSsrModuleChanged` (what `.`
+  actually re-exports) with `createSpaceDevEngine`/`spacePlugin` (`../bundler/dev-engine.ts`/
+  `../bundler/space-plugin.ts`, never re-exported from `.` itself) — a plain ES module barrel
+  resolves every export statement's source file the moment anything is imported from it, so `.`
+  reaching for `SpaceDevSocket` alone forced `spacePlugin`'s own unconditional
+  `@vitejs/plugin-react`/ `@preact/preset-vite` import along with it. Fixed by extracting the narrow
+  slice `.` actually needs into the new `modules/dev/socket-exports.ts` —
+  `SpaceDevSocket`/`broadcastSsrModuleChanged`/
+  `SPACE_DEV_SOCKET_ROUTE`/`ZanixWebSocket`/`SocketPrototype`/`SsrModuleChangedEvent`, nothing from
+  `../bundler/` — and repointing `.`'s own re-exports at it instead of the full barrel. `./dev`
+  (`modules/dev/mod.ts` itself) is unchanged, still exporting everything `zanix space dev` needs.
+  `vite`/`@deno/vite-plugin` remain reachable from `.` regardless — `SsrModuleChangedEvent` is
+  `broadcastSsrModuleChanged`'s own parameter type, defined in `dev-engine.ts`, whose real value
+  imports resolve the moment its type is referenced, the same `import type` reachability rule as
+  everywhere else in this package. Confirmed via `deno info --json --min-dep-age=0`: `.` drops from
+  7 `npm:` specifiers to 4 (`vite`, `@deno/vite-plugin`, and their own `/resolver`/`/module-runner`
+  subpaths); `./dev` stays at 7, unchanged.
+
 ## [0.2.0] - 2026-08-26
 
 ### Added
@@ -138,6 +161,43 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
   - Confirmed via `deno info --json --min-dep-age=0 mod.ts`: `react` and `preact` are both fully
     absent from `.`'s reachable `npm:` specifiers — the doc's own "importing it never evaluates
     `react`, `react-dom/server` or `preact`" claim is now checked, not just asserted.
+- **Partial fix for `zanix space build` failing on a plain, default `zanix new space` React scaffold
+  with `[UNLOADABLE_DEPENDENCY]`/`[PARSE_ERROR]`/`[UNRESOLVED_ENTRY]` errors inside a nested Vite
+  worker sub-build (`zanix-io/space#4`).** Root cause: `@zanix/utils`'s own `WorkerManager`
+  (`workers/processor.ts`) does a real `new Worker(new URL(...))` — a pattern Vite's own
+  `worker-import-meta-url` plugin statically detects and tries to bundle as a nested sub-build the
+  moment the file is merely REACHABLE, regardless of whether the app ever configures anything that
+  needs it; that nested build then fails for reasons still outside this package's own control (see
+  below). Two real, `@zanix/space`-controlled reachability paths into it, both fixed:
+  - `build-client.ts` (`zanix space build`'s own Vite orchestration) statically imported
+    `assetsPlugin`/`mediaPlugin` at its own top level, even though the SAME file already gates
+    actually calling either behind `assetsDir` being configured — the classic "gated the call, not
+    the import" gap this package has already fixed elsewhere (see `svgo`/renderer-view-specifier
+    entries above). Both real value imports reach `@zanix/utils`'s `WorkerManager` (via
+    `@zanix/logger`), so a plain app with no `assetsDir` configured — the exact repro — still paid
+    for it. Fixed the same way: lazy, non-literal specifiers (new
+    `bundler/build-plugin-specifiers.ts`), resolved only when `assetsDir` is actually set; typed via
+    the existing `assets-plugin-types.ts`/`media-plugin-types.ts` siblings instead.
+  - `typings/manifest.ts`'s `SpaceAppConfig.logApi` field `import type`-ed `LogApiControllerOptions`
+    from the real `log.controller.ts` — which value-imports `@zanix/logger` directly — and
+    `modules/runtime/define-space-app.ts` additionally, unconditionally, statically imported and
+    called `createLogApiController` as part of every app's own `setup()`. Since `SpaceAppConfig` is
+    reachable from the root `.` entry point (the SAME barrel every Comet imports, for
+    `defineComet`), this meant `log.controller.ts` — and `@zanix/logger` — were reachable from every
+    `@zanix/space` app's CLIENT bundle, not just its server side. Fixed by extracting
+    `LogApiControllerOptions`/`LogApiRateLimitOptions` into the new
+    `log-api/controllers/log-controller-types.ts` (for the type reference) and resolving
+    `createLogApiController` itself via a lazy, non-literal specifier at its own call site (already
+    inside an `async` scope) — `defineSpaceApp` stays fully synchronous for every existing caller.
+  - **Not yet fully closed**: even with both fixes above, `@zanix/server`'s own `ProgramModule` —
+    unconditionally needed by `defineSpaceApp` itself, and by every `SpacePageController`/`Page` a
+    Comet's own sibling routes use — has its own internal path into `@zanix/utils`'s
+    `helpers/mod.ts` → `utils/cron.ts` → `@zanix/logger` → the same `WorkerManager` pattern. This is
+    outside this package's own control: `@zanix/logger`'s root `mod.ts` unconditionally imports a
+    `WorkerManager`-backed default log-storage implementation (`defaults/storage/default.ts`),
+    regardless of whether `useWorker` is ever actually set at runtime — the identical "gated the
+    call, not the import" gap, one level up, in `@zanix/utils` itself. A real fix needs that import
+    made lazy there; `zanix-io/space#4` stays open pending it.
 
 ## [0.1.0] - 2026-08-24
 

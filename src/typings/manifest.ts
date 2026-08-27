@@ -27,7 +27,7 @@ import type { ValidationConfig } from 'modules/validation/engine.ts'
 import type { AssetsOptimizeOptions } from 'modules/bundler/assets-plugin-types.ts'
 import type { MediaOptimizeOptions } from 'modules/bundler/media-plugin-types.ts'
 import type { AssetsControllerOptions } from 'modules/assets-api/controllers/assets-controller-types.ts'
-import type { LogApiControllerOptions } from 'modules/log-api/controllers/log.controller.ts'
+import type { LogApiControllerOptions } from 'modules/log-api/controllers/log-controller-types.ts'
 
 // Re-exported (not just imported) because `SpaceAppConfig.setup` below references
 // `AppSetupContext`, which extends `RuntimeContext`, which in turn holds a `ConfigAccessor` —

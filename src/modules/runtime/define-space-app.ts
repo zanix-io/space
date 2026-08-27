@@ -16,7 +16,6 @@ import {
 } from 'modules/assets/asset-registry.ts'
 import { registerAssets } from 'modules/assets/register-assets.ts'
 import { createAssetsController } from 'modules/assets-api/controllers/assets.controller.ts'
-import { createLogApiController } from 'modules/log-api/controllers/log.controller.ts'
 import { setMessagesDir } from 'modules/i18n/messages-registry.ts'
 import { registerSitemap } from 'modules/seo/sitemap.ts'
 import { registerRobots } from 'modules/seo/robots.ts'
@@ -25,6 +24,18 @@ import { setActiveRenderer } from 'modules/router/active-renderer.ts'
 import { getInstalledRenderer } from 'modules/router/renderer-runtime.ts'
 import { InternalError } from '@zanix/errors'
 import { setValidationConfig } from 'modules/validation/config-registry.ts'
+
+/** Deliberately non-literal, kept OUTSIDE a normal top-level `import` — `log.controller.ts` value-
+ * imports `@zanix/logger` (and, transitively, `@zanix/utils`'s own `WorkerManager`), whose real
+ * `new Worker(new URL(...))` pattern Vite's own `worker-import-meta-url` plugin statically detects
+ * and tries to bundle as a nested sub-build the moment the file is merely reachable — a real,
+ * confirmed source of build failures. `defineComet` (`.`'s OWN barrel) is what every Comet
+ * imports, so `.` is unavoidably part of every client bundle's own graph;
+ * `createLogApiController` itself only ever actually RUNS server-side, inside the `async setup`
+ * callback below, so resolving it there — via this non-literal specifier, not a top-level import —
+ * keeps `log.controller.ts` out of that graph entirely. Single consumer (this file) — stays inline,
+ * not promoted to a shared specifiers file, per this package's own established convention. */
+const LOG_CONTROLLER_SPECIFIER = 'modules/log-api/controllers/log.controller.ts'
 
 // Re-exported (not just imported) because `defineSpaceApp` below returns it — see
 // `typings/manifest.ts`'s own doc comment for why referenced public types must themselves be
@@ -239,6 +250,7 @@ export function defineSpaceApp(config: SpaceAppConfig): ZanixAppDefinition {
       // A test that needs to call `setup()` more than once gives each call its own
       // `ProgramModule.defineApplication(...)` scope (see `define-space-app.test.tsx`) instead of
       // relying on this line to tolerate a shared one.
+      const { createLogApiController } = await import(LOG_CONTROLLER_SPECIFIER)
       createLogApiController(logApi)
       await setup?.(ctx)
     },

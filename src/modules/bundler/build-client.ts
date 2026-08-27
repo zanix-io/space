@@ -7,8 +7,9 @@ import { spacePlugin } from './space-plugin.ts'
 import { cometPlugin } from './comet-plugin.ts'
 import { cssPlugin, type CssPluginOptions } from './css-plugin.ts'
 import { pwaPlugin } from './pwa-plugin.ts'
-import { type AssetsOptimizeOptions, assetsPlugin } from './assets-plugin.ts'
-import { type MediaOptimizeOptions, mediaPlugin } from './media-plugin.ts'
+import type { AssetsOptimizeOptions } from './assets-plugin-types.ts'
+import type { MediaOptimizeOptions } from './media-plugin-types.ts'
+import { ASSETS_PLUGIN_SPECIFIER, MEDIA_PLUGIN_SPECIFIER } from './build-plugin-specifiers.ts'
 import { createAssetManifestRegistry } from 'modules/assets/asset-manifest-registry.ts'
 import { resolvePwaPluginOptions } from './resolve-pwa-plugin-options.ts'
 import { discoverComets } from './discover-comets.ts'
@@ -319,6 +320,30 @@ export async function buildSpaceClient(
   // a process-wide singleton.
   const manifestRegistry = createAssetManifestRegistry()
 
+  // Lazy, gated behind the same `assetsDir` check the plugins array below already applies —
+  // `assets-plugin.ts`/`media-plugin.ts` both reach `@zanix/utils`'s own `WorkerManager` (via
+  // `@zanix/logger`), whose real `new Worker(new URL(...))` pattern Vite's own
+  // `worker-import-meta-url` plugin statically detects the moment either file is merely resolved,
+  // and tries to bundle as its own nested sub-build — a real, confirmed source of build failures
+  // (`UNLOADABLE_DEPENDENCY`/`PARSE_ERROR`/`UNRESOLVED_ENTRY` inside that nested build,
+  // `worker: { plugins: () => [] }` below notwithstanding). A plain app with no `assetsDir`
+  // configured needs neither plugin at all, so resolving them here, only once `assetsDir` is real,
+  // keeps that app's own build out of this risk entirely.
+  const assetsPlugins = assetsDir
+    ? (await import(ASSETS_PLUGIN_SPECIFIER)).assetsPlugin({
+      assetsDir,
+      optimize,
+      manifestRegistry,
+    })
+    : []
+  const mediaPlugins = assetsDir
+    ? (await import(MEDIA_PLUGIN_SPECIFIER)).mediaPlugin({
+      assetsDir,
+      optimize: media,
+      manifestRegistry,
+    })
+    : []
+
   await build({
     root,
     configFile: false,
@@ -359,8 +384,8 @@ export async function buildSpaceClient(
       // knowing the other exists. The manifest plugin itself is included exactly once, after every
       // producer, gated the same way each producer's own inclusion already is — no producer, no
       // manifest file, unchanged.
-      ...(assetsDir ? assetsPlugin({ assetsDir, optimize, manifestRegistry }) : []),
-      ...(assetsDir ? mediaPlugin({ assetsDir, optimize: media, manifestRegistry }) : []),
+      ...assetsPlugins,
+      ...mediaPlugins,
       ...(assetsDir ? [manifestRegistry.createManifestPlugin()] : []),
       {
         name: 'zanix-space-empty-entry',

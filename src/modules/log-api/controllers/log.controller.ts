@@ -46,6 +46,9 @@ import { Controller, Guard, Post, ZanixController } from '@zanix/server'
 import { InternalError } from '@zanix/errors'
 import logger from '@zanix/logger'
 import { LogIngestRTO } from './rtos/log.rto.ts'
+import type { LogApiControllerOptions, LogApiRateLimitOptions } from './log-controller-types.ts'
+
+export type { LogApiControllerOptions, LogApiRateLimitOptions }
 
 /** Fully-qualified, deliberately non-literal `jsr:` specifier for `@zanix/auth` — see
  * {@linkcode resolveDefaultGuard}'s own doc for why this package is reached this way instead of a
@@ -99,62 +102,6 @@ export interface LogApiControllerInstance extends ZanixController {
   /** `POST /api/log` — relays one already-formatted browser log entry into the server's own
    * `Logger#ingest`. */
   ingest(ctx: HandlerContext<{ body: LogIngestRTO }>): Promise<Record<string, unknown>>
-}
-
-/**
- * Overrides for this endpoint's own default `rateLimitGuard` — every field optional, falling back
- * to the current defaults ({@linkcode LOG_API_RATE_LIMIT_ANONYMOUS_LIMIT} /
- * {@linkcode LOG_API_RATE_LIMIT_WINDOW_SECONDS} / `trustProxyHeader: true`) when omitted, same
- * "omit = current default behavior" convention every other `SpaceAppConfig` field already follows.
- *
- * Unlike {@linkcode LogApiControllerOptions.guards} (strictly additive — never lets a consumer
- * loosen the floor, only tighten it further), THIS is the real override surface: a consumer whose
- * app genuinely needs a different budget, window, or IP-trust posture changes it here, not by
- * fighting the default guard via `guards`. `trustProxyHeader` in particular isn't just a taste
- * knob — it's a deployment-topology fact this package can't safely assume for every consumer
- * (whether THIS app's own infrastructure genuinely sits behind a trusted reverse proxy/CDN that
- * overwrites client-IP headers); hardcoding `true` for every app would silently over-trust a
- * spoofable header for one that isn't behind such a proxy, so an app that knows it isn't can opt
- * into the "every anonymous caller shares ONE bucket" trade-off instead (see `rateLimitGuard`'s own
- * doc, and `auth-network-security` for the general shape of this decision).
- */
-export interface LogApiRateLimitOptions {
-  /** Requests-per-window budget for a single anonymous caller. @default 30 */
-  anonymousLimit?: number
-  /** Window length, in seconds, {@linkcode anonymousLimit} is counted over. @default 60 */
-  windowSeconds?: number
-  /** `true` keys each anonymous caller's own bucket off its resolved client IP+User-Agent (only
-   * safe behind a trusted proxy that overwrites IP headers); `false` shares ONE bucket across
-   * every anonymous caller instead. @default true */
-  trustProxyHeader?: boolean
-}
-
-/** Options for {@link createLogApiController}. */
-export interface LogApiControllerOptions {
-  /** Route prefix, e.g. `'api'` (default) for `POST /api/log`. Overridable mainly for test
-   * isolation — `@Controller`/`@Post` register into a process-global route table at
-   * class-definition time, the same reason `createAssetsController`'s own `prefix` option exists
-   * (see that factory's own unit tests) — a real consumer never needs anything other than the
-   * default, which is what `defineSpaceApp` always calls this with. */
-  prefix?: string
-  /** Overrides the default `rateLimitGuard`'s own `anonymousLimit`/`windowSeconds`/
-   * `trustProxyHeader` — see {@link LogApiRateLimitOptions}'s own doc. Omit for the current
-   * defaults; this is the real "change the floor" surface, distinct from {@link guards} below. */
-  rateLimit?: LogApiRateLimitOptions
-  /**
-   * Extra guards, run AFTER this endpoint's own default `rateLimitGuard` (see this module's own
-   * top-level doc) — APPENDED, never replacing it, each running in order and short-circuiting on
-   * the first denial, the same run-in-order mechanism `createAssetsController`'s own `combineGuards`
-   * already establishes. This is a deliberate divergence from that factory's own `guards` option,
-   * not an inconsistency: `createAssetsController`'s default (`denyAllGuard`) is a placeholder an
-   * integrator REPLACES the moment a real `guards` list is configured (there is no policy decided
-   * yet for that API); this endpoint's default rate limit IS the decided policy (see Task/PR
-   * history — a public, anonymous relay genuinely needs SOME bound on write volume, not "nothing
-   * until configured"), so passing `guards` here can only ever add more restrictions on top, never
-   * remove or loosen the floor — a consumer that needs a genuinely different budget/window/IP-trust
-   * posture uses {@link rateLimit} above instead, not this option.
-   */
-  guards?: MiddlewareGuard[]
 }
 
 /**

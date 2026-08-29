@@ -1,6 +1,7 @@
 import type { ClassConstructor, ZanixClassDecorator, ZanixInteractorClass } from '@zanix/server'
 
-import { Get, Post, SsrController } from '@zanix/server'
+import { AsyncLocalStorage } from 'node:async_hooks'
+import { Get, Post, ProgramModule, SsrController } from '@zanix/server'
 import type { RtoTypes } from '@zanix/types'
 import { InternalError } from '@zanix/errors'
 import type { PageHeaderOptions } from './space-page-controller.ts'
@@ -106,16 +107,62 @@ type PendingPageOptions = {
   action?: { Body?: RtoTypes['Body'] }
 }
 
-/** Pages decorated with a pathless `@Page()`, awaiting `loadRoutes()` to tell them their real
- * route path (derived from where their file actually lives). A page left in here forever — one
- * decorated `@Page()` but never discovered by `loadRoutes()` (e.g. imported by hand from outside
- * `routesDir`) — silently never becomes a real route; that's why `@Page()`'s own doc calls this
- * mode out as depending on file-based discovery. Maps to the page's own options, carried along
- * until the path is known and the page can actually be registered. */
-const pendingPages = new Map<
+/** Every class ever decorated with a pathless `@Page()`, mapped to its own options — never
+ * deleted, unlike an earlier version of this bookkeeping. A `WeakMap`, deliberately: once a class
+ * this holds becomes unreachable from anywhere else (e.g. `load-routes.ts`'s own
+ * `registeredPageTargets`, once a dev-server reimport replaces it with a fresh class for the same
+ * file), this entry is collected right along with it — no separate cleanup pass needed, and no
+ * unbounded growth across a long `zanix space dev` session's worth of edits.
+ *
+ * Kept permanently (not removed once resolved) for two reasons: {@linkcode resolvePendingPage}
+ * needs to tell "this class was never pathless — an explicit-path page, nothing to do here" apart
+ * from "this class WAS pathless and already resolved once" — a distinction a one-shot,
+ * delete-after-use map can't make. And the options themselves (`Interactor`/`headers`/`action`)
+ * stay available for a genuine RE-registration later — see {@linkcode resolvePendingPage}'s own
+ * doc for the real case that needs one. */
+const pendingPages = new WeakMap<
   ClassConstructor<SpacePageController>,
   PendingPageOptions
 >()
+
+/** Ambient "the class about to register a path may evict THIS one first, if it turns out to be
+ * what's blocking it" signal — see {@linkcode withPendingReplacement}'s own doc for why this
+ * exists and how it's scoped. `undefined` (the default, outside any `withPendingReplacement` call)
+ * means "nothing to evict," exactly as if this mechanism didn't exist at all — the state every
+ * plain production boot's own registration sees. */
+const pendingReplacement = new AsyncLocalStorage<
+  ClassConstructor<SpacePageController> | undefined
+>()
+
+/**
+ * Runs `fn` (a single page's own `importModule()` call) with `previousTarget` available to
+ * {@linkcode registerPage} as the one class THIS SAME call is allowed to evict if it turns out to
+ * be blocking the path a freshly-imported page is about to claim — dev-mode-only recovery for an
+ * *explicit* `@Page(path)`'s own real limitation (see `loadRoutes`'s own doc): unlike a pathless
+ * `@Page()`, an explicit path registers synchronously, DURING import itself, before `loadRoutes()`
+ * ever gets a chance to deregister the previous class first — so reimporting such a page while its
+ * previous registration is still live collides and throws, and (since the throw happens mid class
+ * definition) the fresh class binding is never even created, so there is nothing to retry
+ * afterward with. Fixing that ordering problem needs the ONE piece of context `registerPage` has
+ * no other way to receive: which class, if any, THIS exact file's own previous import left behind.
+ * An `AsyncLocalStorage`, not a plain module variable, is what safely carries that from here to
+ * there — `loadRoutes()` processes every page in one `Promise.all`, so several pages' own imports
+ * can genuinely be in flight at once; a flat variable would let one page's value leak into
+ * another's decorator call, evicting the wrong class. Scoped correctly, each page's own `Target`
+ * class is the only one the eviction check below can ever see.
+ *
+ * Only ever called by `loadRoutes()` itself, and only while a real dev engine is installed (never
+ * for a plain production `import()` — see that call site's own comment for why gating on that
+ * matters). A pathless `@Page()`'s own registration (deferred to {@linkcode resolvePendingPage},
+ * which always runs OUTSIDE this wrapped call) never observes this context either way — nothing
+ * new for that path, which already orders its own deregistration correctly.
+ */
+export function withPendingReplacement<T>(
+  previousTarget: ClassConstructor<SpacePageController> | undefined,
+  fn: () => Promise<T>,
+): Promise<T> {
+  return pendingReplacement.run(previousTarget, fn)
+}
 
 /** Wires `GET`/`POST` to `handleGet`/`handlePost` for `path`, registers `Target` under `'ssr'`
  * (with `Interactor`, if the page declared one), and records its `headers` choice as a static
@@ -133,6 +180,15 @@ function registerPage(
   path: string,
   { Interactor, headers, action }: PendingPageOptions,
 ): void {
+  // Only ever non-undefined for an EXPLICIT-path page reimported under `withPendingReplacement`
+  // (see that function's own doc) — evicts THIS class's own previous registration for the SAME
+  // file, never anyone else's, so a genuine collision between two unrelated pages that happen to
+  // declare the same path still throws exactly as before.
+  const evictable = pendingReplacement.getStore()
+  if (evictable && evictable !== Target) {
+    ProgramModule.unregisterRoutes(evictable, 'ssr')
+  }
+
   const proto = Target.prototype
   Get(path)(proto.handleGet)
   Post(path)(proto.handlePost)
@@ -148,8 +204,23 @@ function registerPage(
 /**
  * Finishes registering a page that was decorated with a pathless `@Page()`, now that its real
  * route path is known. Called internally by `loadRoutes()` once it imports the page's file and
- * derives that path from the file's own location — a page never calls this itself. A no-op for
- * any class not currently pending (e.g. already registered via an explicit `@Page(path)`).
+ * derives that path from the file's own location — a page never calls this itself.
+ *
+ * A no-op for `Target` never decorated with a pathless `@Page()` at all — an explicit-path page,
+ * already registered synchronously at decoration time, has nothing left for this function to do.
+ *
+ * Otherwise a true no-op **only** when `Target`'s routes are still live
+ * (`ProgramModule.routes.hasRoutesForTarget`) — normally true on every call after the first, since
+ * nothing else in this package ever removes a page's routes out from under it. The one real
+ * exception: `@zanix/app`'s `uninstallApp`/`installApp` hot-uninstalls then hot-reinstalls an
+ * Application's whole route surface in a live process, re-running this app's `setup()` — and
+ * therefore `loadRoutes()` — a second time. If the page's file didn't change on disk in between, a
+ * plain `import()` (production, no dev engine) hits Deno's own ES module cache and returns the
+ * identical, already-evaluated class: its `@Page()` decorator never reruns, so nothing would ever
+ * ask this function to re-register it. Checking liveness directly (rather than only ever trusting
+ * "already resolved once, so it must still be fine") is what actually restores it — using the
+ * SAME options this class was originally decorated with, still available from `pendingPages`
+ * (kept permanently — see its own doc).
  *
  * @param Target - The page class, as imported.
  * @param routePath - The route path derived from the file's location (see `scanPageFiles`).
@@ -160,7 +231,7 @@ export function resolvePendingPage(
 ): void {
   const options = pendingPages.get(Target)
   if (!options) return
-  pendingPages.delete(Target)
+  if (ProgramModule.routes.hasRoutesForTarget(Target, 'ssr')) return
   registerPage(Target, routePath, options)
 }
 

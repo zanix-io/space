@@ -163,13 +163,24 @@ Deno.test(
 )
 
 Deno.test(
-  'window.__spaceApplyClientUpdate: a silent no-op when nothing was registered for that url',
+  'window.__spaceApplyClientUpdate: falls back to a real reload when nothing was registered for ' +
+    'that url — no longer a silent no-op (real gap found: a Comet whose own static import chain ' +
+    'failed on its very first load never reaches its own import.meta.hot.accept(...) call, ' +
+    'permanently leaving no callback registered; a later edit to that SAME file must still recover ' +
+    'via reload, not keep silently doing nothing forever)',
   async () => {
-    await withViteHotClientScript(async (_mod, window) => {
+    await withViteHotClientScript(async (_mod, window, location) => {
+      let reloaded = false
+      location.reload = () => (reloaded = true)
       window.__spaceHotAccept = {}
 
       // Must not throw — a dev-only best-effort update failing to apply must not break the page.
       await window.__spaceApplyClientUpdate('/never/registered.tsx')
+
+      assert(
+        reloaded,
+        'a missing accept() callback must fall back to a real reload, not silently do nothing',
+      )
     })
   },
 )

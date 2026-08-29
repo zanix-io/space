@@ -39,7 +39,9 @@ export interface LogApiRateLimitOptions {
 /** Options for `createLogApiController`. See `log.controller.ts`'s own doc for the full contract
  * behind each field. */
 export interface LogApiControllerOptions {
-  /** Route prefix, e.g. `'api'` (default) for `POST /api/log`. */
+  /** Route prefix ON TOP OF the REST server's own default `/api` globalPrefix — empty (default)
+   * for `POST /api/log`. Only set this to something else if a project's own `rest` server was
+   * itself configured with a non-default `globalPrefix`/no default at all. */
   prefix?: string
   /** Overrides the default `rateLimitGuard`'s own `anonymousLimit`/`windowSeconds`/
    * `trustProxyHeader` — see {@linkcode LogApiRateLimitOptions}'s own doc. */

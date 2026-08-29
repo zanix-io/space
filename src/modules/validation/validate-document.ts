@@ -83,6 +83,17 @@ function metaContent(head: ResolvedHead, name: string): string | undefined {
   return head.meta.find((tag) => tag.name === name)?.content
 }
 
+/** Whether a resolved head's own `<meta name="robots">` carries a `noindex` token — shared between
+ * this module's own SEO004 cross-check below and `deriveAutoSitemapEntries`
+ * (`modules/bundler/auto-sitemap.ts`), so a page that opts out of indexing is excluded from an
+ * auto-derived sitemap by construction, rather than relying on a second parse of the same tag to
+ * agree with this one. */
+export function isNoindex(head: ResolvedHead): boolean {
+  const robots = metaContent(head, 'robots')
+  return robots !== undefined &&
+    robots.split(',').some((token) => token.trim().toLowerCase() === 'noindex')
+}
+
 function ogProperty(head: ResolvedHead, property: string): string | undefined {
   return head.meta.find((tag) => tag.property === property)?.content
 }
@@ -177,10 +188,10 @@ function validatePage(
     }
 
     // --- sitemap / noindex contradiction ---------------------------------------------------------
-    const isNoindex = robots !== undefined &&
-      robots.split(',').some((token) => token.trim().toLowerCase() === 'noindex')
+    const pageIsNoindex = isNoindex(page.head)
     if (
-      isNoindex && app.sitemapLocations?.some((loc) => loc.replace(/^\//, '') === page.routePath)
+      pageIsNoindex &&
+      app.sitemapLocations?.some((loc) => loc.replace(/^\//, '') === page.routePath)
     ) {
       collector.report('SEO004', {
         ...where,

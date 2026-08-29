@@ -15,6 +15,8 @@ import { resolvePwaPluginOptions } from './resolve-pwa-plugin-options.ts'
 import { discoverComets } from './discover-comets.ts'
 import { collectPageStyles, discoverPages } from './discover-pages.ts'
 import { getGlobalCssPaths, type StylesheetRef } from 'modules/render/css-manifest.ts'
+import { CLIENT_ENTRY_VIRTUAL_ID, getClientEntry } from 'modules/render/client-entry.ts'
+import { clientEntryPlugin } from './client-entry-plugin.ts'
 import { normalizeSourceKey } from 'modules/comets/comet-manifest.ts'
 import {
   getAssetsDirConfig,
@@ -22,9 +24,12 @@ import {
   getOptimizeConfig,
 } from 'modules/assets/asset-registry.ts'
 import { getActiveRenderer, type RendererKind } from 'modules/router/active-renderer.ts'
+import { getRoutesDir } from 'modules/router/routes-dir-registry.ts'
 import { getValidationConfig } from 'modules/validation/config-registry.ts'
 import type { Diagnostic, ValidationConfig } from 'modules/validation/mod.ts'
 import { validateBuild } from './validate-build.ts'
+import { getSitemapDeclaration, type SitemapEntry } from 'modules/seo/sitemap.ts'
+import { deriveAutoSitemapEntries } from './auto-sitemap.ts'
 
 // `Plugin` is not re-exported here — same accepted `deno doc --lint` finding as `spacePlugin`'s
 // own doc comment.
@@ -33,7 +38,7 @@ import { validateBuild } from './validate-build.ts'
 export interface BuildSpaceClientOptions {
   /** Project root — same meaning as `SpaceDevEngineOptions.root`. */
   root: string
-  /** Where the built client assets are written, relative to `root`. @default 'dist/client' */
+  /** Where the built client assets are written, relative to `root`. @default '.dist/client' */
   outDir?: string
   /**
    * This app's own declared global stylesheet source paths — included as real build entries
@@ -53,11 +58,22 @@ export interface BuildSpaceClientOptions {
    */
   globalCss?: StylesheetRef[]
   /**
+   * This app's own `SpaceAppConfig.clientEntry` override, if any — defaults to `getClientEntry()`,
+   * the same eager registry `defineSpaceApp({ clientEntry })` populates. `undefined` (the normal
+   * case) builds the auto-generated default entry instead (`hydrateComets()`/`initOrbit()`, see
+   * `client-entry-plugin.ts`'s own doc) — every app gets a real, built bootstrap chunk either way,
+   * never an empty one.
+   */
+  clientEntry?: string
+  /**
    * Where to look for pages' own `static styles` — passed UNCHANGED to `scanPageFiles`
    * (see `discover-pages.ts`'s own doc for why this is deliberately NOT resolved against
    * `root` the way `globalCss`/`assetsDir` are: the resulting page identity must come out in
    * EXACTLY the same shape `loadRoutes()` itself will produce for the SAME value at real server
-   * startup). @default './routes' — the same default `loadRoutes()` itself uses.
+   * startup). Defaults to `getRoutesDir()` — the SAME eager-registry pattern `assetsDir`/
+   * `renderer` above already establish (`defineSpaceApp({ routesDir })` sets it eagerly, same
+   * timing as those), so a build script that already imports the app's `space.app.ts` gets it
+   * automatically, without needing to guess at (or hardcode) a project's own layout.
    */
   routesDir?: string | string[]
   /** Forwarded to {@linkcode cssPlugin} unchanged. */
@@ -112,9 +128,15 @@ export interface BuildSpaceClientOptions {
    */
   validation?: ValidationConfig | false
   /**
-   * Sitemap locations, when the app declares its sitemap as a literal array — enables the
-   * sitemap cross-checks. Omitted (including for a function-sourced sitemap) simply skips them, and
-   * the skip is reported rather than left silent. See `validateBuild`'s own doc.
+   * Explicit override for the sitemap cross-checks' own locations list — resolved automatically
+   * otherwise, from `getSitemapDeclaration()` (`defineSpaceApp({ sitemap })`'s own eagerly-captured
+   * value): a literal array is read directly, `'auto'` is derived from this SAME build's own
+   * discovered pages (`deriveAutoSitemapEntries`), and a function source (or `sitemap` omitted
+   * entirely) resolves to nothing to derive, same as before `'auto'` existed. Passing this
+   * explicitly is only for a caller with no real `defineSpaceApp({ sitemap })` declaration to read
+   * back — a test, or a script building against an app that never imported this function's own
+   * module. See `validateBuild`'s own doc for what an unresolved case reports instead of silently
+   * skipping.
    */
   sitemapLocations?: string[]
   /**
@@ -147,6 +169,15 @@ export interface BuildSpaceClientResult {
   /** Checks that could not run, and why — see `ValidateBuildResult.skipped`. A validator that
    * silently skips work reads exactly like one that found nothing wrong. */
   validationSkipped: string[]
+  /**
+   * Entries `defineSpaceApp({ sitemap: 'auto' })` derived from this build's own static route tree
+   * — `undefined` whenever the app's `sitemap` is not `'auto'` (omitted, a literal array, or a
+   * function; none of those need a build-output artifact at all, see `SitemapDeclaration`'s own
+   * doc). A caller persists this into `{outDir}/sitemap-manifest.json` AFTER this function returns
+   * (`loadSitemapManifest`'s own doc explains why: writing it any earlier would not survive Vite's
+   * own `emptyOutDir`) — `zanix space build` is the one real caller that does.
+   */
+  sitemapEntries?: SitemapEntry[]
 }
 
 /** Derives a stable, collision-resistant Rollup entry name from an absolute file path — its path
@@ -207,9 +238,10 @@ export async function buildSpaceClient(
 ): Promise<BuildSpaceClientResult> {
   const {
     root,
-    outDir = 'dist/client',
+    outDir = '.dist/client',
     globalCss = getGlobalCssPaths() ?? [],
-    routesDir = './routes',
+    clientEntry = getClientEntry(),
+    routesDir = getRoutesDir(),
     css,
     pwa,
     assetsDir = getAssetsDirConfig(),
@@ -219,7 +251,7 @@ export async function buildSpaceClient(
     minify = true,
     renderer = getActiveRenderer(),
     validation = getValidationConfig(),
-    sitemapLocations,
+    sitemapLocations: explicitSitemapLocations,
   } = options
 
   const comets = await discoverComets(root)
@@ -273,6 +305,24 @@ export async function buildSpaceClient(
   // and `head`/`redirect`, instead of a separate scan+import per concern.
   const discoveredPages = await discoverPages(routesDir)
 
+  // `defineSpaceApp({ sitemap: 'auto' })` derives its own entries from THIS SAME discovery pass —
+  // no second scan, no per-page declaration beyond what routing already captured. A literal array
+  // source resolves to `sitemapLocations` directly, no derivation needed. `explicitSitemapLocations`
+  // (this function's own public option) wins over either when a caller passes it — the one
+  // pre-existing way to exercise the SEO004/SEO006 cross-checks without a real `defineSpaceApp`
+  // declaration at all (a test, a script building against an app that never imported this
+  // function's own module). `sitemapEntries` below is returned (not merely used locally) only for
+  // the `'auto'` case — a literal array needs no build-output roundtrip, since production already
+  // registers that SAME array directly via `getSitemapDeclaration()`, never through a manifest.
+  const sitemapDeclaration = getSitemapDeclaration()
+  const autoSitemapEntries = sitemapDeclaration === 'auto'
+    ? deriveAutoSitemapEntries(discoveredPages)
+    : undefined
+  const declaredSitemapEntries = autoSitemapEntries ??
+    (Array.isArray(sitemapDeclaration) ? sitemapDeclaration : undefined)
+  const sitemapLocations = explicitSitemapLocations ??
+    declaredSitemapEntries?.map((entry) => entry.loc)
+
   // Validated from the SAME discovery result the CSS entries below are built from — one pass, one
   // view of the project. Run before Vite so a document problem is reported even when the bundle
   // would go on to fail for an unrelated reason.
@@ -291,10 +341,26 @@ export async function buildSpaceClient(
     ;(pageEntries[pageFilePath] ??= []).push({ entryName, media })
   }
 
+  // Always included, unlike `comets`/`globalCss`/page styles above — every app gets a real,
+  // built bootstrap chunk, whether that's `clientEntry`'s own override (realpath'd, same
+  // resolution `globalCss` entries already go through) or the auto-generated default (the virtual
+  // id itself, resolved by `clientEntryPlugin`'s own `resolveId`/`load` hooks below — never a real
+  // filesystem path, so it skips `Deno.realPath` entirely). A fixed literal entry name, not
+  // `toEntryName`-derived: there is only ever ONE client entry per build, and the virtual id isn't
+  // a real path `toEntryName`'s own `relative()` call could meaningfully resolve against `realRoot`
+  // anyway.
+  const resolvedClientEntry = clientEntry === undefined
+    ? CLIENT_ENTRY_VIRTUAL_ID
+    : await Deno.realPath(resolve(root, clientEntry))
+  input['client-entry'] = resolvedClientEntry
+
   // Zero comets, zero declared global CSS, no `pwa`, and no `assetsDir` configured is a valid (if
   // unusual) app state — a page whose entire UI renders server-side with nothing client-facing at
   // all — not an error. Confirmed empirically: Rollup itself throws `INVALID_OPTION` for an empty
-  // `input`, so this is a real guard, not defensive filler for a case that can't happen.
+  // `input`, so this is a real guard, not defensive filler for a case that can't happen. Now
+  // effectively unreachable in practice — `input` always carries at least the client-entry key
+  // above — kept as a harmless safety net rather than restructured, since removing it changes
+  // nothing observable.
   if (Object.keys(input).length === 0 && !pwa && !assetsDir) {
     return {
       comets,
@@ -372,6 +438,10 @@ export async function buildSpaceClient(
       },
     },
     plugins: [
+      // `clientEntryPlugin`'s own `enforce: 'pre'` is what actually guarantees it resolves the
+      // virtual default ahead of `deno()` — array position here doesn't matter, but it's listed
+      // first anyway for the same reason `dev-engine.ts` lists `nativeRuntimeModulesPlugin` first.
+      clientEntryPlugin({ renderer, entryId: resolvedClientEntry }),
       deno(),
       ...spacePlugin({ renderer }),
       cometPlugin({ knownEntryPaths: comets }),
@@ -401,5 +471,6 @@ export async function buildSpaceClient(
     outDir: resolvedOutDir,
     diagnostics: validationResult.diagnostics,
     validationSkipped: validationResult.skipped,
+    sitemapEntries: autoSitemapEntries,
   }
 }

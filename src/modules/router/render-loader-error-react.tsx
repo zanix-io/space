@@ -34,7 +34,10 @@ export function renderLoaderErrorResponse(
   // retry — the same `ErrorBoundaryProps` contract `SpaceErrorBoundary` already uses, just with
   // nothing (yet) for `reset` to meaningfully clear on the server.
   const outlet = (
-    <div style={{ display: 'contents' }} {...{ [ORBIT_OUTLET_ATTR]: '' }}>
+    // `display: contents` comes from `builtin-css.ts`'s own stylesheet rule, targeting this same
+    // `ORBIT_OUTLET_ATTR` selector — never an inline `style` prop here (a strict `style-src` with
+    // no `'unsafe-inline'` silently drops those).
+    <div {...{ [ORBIT_OUTLET_ATTR]: '' }}>
       <Fallback error={error} reset={() => {}} />
     </div>
   )

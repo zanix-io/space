@@ -6,6 +6,7 @@ import { applyDocumentShell } from 'modules/router/document-shell-preact.ts'
 import { renderToResponse } from 'modules/render/render-to-response-preact.ts'
 import { serializeHeadMarkup } from 'modules/render/head-markup.ts'
 import type { DocumentModel } from 'modules/render/document-model.ts'
+import { BUILTIN_CSS } from 'modules/render/builtin-css.ts'
 
 // This file covers the Preact document shell AFTER head placement moved out of it.
 //
@@ -237,15 +238,23 @@ Deno.test(
       }),
     )
 
-    assertStringIncludes(html, '<style nonce="theme-nonce">:root{--space-color-primary:#16a34a}')
-    assert(html.indexOf('/app.css') < html.indexOf('<style nonce='), html)
+    // The built-in stylesheet rule (see `builtin-css.ts`) is its OWN, earlier `<style>` tag —
+    // searching for the THEME tag's own exact content, not just the generic `<style nonce=`
+    // prefix both tags now share (same nonce, from the same model).
+    const themeStyleTag = '<style nonce="theme-nonce">:root{--space-color-primary:#16a34a}'
+    assertStringIncludes(html, themeStyleTag)
+    assert(html.indexOf('/app.css') < html.indexOf(themeStyleTag), html)
   },
 )
 
-Deno.test('END TO END: omitting themeStyle renders no <style> tag at all', async () => {
-  const html = await renderDocument(UncooperativeRootLayout, model({ cssHrefs: ['/app.css'] }))
-  assertFalse(html.includes('<style'), html)
-})
+Deno.test(
+  'END TO END: omitting themeStyle renders only the built-in stylesheet rule, never a theme <style> tag',
+  async () => {
+    const html = await renderDocument(UncooperativeRootLayout, model({ cssHrefs: ['/app.css'] }))
+    assertStringIncludes(html, `<style>${BUILTIN_CSS}</style>`)
+    assertFalse(html.includes(':root'), html)
+  },
+)
 
 Deno.test(
   'END TO END: the service-worker registration script lands at the end of <body>, nonced — the ' +

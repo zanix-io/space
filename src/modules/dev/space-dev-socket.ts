@@ -138,3 +138,42 @@ export function broadcastClientModuleChanged(urls: string[]): void {
     }
   }
 }
+
+/**
+ * Sends a `full-reload` notification to every currently-connected {@linkcode SpaceDevSocket} —
+ * the real, browser-facing counterpart of `SpaceDevEngine`'s `onFullReloadNeeded` callback
+ * (`@zanix/space`'s own bundler module, which only reports the event). Relays a REAL, previously
+ * unreachable signal: Vite's own dependency optimizer calls `environment.hot.send({ type:
+ * 'full-reload' })` internally whenever it needs to re-run mid-session (discovers a dependency it
+ * didn't know about during its first scan) — real Vite's own dev server relies on its own
+ * WebSocket/HMR channel to relay this to the browser, so the page reloads onto the now-settled,
+ * consistent dependency set. This engine never binds that channel to anything real (`Deno.serve()`
+ * is the only real listener — see `createSpaceDevEngine`'s own doc), so without this bridge, that
+ * signal went nowhere: a real, confirmed incident (a mid-session re-optimize left a page holding a
+ * STALE version-hash reference for one dependency, loading a second, duplicate module instance of
+ * it — confirmed for `@prefresh/core`, silently breaking Preact Fast-Refresh, no error, no
+ * automatic recovery, exactly the "not silently stuck" failure real Vite's own full-reload
+ * already exists to prevent).
+ *
+ * Deliberately its own message `kind`, not reused from `ssr-module-changed`/`client-module-changed`
+ * — this is a Vite-internal recovery signal, unrelated to any specific file changing, so it never
+ * carries `affectedRoutes`/`urls` the way those two do; `dev-client-script.ts`'s own handler
+ * reloads unconditionally, the same "no route/comet identity to compare against" case
+ * `routeFilePath: undefined` already covers for `ssr-module-changed`.
+ *
+ * Same no-op-when-nobody's-connected and skip-a-dead-socket behavior as
+ * {@linkcode broadcastSsrModuleChanged} — see that function's own doc for why.
+ */
+export function broadcastFullReloadNeeded(): void {
+  const sockets = ProgramModule.registry.array<SpaceDevSocket>(
+    CONNECTIONS_REGISTRY_KEY,
+  )
+  const payload = { kind: 'full-reload' }
+  for (const socket of sockets) {
+    try {
+      socket.push(payload)
+    } catch {
+      // Swallowed deliberately — see this function's own doc.
+    }
+  }
+}

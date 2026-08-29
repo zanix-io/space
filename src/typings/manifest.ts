@@ -191,6 +191,11 @@ export interface SpaceAppConfig {
    * `{messagesDir}/{lang}/populations/{population}.json` for a population override (only the keys
    * that differ from the base need to be present) — see `loadMessages()`'s own doc for the full
    * resolution/merge/caching contract.
+   *
+   * **Never overwritten by `zanix space build`.** Compiling this directory's ICU strings to AST
+   * writes to `{clientBuildDir}/messages/...` instead (when `clientBuildDir` is also set) —
+   * `messagesDir` itself stays the developer's own editable ICU source, in dev AND in a built
+   * project's own working copy. See `loadMessages()`'s own doc for the exact production read path.
    */
   messagesDir?: string | string[]
   /**
@@ -245,6 +250,33 @@ export interface SpaceAppConfig {
    * specifically for CSS a page's *initial* HTML needs before any component-level code runs.
    */
   globalCss?: StylesheetRef[]
+  /**
+   * Overrides this app's default, auto-generated client entry with a real source file of your
+   * own — e.g. `'./src/main.client.ts'`. **Omitting this is the normal, recommended case**: every
+   * app already gets `hydrateComets()`/`initOrbit()` wired automatically, with a correct CSP
+   * `nonce`, with zero configuration — that pair IS the entire client-side setup a Comet-based app
+   * ever needs (see `docs/comets.md`'s/`docs/orbit.md`'s own client-entry examples, unchanged).
+   * Set this ONLY when a project genuinely needs extra client-side code of its own — analytics, a
+   * global error handler, a service-worker registration not already covered by `pwa`. Your own
+   * file is then fully responsible for calling `hydrateComets()`/`initOrbit()` itself, exactly like
+   * today's documented example — this option REPLACES the auto-generated default, it doesn't
+   * compose with it.
+   *
+   * Same dev/prod duality as `globalCss`, resolved through the identical mechanism:
+   * - **In `znx space dev`**: resolves directly through `SpaceDevEngine`'s `transformClientAsset`
+   *   (an override) or `clientEntryPlugin`'s own `load` hook (the auto-generated default) — no
+   *   manifest file, no hashing, no build step involved either way.
+   * - **In production**: `clientEntryPlugin`'s own `client-entry-manifest.json` is this same
+   *   entry, translated to its real, hashed build-output URL. `buildSpaceClient()`
+   *   (`modules/bundler/build-client.ts`) always includes a `rollupOptions.input` entry for
+   *   whichever specifier `resolveClientEntrySpecifier()` (`modules/render/client-entry.ts`)
+   *   resolves to — the default virtual entry, or this override once configured.
+   *
+   * Unlike `globalCss` (a genuinely composable list across multiple `defineSpaceApp()` calls),
+   * this is a plain last-wins REPLACE — a host overriding a base app's own entry point discards
+   * the base app's own choice entirely, since there is no real "run two client entries" use case.
+   */
+  clientEntry?: string
   /**
    * App-wide default for every page's `headers` (CSP + security headers) — set once here instead
    * of repeating it on every page's own `Page({ headers })`/`static headers`. A specific page's own
@@ -315,16 +347,67 @@ export interface SpaceAppConfig {
    */
   pwa?: PwaConfig | false
   /**
+   * The client build's own output directory (e.g. `'./.dist/client'`, matching `zanix space
+   * build`'s own default `--out-dir`) — when set, this app's own `setup(ctx)` automatically loads
+   * every production manifest a real build wrote there (`loadCometManifest`,
+   * `loadClientEntryManifest`, `loadCssManifest`, `loadAssetsManifest`, `loadAssetsBuildOutput`,
+   * `loadPwaBuildOutput`, `loadSitemapManifest` (this last one only ever matters for
+   * `sitemap: 'auto'` above) — in that order, `loadPwaBuildOutput` before `loadSitemapManifest`
+   * since `registerPwa` reads its own build output back immediately afterward, same timing
+   * constraint that already applied when a `main.ts` called these by hand), so a production
+   * `main.ts` no longer has to call any of them itself.
+   *
+   * **Omitted entirely by default — no file is read, at zero cost**, same convention as
+   * `assetsDir`/`pwa`/`sitemap` above. Safe to set unconditionally in a `space.app.ts` a dev
+   * server also imports: this whole block is skipped entirely under `znx space dev`
+   * (`isDevClientEnabled()`) — NOT because a missing manifest file would be an error (each of the
+   * seven already tolerates that fine), but because a STALE one on disk very much isn't harmless. A
+   * real `zanix space build` and `znx space dev` commonly point at the same `clientBuildDir` on
+   * the same machine, and an earlier build's real output already sitting there is the common case
+   * during local development, not a rare one — loading it under dev would resolve every Comet to
+   * that OLD build's own hashed chunk names instead of the current source Vite is actually
+   * serving. Confirmed as a real failure, not hypothetical: a stale React-Compiler-transformed
+   * chunk from a previous build, loaded into a fresh dev session's own React instance, threw
+   * `Cannot read properties of null (reading 'useMemoCache')` on hydration.
+   *
+   * Still call any of the seven loaders yourself, directly, only for an unusual layout this option
+   * doesn't fit — e.g. a build output split across more than one directory. Setting this AND
+   * calling one of the seven loaders by hand for the same app double-loads that one manifest
+   * harmlessly (the second call simply overwrites the first with the same file's own contents).
+   */
+  clientBuildDir?: string
+  /**
    * `sitemap.xml`, registered as a real route (`GET /sitemap.xml`), not a build-time static file —
    * this stays SSR-native/edge-friendly, with no build step required. A plain array is resolved
-   * once, at zero per-request cost; a function runs fresh on EVERY request instead, so it always
-   * reflects whatever's actually live (a product catalog, a CMS) — an app that wants its own caching
-   * owns that itself, this package doesn't impose one. **Omitted entirely by default — no route
-   * registered, at zero cost**, same convention as `assetsDir`/`messagesDir`. See
-   * `buildSitemapXml`'s own doc (`modules/seo/sitemap.ts`) for the exact XML contract: proper
+   * once, at zero per-request cost; a function is invoked once and its result cached for the
+   * process lifetime, so it always reflects whatever was live at the last process start (a product
+   * catalog, a CMS) without repeating that work on every crawler hit — an app that needs
+   * sub-restart freshness owns that itself, this package doesn't impose one. **Omitted entirely by
+   * default — no route registered, at zero cost**, same convention as `assetsDir`/`messagesDir`.
+   * See `buildSitemapXml`'s own doc (`modules/seo/sitemap.ts`) for the exact XML contract: proper
    * escaping, only standard tags in the `urlset`, and correct per-language cross-referencing.
+   *
+   * `'auto'` derives entries from this app's own static route tree instead of a hand-written
+   * source: every discovered page whose route carries no dynamic segment, declares no
+   * unconditional `redirect`, and whose resolved head carries no `noindex` — the same static
+   * discovery `zanix space build`/`zanix space dev` already run for document validation, so no
+   * per-page declaration is needed beyond what routing itself already captures. A route needing
+   * entries this can't derive (a dynamic segment backed by a database, a custom priority/
+   * `changefreq`) still uses an explicit array or function instead — `'auto'` only ever replaces
+   * the "no sitemap at all" case, never composes with a hand-written one. One exception: a route
+   * whose ONLY dynamic segment is `langPreHandler`'s own registered `:lang` param still qualifies
+   * (when `langPreHandler` is registered), expanding into one entry per `availableLangs` instead of
+   * being excluded. See `deriveAutoSitemapEntries`'s own doc (`modules/bundler/auto-sitemap.ts`) for
+   * exactly which pages qualify.
+   *
+   * `zanix space build` writes derived `'auto'` entries to `{outDir}/sitemap-manifest.json` —
+   * **production only reads that back when `clientBuildDir` (below) is also set**, since that's
+   * the only place `setup()` calls `loadSitemapManifest` automatically. Without `clientBuildDir`,
+   * call `loadSitemapManifest` yourself from `main.ts` (see that function's own doc,
+   * `modules/seo/sitemap-manifest.ts`) — omitting both means `GET /sitemap.xml` never registers in
+   * production at all, even though a real build already derived the entries.
    */
-  sitemap?: SitemapSource
+  sitemap?: SitemapSource | 'auto'
   /**
    * `robots.txt`, registered as a real route (`GET /robots.txt`). A raw `string` is served
    * byte-for-byte, no processing; a structured `{ rules, includeSitemap? }` config auto-appends a

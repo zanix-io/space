@@ -68,8 +68,18 @@ const ASSETS_ROUTE = '/assets/:path*'
  * genuine HTTP request can never itself carry an unresolved `../` this far (`@zanix/server`'s own
  * `new URL(req.url).pathname` already resolves every dot segment, including percent-encoded ones,
  * before any route ever matches).
+ *
+ * The return type spells `serve` out explicitly rather than leaving it to `ZanixSsrController`
+ * alone: that base class never declares `serve` itself (each subclass does), so accessing it
+ * through the plain `ZanixSsrController` type falls back to `HandlerBaseClass`'s own index
+ * signature — a union that also covers non-callable members (`_znx_props_` and friends), which
+ * makes the whole access uncallable as far as the type checker is concerned. This intersection is
+ * additive only (every real caller still gets a plain `ZanixSsrController`); `define-space-app.ts`
+ * discards the return value entirely, so it is unaffected.
  */
-export function registerAssets(): new (ctx: HandlerContext) => ZanixSsrController {
+export function registerAssets(): new (ctx: HandlerContext) => ZanixSsrController & {
+  serve(ctx: HandlerContext): Promise<Response>
+} {
   class AssetsRoute extends ZanixSsrController {
     public async serve(ctx: HandlerContext): Promise<Response> {
       const relativePath = ctx.payload.params.path as string
@@ -77,13 +87,18 @@ export function registerAssets(): new (ctx: HandlerContext) => ZanixSsrControlle
       const buildOutputDir = getAssetsBuildOutput()
       if (buildOutputDir) {
         try {
+          // The hash IS the filename — a match here means the exact same bytes this browser
+          // already has, no exception. Checked BEFORE `Deno.readFile` below (same order
+          // `space-page-controller.ts`'s own `if-none-match` check already follows), so a cache
+          // hit skips the disk read entirely, not just the response body.
+          const etag = `"${relativePath}"`
+          const headers = { 'cache-control': 'public, max-age=31536000, immutable', etag }
+          if (ctx.req.headers.get('if-none-match') === etag) {
+            return new Response(null, { status: 304, headers })
+          }
           const bytes = await Deno.readFile(confinePath(`${buildOutputDir}/assets`, relativePath))
           return new Response(bytes, {
-            headers: {
-              'content-type': contentTypeFor(relativePath),
-              'cache-control': 'public, max-age=31536000, immutable',
-              etag: `"${relativePath}"`,
-            },
+            headers: { ...headers, 'content-type': contentTypeFor(relativePath) },
           })
         } catch (error) {
           const isBlockedTraversal = error instanceof ApplicationError &&

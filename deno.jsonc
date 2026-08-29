@@ -1,16 +1,16 @@
 {
   "name": "@zanix/space",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "zanix": {
     "project": "library"
   },
-  "links": [],
+  "links": ["../server", "../utils"],
   "compilerOptions": {
     "strict": true,
     "noImplicitAny": true,
     "jsx": "react-jsx",
     "jsxImportSource": "react",
-    "types": []
+    "types": ["../utils/src/typings/index.d.ts"]
   },
   "lint": {
     "rules": {
@@ -125,6 +125,21 @@
     // `spacePlugin`'s own doc for what that difference means downstream.
     "preact": "npm:preact@^10.29.0",
     "@preact/preset-vite": "npm:@preact/preset-vite@^2.10.6",
+    // `@preact/preset-vite`'s own transitive Fast-Refresh dependencies — never imported by a bare
+    // specifier from this package's own source (only ever reached via absolute `/@fs/...` paths in
+    // a Comet's own dev-transformed output), but declared explicitly anyway: `space-plugin.ts`'s
+    // own `optimizeDeps.include` (preact branch) names both, and Vite/esbuild's dependency
+    // optimizer can only resolve a bare specifier there through a REAL, top-level
+    // `node_modules/@prefresh/*` entry — confirmed empirically (`Failed to resolve dependency:
+    // @prefresh/core` when this entry was absent) that Deno's own `node_modules/.deno` flattening
+    // never hoists a transitive-only dependency like this to that top level on its own, same
+    // "every used specifier needs its own explicit declaration" rule already documented for
+    // `preact/hooks`. Needed for a real, confirmed correctness bug, not just the discovery-scan
+    // race the OTHER preact entries guard against — see `space-plugin.ts`'s own doc for the full
+    // "two different `@prefresh/core` instances split Prefresh's own re-render tracking in two"
+    // mechanism this closes.
+    "@prefresh/core": "npm:@prefresh/core@^1.5.10",
+    "@prefresh/utils": "npm:@prefresh/utils@^1.2.1",
     // Preact's own official SSR renderer — confirmed via this package's own decision spike to
     // support real, synchronous server rendering (`render`) and, separately, error boundaries
     // (`options.errorBoundaries`, see `error-boundary-preact.ts`'s own doc) without needing
@@ -241,6 +256,20 @@
     "./vite/media": "./src/modules/bundler/media-plugin.ts",
     "./client": "./src/modules/client/mod.ts",
     "./client/preact": "./src/modules/client/mod-preact.ts",
+    // Was `defineComet`/`loadCometManifest`/`resolveCometModuleUrl` re-exported from `.` (`mod.ts`)
+    // itself. Moved here because `.` ALSO carries genuinely server/dev-only code elsewhere in the
+    // SAME file (`defineSpaceApp`, and `SpaceDevSocket` — a real TC39-decorated class Vite's
+    // normal transform can't parse at all) — a real browser bundling a Comet's own
+    // `import { defineComet } from '@zanix/space'` has to resolve `.`'s ENTIRE export graph, not
+    // just the one symbol it asked for (a plain ES barrel resolves every one of its own export
+    // statements' source files regardless of which named symbol a consumer actually imports — the
+    // same reasoning `./vite/assets`/`./vite/media`'s own comment already establishes for a
+    // different barrel). Confirmed empirically as a real, hard client-build failure
+    // (`SpaceDevSocket`'s own decorator syntax, plus `@zanix/server`/`@zanix/app` — both needed by
+    // `defineSpaceApp`, neither resolvable in a browser context), not a theoretical gap.
+    // `modules/comets/mod.ts` itself needs no changes — it already only ever touched
+    // Comet-relevant code, so this subpath is that same file, exposed under its own name.
+    "./comet": "./src/modules/comets/mod.ts",
     "./testing": "./src/modules/testing/mod.ts",
     "./dev": "./src/modules/dev/mod.ts",
     // Both already re-exported from `.` (`mod.ts`) — these two narrow subpaths exist so a

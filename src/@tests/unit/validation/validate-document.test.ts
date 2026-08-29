@@ -1,5 +1,5 @@
-import { assertEquals } from '@std/assert'
-import { validateDocuments } from 'modules/validation/validate-document.ts'
+import { assertEquals, assertFalse } from '@std/assert'
+import { isNoindex, validateDocuments } from 'modules/validation/validate-document.ts'
 import type { StaticAppInput, StaticPageInput } from 'modules/validation/validate-document.ts'
 import type { ResolvedHead } from 'modules/router/head-descriptor.ts'
 import type { ValidationConfig } from 'modules/validation/engine.ts'
@@ -188,6 +188,22 @@ Deno.test('SEO004: noindex plus a sitemap entry for the same route is a contradi
     { sitemapLocations: ['/secret'], knownRoutes: ['secret'] },
   )
   assertEquals(found.includes('SEO004'), true)
+})
+
+Deno.test('isNoindex: true when the robots meta carries a noindex token', () => {
+  assertEquals(isNoindex(head({ meta: [{ name: 'robots', content: 'noindex' }] })), true)
+})
+
+Deno.test('isNoindex: true when noindex is one of several comma-separated tokens', () => {
+  assertEquals(isNoindex(head({ meta: [{ name: 'robots', content: 'noindex, nofollow' }] })), true)
+})
+
+Deno.test('isNoindex: false when robots is present but never declares noindex', () => {
+  assertFalse(isNoindex(head({ meta: [{ name: 'robots', content: 'index, follow' }] })))
+})
+
+Deno.test('isNoindex: false when the page declares no robots meta at all', () => {
+  assertFalse(isNoindex(head()))
 })
 
 // --- open graph (opt-in) --------------------------------------------------------------------------

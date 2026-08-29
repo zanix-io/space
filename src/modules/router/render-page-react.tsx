@@ -1,10 +1,12 @@
 import type { ComponentType, ReactElement, ReactNode } from 'react'
 import { Fragment, Suspense } from 'react'
+import { resolve } from '@std/path'
 import type { ClassConstructor } from '@zanix/server'
 import type { ErrorBoundaryProps, LayoutProps, PageContext } from 'typings/page.ts'
 import logger from '@zanix/logger'
 import { renderToResponse } from '../render/render-to-response.tsx'
 import { resolveCssHrefs, resolvePageCssHrefs } from '../render/css-manifest.ts'
+import { resolveClientEntryUrl } from '../render/client-entry.ts'
 import { resolvePwaHead } from '../pwa/pwa-registry.ts'
 import { isDevClientEnabled } from '../dev/dev-client-registry.ts'
 import { SpaceErrorBoundary } from './error-boundary.tsx'
@@ -134,10 +136,13 @@ async function composeSegments<Params>(
     }
   }
 
-  // `display: contents` so this outlet never breaks a root layout's own `display: grid`/`flex`
-  // layout by inserting an extra box between it and its real children.
+  // `display: contents` (so this outlet never breaks a root layout's own `display: grid`/`flex`
+  // layout by inserting an extra box between it and its real children) comes from
+  // `builtin-css.ts`'s own stylesheet rule, targeting this same `ORBIT_OUTLET_ATTR` selector —
+  // never an inline `style` prop here. See that module's own doc for why: a strict `style-src`
+  // with no `'unsafe-inline'` silently drops an inline `style` ATTRIBUTE (nonces don't cover it).
   const outlet = (
-    <div style={{ display: 'contents' }} {...{ [ORBIT_OUTLET_ATTR]: '' }}>
+    <div {...{ [ORBIT_OUTLET_ATTR]: '' }}>
       {node}
     </div>
   )
@@ -253,6 +258,11 @@ export async function renderPageResponse<Params>(
   // the SAME resolution helpers `render-page-preact.ts` calls, in the same order, so both renderers
   // start from identical inputs and differ only in how they serialize them. Never built for a
   // fragment: a fragment is not a document and has no `<head>` for any of this to live in.
+  const rawRouteFilePath = getPageTree(Target)?.filePath
+  // Always at least the auto-generated default (`hydrateComets()`/`initOrbit()`) — see
+  // `client-entry.ts`'s own doc. `undefined` only if a production response is served before its
+  // own `loadClientEntryManifest()` call ever ran.
+  const clientEntryUrl = resolveClientEntryUrl()
   const document: DocumentModel | undefined = fragmentOnly ? undefined : {
     head,
     // Global first, then this page's own — preserves cascade order (global → page → comet; a
@@ -264,7 +274,18 @@ export async function renderPageResponse<Params>(
     pwa: resolvePwaHead(),
     nonce,
     initialState: data,
-    devClient: isDevClientEnabled() ? { routeFilePath: getPageTree(Target)?.filePath } : undefined,
+    bootstrapModules: clientEntryUrl ? [clientEntryUrl] : undefined,
+    // Resolved to an ABSOLUTE path here, not passed through as `getPageTree(Target)?.filePath`
+    // reports it (relative to whatever `routesDir` an app declared, e.g. `'./src/routes'`) —
+    // `dev-client-script.ts`'s own browser-side `handleSsrModuleChanged` compares this directly
+    // against `SsrModuleChangedEvent.affectedRoutes`, which is always ABSOLUTE (Vite's own module
+    // graph node ids/`ctx.file` never report a relative path). Left un-resolved, that comparison
+    // silently never matches for ANY page — a real, confirmed regression: `location.reload()`
+    // never firing on its own SSR change, forcing a manual refresh every time, in EVERY project
+    // regardless of renderer.
+    devClient: isDevClientEnabled()
+      ? { routeFilePath: rawRouteFilePath && resolve(rawRouteFilePath) }
+      : undefined,
   }
 
   // `renderToResponse`'s own default (no `onError`) is silent — this is the one place a
@@ -291,6 +312,7 @@ export async function renderPageResponse<Params>(
       meta: document.head.meta,
       link: document.head.link,
       devClient: document.devClient,
+      bootstrapModules: document.bootstrapModules,
     },
   )
 }

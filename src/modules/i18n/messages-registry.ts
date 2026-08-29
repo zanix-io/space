@@ -40,3 +40,32 @@ export function resetMessagesDir(): void {
 export function getMessagesDir(): string | string[] | undefined {
   return messagesDir
 }
+
+/** Mirrors `SpaceAppConfig.clientBuildDir`'s own value — set eagerly, alongside `messagesDir`
+ * itself, by `defineSpaceApp()` (see `define-space-app.ts`'s own comment at that call site for why
+ * this is a plain copy rather than a shared registry: `clientBuildDir`'s own consumption inside
+ * `setup()` is a separate, established code path this deliberately doesn't touch). A SEPARATE
+ * module-level value from `clientBuildDir` itself, not a re-export of it — kept local to this
+ * module so `loadMessages()`'s own resolution logic (`load-messages.ts`) never needs to import
+ * anything client-build-specific. */
+let messagesBuildDir: string | undefined
+
+/** Set once, eagerly, by `defineSpaceApp()` itself — never called directly by application code. */
+export function setMessagesBuildDir(dir: string): void {
+  messagesBuildDir = dir
+}
+
+/** Test-only escape hatch — mirrors `resetMessagesDir`'s own reasoning. Not exported from this
+ * package's public entry points. */
+export function resetMessagesBuildDir(): void {
+  messagesBuildDir = undefined
+}
+
+/** Where `zanix space build` compiled this app's `messagesDir` catalogs to (mirrors
+ * `clientBuildDir`), or `undefined` if this app never declared `clientBuildDir`. Read by
+ * `loadMessages()`'s own `resolve()` to decide whether to read compiled output instead of live
+ * source — see that function's own doc for the exact `!isDevClientEnabled()` gating, identical to
+ * `clientBuildDir`'s own dev-skip condition. */
+export function getMessagesBuildDir(): string | undefined {
+  return messagesBuildDir
+}

@@ -20,8 +20,13 @@ the only setup left is loading the manifest the build wrote:
 // main.ts — after activateApps(), before bootstrapServers(), same convention as loadCometManifest
 import { loadCssManifest } from '@zanix/space'
 
-await loadCssManifest('./dist/client/css-manifest.json')
+await loadCssManifest('./.dist/client/css-manifest.json')
 ```
+
+Set `defineSpaceApp({ clientBuildDir: './.dist/client' })` instead to skip this (and every other
+production manifest load — Comets, client entry, assets, PWA, sitemap) entirely: `setup()` calls
+`loadCssManifest` automatically from there, in production only (`znx space dev` never touches it).
+See `SpaceAppConfig.clientBuildDir`'s own doc for the exact ordering and dev/prod split.
 
 `cssPlugin()` writes `css-manifest.json` next to the client build's other assets, listing every
 built stylesheet's real, hashed URL; `loadCssManifest` reads it back so a full-document response
@@ -77,9 +82,9 @@ layout → root inheritance) — only a page's own direct declaration resolves t
 
 **Per component**, a Comet's own `*.module.css` import is scoped automatically — no config, no field
 to declare. `cssPlugin` correlates each Comet's build entry to the CSS it actually imports; a
-Comet's stylesheet ships only on a page that renders that Comet, never globally. This is what fixed
-a real bug: before this correlation existed, `generateBundle` swept every built `.css` asset into
-one flat global list, so a Comet used on one page out of fifty shipped its CSS on all fifty.
+Comet's stylesheet ships only on a page that renders that Comet, never globally — never swept into
+one flat global list the way a naive `generateBundle` asset scan would, which would ship a Comet
+used on one page out of fifty to all fifty.
 
 All three levels render under the same cascade, in the same order: **global → page → comet** — a
 page's stylesheet can override a global rule, a Comet's can override a page's, following ordinary
@@ -160,8 +165,11 @@ third-party config, not maintained by Tailwind Labs itself.
 `SpacePageController`'s Orbit outlet and every Comet boundary are already targetable with plain CSS
 attribute selectors — `[data-space-outlet]`, `[data-comet]`, `[data-comet-strategy="visible"]` — no
 override prop needed, a direct benefit of CSS being fully static, with no runtime class computation
-to override. Both wrappers default to `display: contents` inline, so they never break a parent
-`display: grid`/`flex` layout by inserting an extra box — override with more specific CSS if a real
+to override. Both wrappers default to `display: contents` via a real, `nonce`'d `<style>` rule
+emitted once in every full-document response — never an inline `style` attribute on the element
+itself, which a strict `style-src` CSP (no `'unsafe-inline'`) silently drops — so they never break a
+parent `display: grid`/`flex` layout by inserting an extra box. Override with more specific CSS
+(normal cascade rules apply, since this is a real stylesheet rule, not an inline style) if a real
 box is genuinely needed there.
 
 **Fonts and other critical resources**: use `react-dom`'s own `preload`/`preinit`/`preconnect`

@@ -1,8 +1,7 @@
 import type { Plugin } from 'vite'
-import { basename } from '@std/path'
 import type { CometManifest } from '../comets/comet-manifest.ts'
 import { USE_COMET_DIRECTIVE } from './comet-directive.ts'
-import { SERVER_ONLY_DIRECTIVE } from './server-only-directive.ts'
+import { formatServerOnlyViolation, SERVER_ONLY_DIRECTIVE } from './server-only-directive.ts'
 
 // `Plugin` is not re-exported here — same accepted `deno doc --lint` finding, for the same reason,
 // as `spacePlugin`'s own (see that file's own comment): it's a deeply recursive Vite/Rolldown
@@ -114,17 +113,6 @@ async function findChainToComet(
   }
 
   return null
-}
-
-/** Renders the violation exactly as a developer needs to fix it — the offending Comet first, the
- * `'server-only'` module last, everything in between the real reason it got pulled in. Uses each
- * file's own basename (never the full, often temp-dir-cluttered absolute path) — a chain is only
- * ever a handful of modules deep in practice, so the basenames alone are enough to locate the fix. */
-function formatServerOnlyViolation(chain: string[]): string {
-  const names = chain.map((id) => basename(id))
-  const [head, ...rest] = names
-  const lines = [head, ...rest.map((name, i) => `${'  '.repeat(i + 1)}→ ${name}`)]
-  return `Server-only module imported into client Comet:\n\n${lines.join('\n')}`
 }
 
 /**

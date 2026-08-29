@@ -193,7 +193,7 @@ directive, a named export, and its own `import.meta.url`:
 ```tsx
 // comets/counter.tsx
 'use comet'
-import { defineComet } from '@zanix/space'
+import { defineComet } from '@zanix/space/comet'
 
 export function Counter({ initial }: { initial: number }) {
   const [count, setCount] = useState(initial)
@@ -215,8 +215,11 @@ cross-navigation state persistence (`persist`), and the build-time `'server-only
 
 ### Client-side navigation ("Orbit")
 
+Already on by default — every app's auto-generated client entry calls `initOrbit()` alongside
+`hydrateComets()`, no configuration needed:
+
 ```ts
-// client entry — call once, alongside hydrateComets()
+// your own client entry, only if you set SpaceAppConfig.clientEntry
 import { initOrbit } from '@zanix/space/client'
 
 initOrbit()
@@ -268,11 +271,25 @@ export default defineSpaceApp({ name: 'storefront', messagesDir: './messages' })
 
 ```tsx
 import { loadMessages } from '@zanix/space'
+import { IntlProvider, useIntl } from '@zanix/space-ui'
 
 loader = async (ctx: { params: { lang: string }; population?: string }) => ({
+  lang: ctx.params.lang,
   messages: await loadMessages({ lang: ctx.params.lang, population: ctx.population }),
 })
-component = ({ messages }) => <h1>{messages['home/title']}</h1>
+// NEVER interpolate `messages[key]` directly — once `zanix space build` compiles this app's
+// `messagesDir`, a catalog value is precompiled AST, not a plain string, and rendering it as a
+// JSX child crashes at runtime. Always format through `IntlProvider`/`useIntl` (below), which
+// accepts either shape.
+component = ({ lang, messages }) => (
+  <IntlProvider locale={lang} messages={messages}>
+    <PageContent />
+  </IntlProvider>
+)
+function PageContent() {
+  const { formatMessage } = useIntl()
+  return <h1>{formatMessage('home/title')}</h1>
+}
 ```
 
 Reads `{messagesDir}/{lang}/index.json` (a base catalog) and, when `population` is given, an

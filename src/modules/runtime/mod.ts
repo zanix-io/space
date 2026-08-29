@@ -8,3 +8,6 @@ export { defineSpaceApp } from './define-space-app.ts'
 // referenced public types must themselves be public.
 export type { ZanixAppDefinition } from '@zanix/app/runtime'
 export { ZANIX_APP_DEFINITION_BRAND } from '@zanix/app/runtime'
+export { defineBootstrapSpaceAppConfig } from './define-bootstrap-space-app-config.ts'
+export { getBootstrapSpaceAppConfig } from './bootstrap-config-registry.ts'
+export type { BootstrapRemoteAppOptions } from '@zanix/app/runtime'

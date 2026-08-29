@@ -126,6 +126,54 @@ Deno.test(
           assert(
             event.affectedRoutes.some((route) => route.endsWith('page.tsx')),
           )
+          // The route file itself, not a Comet — a connected browser genuinely needs a fresh
+          // document for this one, so this must stay `false`; see `isComet`'s own doc.
+          assertEquals(event.isComet, false)
+        } finally {
+          await engine.close()
+        }
+      },
+    )
+  },
+)
+
+Deno.test(
+  'createSpaceDevEngine: onSsrModuleChanged reports isComet: true for a Comet edit — reachable ' +
+    "from the ssr environment too (its initial HTML is server-rendered), but a connected browser's " +
+    'own reload should defer to the separate onClientModuleChanged update instead',
+  async () => {
+    await withTempProject(
+      async (root) => {
+        await Deno.writeTextFile(
+          join(root, 'counter.tsx'),
+          `'use comet'\nexport const marker = 'v1'\n`,
+        )
+        await Deno.writeTextFile(
+          join(root, 'page.tsx'),
+          `export { marker } from './counter.tsx'\n`,
+        )
+      },
+      async (root) => {
+        const events: SsrModuleChangedEvent[] = []
+        const engine = await createSpaceDevEngine({
+          root,
+          isRouteEntry,
+          onSsrModuleChanged: (event) => events.push(event),
+        })
+        try {
+          await engine.ssrLoadModule('/page.tsx') // establish the module graph before editing
+
+          await Deno.writeTextFile(
+            join(root, 'counter.tsx'),
+            `'use comet'\nexport const marker = 'v2'\n`,
+          )
+
+          const event = await waitUntil(() => events.find((e) => e.file.endsWith('counter.tsx')))
+          assert(
+            event.affectedRoutes.some((route) => route.endsWith('page.tsx')),
+            'a Comet edit must still resolve to its own host route, same as any other dependency',
+          )
+          assertEquals(event.isComet, true)
         } finally {
           await engine.close()
         }
@@ -288,6 +336,91 @@ Deno.test(
             threw,
             'transformClientAsset should reject for a real syntax error',
           )
+        } finally {
+          await engine.close()
+        }
+      },
+    )
+  },
+)
+
+Deno.test(
+  "createSpaceDevEngine: transformClientAsset rejects a 'server-only' module reached from a " +
+    "Comet — the dev-mode counterpart to cometPlugin's own build-time enforcement",
+  async () => {
+    await withTempProject(
+      async (root) => {
+        await Deno.writeTextFile(
+          join(root, 'server-secret.ts'),
+          `'server-only'\nexport const secret = 'do-not-ship-me'\n`,
+        )
+        await Deno.writeTextFile(
+          join(root, 'example.comet.tsx'),
+          [
+            `'use comet'`,
+            `import { secret } from './server-secret.ts'`,
+            `export default function ExampleComet() { return secret as unknown as JSX.Element }`,
+            '',
+          ].join('\n'),
+        )
+      },
+      async (root) => {
+        const engine = await createSpaceDevEngine({ root, isRouteEntry })
+        try {
+          // The Comet must be transformed FIRST — that's what makes Vite's own dev module graph
+          // discover (and record) that `server-secret.ts` is imported BY it, the same "importers
+          // get populated as each request is processed" model this whole check relies on (see
+          // `findDevChainToComet`'s own doc in `dev-engine.ts`).
+          await engine.transformClientAsset('/example.comet.tsx')
+
+          let thrown: Error | undefined
+          try {
+            await engine.transformClientAsset('/server-secret.ts')
+          } catch (error) {
+            thrown = error as Error
+          }
+
+          assert(thrown, "expected transformClientAsset to reject 'server-secret.ts'")
+          assert(
+            thrown.message.includes('Server-only module imported into client Comet'),
+            thrown.message,
+          )
+          assert(thrown.message.includes('example.comet.tsx'), thrown.message)
+          assert(thrown.message.includes('server-secret.ts'), thrown.message)
+        } finally {
+          await engine.close()
+        }
+      },
+    )
+  },
+)
+
+Deno.test(
+  "createSpaceDevEngine: transformClientAsset rejects a 'server-only' module even with no known " +
+    'Comet importer yet — merely being requested through the CLIENT environment at all is ' +
+    'already the violation; a confirmed Comet ancestor only improves the error message, never ' +
+    'gates whether to throw (mirrors real dev traffic: nothing legitimate ever reaches a ' +
+    "'server-only' file this way except a Comet)",
+  async () => {
+    await withTempProject(
+      async (root) => {
+        await Deno.writeTextFile(
+          join(root, 'server-secret.ts'),
+          `'server-only'\nexport const secret = 'do-not-ship-me'\n`,
+        )
+      },
+      async (root) => {
+        const engine = await createSpaceDevEngine({ root, isRouteEntry })
+        try {
+          let thrown: Error | undefined
+          try {
+            await engine.transformClientAsset('/server-secret.ts')
+          } catch (error) {
+            thrown = error as Error
+          }
+
+          assert(thrown, "expected transformClientAsset to reject 'server-secret.ts'")
+          assert(thrown.message.includes('server-secret.ts'), thrown.message)
         } finally {
           await engine.close()
         }
@@ -860,6 +993,20 @@ Deno.test(
             asset.contentType,
             'application/javascript; charset=utf-8',
           )
+          // This first call is a cold start for the `client` environment's own dependency
+          // optimizer (the ONLY place in this file that exercises it — every other bare-specifier
+          // test goes through the SSR-only canonical resolver instead, which never touches Vite's
+          // real optimizer at all): resolving `react` triggers a crawl-end/commit cycle that keeps
+          // running in Vite's own background after `transformRequest` already returned, normally
+          // settled by a real browser's HMR reconnect-and-retry — never by a one-shot
+          // `transformClientAsset` call like this one. Closing the engine before that cycle
+          // settles leaves one of Vite's own internal promises permanently pending (confirmed via
+          // `DEBUG=vite:deps` — the resolve itself completes fast and cleanly; a real hang/dangling
+          // promise only starts to show up right after), which `deno test`'s own event-loop check
+          // then reports as `Promise resolution is still pending`. A brief pause here — long
+          // enough for that cycle to settle, well under this file's own per-test cost — is the
+          // fix; `close()` itself has nothing to do with it.
+          await new Promise((resolve) => setTimeout(resolve, 300))
         } finally {
           await engine.close()
         }

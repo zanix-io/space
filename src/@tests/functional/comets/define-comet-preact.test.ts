@@ -6,9 +6,10 @@ import { assert, assertEquals, assertFalse } from '@std/assert'
 import { createElement } from 'preact'
 import { useState } from 'preact/hooks'
 import { defineComet } from 'modules/comets/define-comet.ts'
-import { setCometManifest } from 'modules/comets/comet-manifest.ts'
+import { hashSourceKey, setCometManifest } from 'modules/comets/comet-manifest.ts'
 import { parseCometProps } from 'modules/render/serialization-codec.ts'
 import { setCssManifest } from 'modules/render/css-manifest.ts'
+import { BUILTIN_CSS } from 'modules/render/builtin-css.ts'
 import { setActiveRenderer } from 'modules/router/active-renderer.ts'
 import { renderToResponse as renderToResponsePreact } from 'modules/render/render-to-response-preact.ts'
 // The Preact entry point, imported for its installation side effect — the same line a real
@@ -132,7 +133,7 @@ Deno.test(
         createElement(Comet as never, { label: 'b', comet: 'visible' }),
       )
 
-      assert(html.includes(`data-comet="${WIDGET_SOURCE_URL}"`), html)
+      assert(html.includes(`data-comet="${hashSourceKey(WIDGET_KEY)}"`), html)
       assert(html.includes('data-comet-strategy="visible"'), html)
       assert(html.includes('data-comet-module="/assets/preact-widget-hash.js"'), html)
       assert(html.includes('data-comet-export="Widget"'), html)
@@ -398,17 +399,21 @@ Deno.test(
         'react',
       )
       const Comet = defineComet(ReactWidget, WIDGET_SOURCE_URL)
+      // `cssHrefs: []` — simulates a real full-document call, the same signal
+      // `render-to-response.tsx` gates the built-in stylesheet rule on (see its own doc).
       const response = await renderToResponseReact(
         createElementReact(Comet as never, { label: 'react', comet: 'visible' }),
+        { cssHrefs: [] },
       )
       const html = stripHydrationComments(await response.text())
 
-      assert(html.includes(`data-comet="${WIDGET_SOURCE_URL}"`), html)
+      assert(html.includes(`data-comet="${hashSourceKey(WIDGET_KEY)}"`), html)
       assert(html.includes('data-comet-strategy="visible"'), html)
       assert(html.includes('data-comet-module="/assets/preact-widget-hash.js"'), html)
       assert(html.includes('data-comet-export="ReactWidget"'), html)
       assert(html.includes('data-comet-props="{&quot;label&quot;:&quot;react&quot;}"'), html)
-      assert(html.includes('style="display:contents"'), html)
+      assert(html.includes(BUILTIN_CSS), html)
+      assertFalse(html.includes('style="display:contents"'), html)
       assert(html.includes('<span class="widget">widget:react</span>'), html)
     } finally {
       reset()

@@ -30,7 +30,10 @@ export function renderNotFoundResponse(
 
   const View = NotFound as ComponentType
   const outlet = (
-    <div style={{ display: 'contents' }} {...{ [ORBIT_OUTLET_ATTR]: '' }}>
+    // `display: contents` comes from `builtin-css.ts`'s own stylesheet rule, targeting this same
+    // `ORBIT_OUTLET_ATTR` selector — never an inline `style` prop here (a strict `style-src` with
+    // no `'unsafe-inline'` silently drops those).
+    <div {...{ [ORBIT_OUTLET_ATTR]: '' }}>
       <View />
     </div>
   )

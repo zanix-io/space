@@ -18,6 +18,27 @@ export function normalizeSourceKey(sourceUrl: string): string {
 }
 
 /**
+ * A small, fast, non-cryptographic hash (FNV-1a, 32-bit, as 8 lowercase hex digits) of a comet's
+ * own {@linkcode normalizeSourceKey} value — used by `define-comet.ts` as `COMET_ID_ATTR`'s
+ * (`data-comet`) public HTML value instead of the raw absolute source path, which would otherwise
+ * put the server's local filesystem layout (and, on a non-containerized deploy, its OS username)
+ * into every page's rendered HTML — confirmed as a real disclosure, not theoretical, by directly
+ * inspecting a real build's output. Not a security hash: collision resistance across an
+ * adversarial input isn't the goal, only a stable, deterministic value for the same comet across
+ * renders (the same property the raw path already had) — a real project's comet count is far too
+ * small for an accidental collision to be a practical concern. Sync on purpose, since
+ * `defineComet` computes this at render time, never behind an `await`.
+ */
+export function hashSourceKey(sourceKey: string): string {
+  let hash = 0x811c9dc5
+  for (let i = 0; i < sourceKey.length; i++) {
+    hash ^= sourceKey.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0')
+}
+
+/**
  * Loads the manifest `cometPlugin` writes during a production client build (`comets-manifest.json`
  * in the client build's output directory), so `defineComet` can resolve each comet's real,
  * hashed client URL instead of the raw source location it only knows from `import.meta.url`.
@@ -50,6 +71,14 @@ export async function loadCometManifest(path: string): Promise<void> {
  * touching the filesystem. Not exported from this package's public entry points. */
 export function setCometManifest(value: CometManifest | undefined): void {
   manifest = value
+}
+
+/** The currently loaded manifest, or `undefined` if {@linkcode loadCometManifest} was never
+ * called — production only, same "was a real build's manifest loaded" signal `css-manifest.ts`'s
+ * own {@linkcode getCssManifest} provides for CSS. Read by `define-space-app.ts`'s own
+ * `assetsDir`-missing warning (see that file's own doc for why). */
+export function getCometManifest(): CometManifest | undefined {
+  return manifest
 }
 
 /**

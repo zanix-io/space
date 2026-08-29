@@ -61,9 +61,14 @@ separately:
 // loadCssManifest/loadCometManifest/loadPwaBuildOutput
 import { loadAssetsBuildOutput, loadAssetsManifest } from '@zanix/space'
 
-await loadAssetsManifest('./dist/client/assets-manifest.json')
-loadAssetsBuildOutput('./dist/client')
+await loadAssetsManifest('./.dist/client/assets-manifest.json')
+loadAssetsBuildOutput('./.dist/client')
 ```
+
+Set `defineSpaceApp({ clientBuildDir: './.dist/client' })` instead to skip both calls (and every
+other production manifest load — Comets, client entry, CSS, PWA, sitemap): `setup()` calls
+`loadAssetsManifest`/`loadAssetsBuildOutput` automatically from there, in production only — see
+`SpaceAppConfig.clientBuildDir`'s own doc for the exact ordering.
 
 ```tsx
 import { resolveAssetHref } from '@zanix/space'
@@ -83,6 +88,16 @@ above, with no special caching (that content could change without its stable URL
 the hashed one). Content that's uniquely named by its own hash gets both `immutable` and a real
 per-file `ETag` — there's nothing to revalidate against time when the URL can only ever point at one
 byte sequence.
+
+**Conditional requests (`If-None-Match`) short-circuit before the file is even read**: the ETag is
+derived from the requested path alone, so it can be computed and compared against an incoming
+`If-None-Match` header before touching disk at all — a match returns `304 Not Modified` (same
+headers, empty body) straight away; only a genuine miss falls through to `Deno.readFile`.
+
+The hashed lookup also confines the requested path with `confinePath` (`@zanix/helpers`) before ever
+touching disk — a caller can never traverse outside the build output's own `assets` directory via
+`../` segments. A blocked traversal attempt is indistinguishable from a genuine miss in the response
+(same fall-through, same eventual 404); it's only ever noted server-side via a `logger.warn`.
 
 ### Image/SVG optimization (`assetsPlugin({ optimize })`)
 

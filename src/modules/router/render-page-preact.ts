@@ -1,10 +1,12 @@
 import { createElement, Fragment } from 'preact'
 import type { ComponentChildren, ComponentType, VNode } from 'preact'
+import { resolve } from '@std/path'
 import type { ClassConstructor } from '@zanix/server'
 import type { ErrorBoundaryProps, LayoutProps, PageContext } from 'typings/page.ts'
 import logger from '@zanix/logger'
 import { renderToResponse } from '../render/render-to-response-preact.ts'
 import { resolveCssHrefs, resolvePageCssHrefs } from '../render/css-manifest.ts'
+import { resolveClientEntryUrl } from '../render/client-entry.ts'
 import { resolvePwaHead } from '../pwa/pwa-registry.ts'
 import { isDevClientEnabled } from '../dev/dev-client-registry.ts'
 import { SpaceErrorBoundary } from './error-boundary-preact.ts'
@@ -124,9 +126,13 @@ async function composeSegments<Params>(
     }
   }
 
+  // `display: contents` comes from `builtin-css.ts`'s own stylesheet rule, targeting this same
+  // `ORBIT_OUTLET_ATTR` selector — never an inline `style` prop here, see that module's own doc
+  // (and `render-page-react.tsx`'s identical comment) for why: a strict `style-src` with no
+  // `'unsafe-inline'` silently drops an inline `style` ATTRIBUTE.
   const outlet = createElement(
     'div',
-    { style: { display: 'contents' }, [ORBIT_OUTLET_ATTR]: '' },
+    { [ORBIT_OUTLET_ATTR]: '' },
     node,
   )
   if (fragmentOnly) {
@@ -239,6 +245,11 @@ export async function renderPageResponse<Params>(
   // the SAME resolution helpers React's own `renderPageResponse` calls, so both renderers start
   // from identical inputs and differ only in how they serialize them. Never built for a fragment:
   // a fragment is not a document and has no `<head>` to place anything in.
+  const rawRouteFilePath = getPageTree(Target)?.filePath
+  // Always at least the auto-generated default (`hydrateComets()`/`initOrbit()`) — see
+  // `client-entry.ts`'s own doc. `undefined` only if a production response is served before its
+  // own `loadClientEntryManifest()` call ever ran.
+  const clientEntryUrl = resolveClientEntryUrl()
   const document: DocumentModel | undefined = fragmentOnly ? undefined : {
     head,
     cssHrefs: cssHrefs ?? [],
@@ -246,7 +257,14 @@ export async function renderPageResponse<Params>(
     pwa: pwaHead,
     nonce,
     initialState: data,
-    devClient: isDevClientEnabled() ? { routeFilePath: getPageTree(Target)?.filePath } : undefined,
+    bootstrapModules: clientEntryUrl ? [clientEntryUrl] : undefined,
+    // Resolved to an ABSOLUTE path — see `render-page-react.tsx`'s own identical comment for why:
+    // `handleSsrModuleChanged` (`dev-client-script.ts`) compares this against `affectedRoutes`,
+    // always absolute (Vite's own module graph), so an un-resolved relative path here silently
+    // never matches and `location.reload()` never fires on its own.
+    devClient: isDevClientEnabled()
+      ? { routeFilePath: rawRouteFilePath && resolve(rawRouteFilePath) }
+      : undefined,
   }
 
   // Same reasoning as React's own `renderPageResponse` for why a fragment skips all of this — see
@@ -273,6 +291,7 @@ export async function renderPageResponse<Params>(
         // `head-markup.ts`'s own module doc.
         headMarkup: serializeHeadMarkup(document),
         serviceWorkerHref: document.pwa?.serviceWorkerHref,
+        bootstrapModules: document.bootstrapModules,
       },
     ),
   )

@@ -7,6 +7,7 @@ import { loadRoutes } from 'modules/router/mod.ts'
 import {
   broadcastClientCssChanged,
   broadcastClientModuleChanged,
+  broadcastFullReloadNeeded,
   broadcastSsrModuleChanged,
   SPACE_DEV_SOCKET_ROUTE,
 } from 'modules/dev/mod.ts'
@@ -50,6 +51,7 @@ Deno.test(
         file: '/routes/products/page.tsx',
         changeType: 'update',
         affectedRoutes: ['/routes/products/page.tsx'],
+        isComet: false,
       })
 
       const message = JSON.parse(await received)
@@ -57,6 +59,7 @@ Deno.test(
         kind: 'ssr-module-changed',
         file: '/routes/products/page.tsx',
         changeType: 'update',
+        isComet: false,
         affectedRoutes: ['/routes/products/page.tsx'],
       })
 
@@ -157,6 +160,40 @@ Deno.test(
 )
 
 Deno.test(
+  'SpaceDevSocket: broadcastFullReloadNeeded delivers a bare full-reload message',
+  async () => {
+    // `finalize: false` — same reasoning as the tests above: the `onclose` test right after this
+    // one still relies on `SpaceDevSocket`'s own decorator-time `@Socket` registration staying
+    // alive.
+    const port = 21005
+    const servers = await bootstrapServers({ socket: { port } }, {
+      finalize: false,
+    })
+    try {
+      const ws = new WebSocket(
+        `ws://localhost:${port}/socket/${SPACE_DEV_SOCKET_ROUTE}`,
+      )
+      await new Promise((resolve) => (ws.onopen = resolve))
+
+      const received = new Promise<string>((resolve) => {
+        ws.onmessage = (event) => resolve(event.data)
+      })
+
+      broadcastFullReloadNeeded()
+
+      const message = JSON.parse(await received)
+      assertEquals(message, { kind: 'full-reload' })
+
+      const closed = new Promise((resolve) => ws.addEventListener('close', resolve))
+      ws.close()
+      await closed
+    } finally {
+      await webServerManager.stop(servers)
+    }
+  },
+)
+
+Deno.test(
   'broadcast*: a connection whose own push throws is skipped, without breaking delivery to the ' +
     'others — real transport bypassed entirely, a manufactured registry entry stands in for a ' +
     'connection whose underlying socket died without a clean close handshake ever reaching onclose',
@@ -177,14 +214,17 @@ Deno.test(
         file: '/routes/products/page.tsx',
         changeType: 'update',
         affectedRoutes: [],
+        isComet: false,
       })
       broadcastClientCssChanged(['/app.css?direct'])
       broadcastClientModuleChanged(['/comets/counter.tsx'])
+      broadcastFullReloadNeeded()
 
-      assertEquals(received.length, 3)
+      assertEquals(received.length, 4)
       assertEquals((received[0] as { kind: string }).kind, 'ssr-module-changed')
       assertEquals((received[1] as { kind: string }).kind, 'client-css-changed')
       assertEquals((received[2] as { kind: string }).kind, 'client-module-changed')
+      assertEquals((received[3] as { kind: string }).kind, 'full-reload')
     } finally {
       // deno-lint-ignore no-explicit-any
       ProgramModule.registry.set(CONNECTIONS_REGISTRY_KEY, [] as any)
@@ -230,6 +270,7 @@ Deno.test({
         file: '/routes/products/page.tsx',
         changeType: 'update',
         affectedRoutes: [],
+        isComet: false,
       })
 
       // Nothing to await on a closed socket — a short grace period is the only way to observe

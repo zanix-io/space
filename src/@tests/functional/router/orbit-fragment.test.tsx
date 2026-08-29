@@ -1,12 +1,13 @@
 // Installs a renderer, exactly as a real app does: `@zanix/space` itself ships none, so a
 // test that renders must import the entry point it is testing against.
 import '../../../../mod-react.ts'
-import { assert, assertEquals } from '@std/assert'
+import { assert, assertEquals, assertFalse } from '@std/assert'
 import { bootstrapServers, webServerManager } from '@zanix/server'
 import { ORBIT_FRAGMENT_HEADER, ORBIT_OUTLET_ATTR } from 'modules/router/orbit-protocol.ts'
 import { loadRoutes, Page, SpacePageController } from 'modules/router/mod.ts'
 import { mockHandlerContext } from 'modules/testing/mod.ts'
 import { setCssManifest } from 'modules/render/css-manifest.ts'
+import { BUILTIN_CSS } from 'modules/render/builtin-css.ts'
 import { setPwaConfig } from 'modules/pwa/pwa-registry.ts'
 import { extractFragmentTitle } from 'modules/client/orbit.ts'
 import { stripHydrationComments } from '../../support/strip-hydration-comments.ts'
@@ -40,8 +41,10 @@ Deno.test(
       const fullHtml = stripHydrationComments(await fullRes.text())
       assert(fullHtml.startsWith('<!DOCTYPE html>'), fullHtml)
       assert(fullHtml.includes(`${ORBIT_OUTLET_ATTR}=""`), fullHtml)
-      // display:contents so the outlet never breaks a root layout's own grid/flex layout.
-      assert(fullHtml.includes('style="display:contents"'), fullHtml)
+      // display:contents comes from the built-in stylesheet rule, never an inline style
+      // attribute (a strict style-src with no unsafe-inline silently drops those).
+      assert(fullHtml.includes(BUILTIN_CSS), fullHtml)
+      assertFalse(fullHtml.includes('style="display:contents"'), fullHtml)
       assert(fullHtml.includes('<p>hello</p>'), fullHtml)
       // The full response is cacheable — its ETag varies by this same header, per the response.
       assertEquals(fullRes.headers.get('vary'), ORBIT_FRAGMENT_HEADER)

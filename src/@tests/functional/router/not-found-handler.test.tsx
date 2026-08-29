@@ -1,7 +1,7 @@
 // Installs a renderer, exactly as a real app does: `@zanix/space` itself ships none, so a
 // test that renders must import the entry point it is testing against.
 import '../../../../mod-react.ts'
-import { assert, assertEquals } from '@std/assert'
+import { assert, assertEquals, assertFalse } from '@std/assert'
 import type { ReactNode } from 'react'
 import { HttpError } from '@zanix/errors'
 import { attachRequestToError } from '@zanix/server'
@@ -112,8 +112,11 @@ Deno.test(
     assert(!html.includes('<!DOCTYPE html>'), html)
     assert(!html.includes('<html'), html)
     assert(html.includes(`${ORBIT_OUTLET_ATTR}=""`), html)
-    // display:contents so the outlet never breaks a root layout's own grid/flex layout.
-    assert(html.includes('style="display:contents"'), html)
+    // No inline style, and no built-in stylesheet `<style>` tag either — a fragment has no
+    // `<head>` of its own (see `head-markup.ts`'s own doc); it relies on the already-loaded
+    // page's own copy of the built-in `display: contents` rule (matched by attribute selector,
+    // so it applies to this newly-inserted outlet element too, without needing its own copy).
+    assertFalse(html.includes('style="display:contents"'), html)
     assert(html.includes('404'), html)
     assertEquals(response.headers.get('vary'), ORBIT_FRAGMENT_HEADER)
   },

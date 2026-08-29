@@ -229,7 +229,15 @@ function combineGuards(
 export function createLogApiController(
   options: LogApiControllerOptions = {},
 ): new (context: HandlerContext) => LogApiControllerInstance {
-  const { prefix = 'api', guards, rateLimit } = options
+  // Empty, not `'api'` — the REST server itself already applies a default `/api` globalPrefix
+  // (`@zanix/server`'s own `bootstrapServers`, `defaultPrefix: 'api'` for the `rest` type), the
+  // exact same server-level prefix `createAssetsController`'s own `prefix = 'assets'` default
+  // already composes with to land on `/api/assets/...` — a bare `'api'` default here stacked a
+  // SECOND one on top, landing on `/api/api/log` instead of the documented, intended `/api/log`.
+  // Confirmed live: `client-logger.ts`'s own `postLog()` fetches `/api/log` unconditionally, and a
+  // real dev/production server registered `/api/api/log` — completely unreachable, a real,
+  // confirmed regression present since this controller's own default was written.
+  const { prefix = '', guards, rateLimit } = options
   const guard = combineGuards(guards, rateLimit)
 
   @Controller({ prefix })

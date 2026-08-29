@@ -38,7 +38,7 @@ export {
   summarize,
 } from './engine.ts'
 export type { ValidationConfig } from './engine.ts'
-export { validateDocuments } from './validate-document.ts'
+export { isNoindex, validateDocuments } from './validate-document.ts'
 export type { StaticAppInput, StaticPageInput } from './validate-document.ts'
 export {
   validateRenderedDocument,

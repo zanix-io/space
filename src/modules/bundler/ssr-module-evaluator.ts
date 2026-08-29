@@ -1,5 +1,6 @@
 import type { ModuleEvaluator, ModuleRunnerContext } from 'vite/module-runner'
 import { join, toFileUrl } from '@std/path'
+import { fromNativeRuntimeSentinel } from './native-runtime-modules.ts'
 
 /**
  * Replaces Vite's own default SSR module evaluator (`ESModulesEvaluator`, from
@@ -26,17 +27,24 @@ import { join, toFileUrl } from '@std/path'
  * `ssrExportNameKey`, from `vite/module-runner`'s own constants), then does a real dynamic
  * `import()` of it — real ES module parsing, unlike `Function()`, does support native decorators.
  *
- * This is the ONLY thing that changes: `runInlinedModule`/`runExternalModule` are the sole two
- * methods `ModuleRunner` ever calls on its own `evaluator` — everything else (the module graph,
- * hot-invalidation, `transformRequest`, the `client` environment, HMR) stays entirely Vite's own,
- * untouched. This class owns no invalidation/caching logic of its own; a fresh temp file per call
- * is what lets a re-evaluation after invalidation always see the newly transformed code, never a
- * stale one — verified with a real edit-and-reload spike (not assumed) before this was written:
- * decorators, `accessor` fields, a relative import, an npm bare specifier resolved through the
- * project's own Deno import map (via `@deno/vite-plugin`), invalidate-then-re-evaluate producing a
- * genuinely fresh module (not a cached one), a real syntax error still surfacing a clear
- * file/line/column message, and `transformRequest()` continuing to work unaffected, all confirmed
- * together against one real fixture.
+ * `runInlinedModule`/`runExternalModule` are the sole two methods `ModuleRunner` ever calls on its
+ * own `evaluator` — everything else (the module graph, hot-invalidation, `transformRequest`, the
+ * `client` environment, HMR) stays entirely Vite's own, untouched. This class owns no
+ * invalidation/caching logic of its own; a fresh temp file per call is what lets a re-evaluation
+ * after invalidation always see the newly transformed code, never a stale one — verified with a real
+ * edit-and-reload spike (not assumed) before this was written: decorators, `accessor` fields, a
+ * relative import, an npm bare specifier resolved through the project's own Deno import map (via
+ * `@deno/vite-plugin`), invalidate-then-re-evaluate producing a genuinely fresh module (not a cached
+ * one), a real syntax error still surfacing a clear file/line/column message, and
+ * `transformRequest()` continuing to work unaffected, all confirmed together against one real
+ * fixture.
+ *
+ * **`runExternalModule` carries one deliberate exception on top of matching Vite's own default
+ * evaluator** — see its own doc, and `native-runtime-modules.ts`'s own header doc, for the real
+ * `@zanix/space`/`@zanix/server` module-identity bug this closes: without it, a route file's own
+ * `@Page()` registers against a copy of `@zanix/server`'s `ProgramModule` that the native
+ * `zanix space dev` process never serves requests through, so every route silently 404s despite
+ * `ssrLoadModule()` succeeding with no error at all.
  */
 export class RealImportEvaluator implements ModuleEvaluator {
   #dir: string
@@ -98,7 +106,17 @@ export class RealImportEvaluator implements ModuleEvaluator {
   // anything Vite decides to externalize rather than transform (e.g. `node:async_hooks`, used
   // transitively by `@zanix/server`'s own `AsyncContext`) already imports cleanly; the decorator
   // limitation this class exists for never applies to an externalized module in the first place.
+  //
+  // ONE deliberate exception: `native-runtime-modules.ts`'s own `nativeRuntimeModulesPlugin`
+  // resolves `@zanix/space`/`@zanix/server` (and their subpaths) to a synthetic
+  // `znxruntime://<specifier>` id specifically so they arrive HERE, as an externalized module,
+  // instead of being transformed/inlined like a normal dependency — see that file's own doc for the
+  // full module-identity fix this is the other half of. `fromNativeRuntimeSentinel` recovers the
+  // ORIGINAL bare specifier text and this does a plain native `import()` of THAT, instead of the
+  // synthetic url — resolved by Deno against the exact same import map the native `zanix space dev`
+  // process already loaded `@zanix/space`/`@zanix/server` through, so this returns the SAME,
+  // reference-identical module instance the native side already holds, not a second copy.
   public runExternalModule(filepath: string): Promise<unknown> {
-    return import(filepath)
+    return import(fromNativeRuntimeSentinel(filepath) ?? filepath)
   }
 }

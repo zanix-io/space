@@ -10,7 +10,7 @@ import {
   COMET_PROPS_ATTR,
   COMET_STRATEGY_ATTR,
 } from './marker.ts'
-import { resolveCometModuleUrl } from './comet-manifest.ts'
+import { hashSourceKey, normalizeSourceKey, resolveCometModuleUrl } from './comet-manifest.ts'
 import { getCometElementFactory } from './element-factory.ts'
 import type { CometElementFactory } from './element-factory.ts'
 import { stringifyForWire } from '../render/serialization-codec.ts'
@@ -72,7 +72,7 @@ import { getActiveRenderer } from '../router/active-renderer.ts'
  * ```tsx
  * // comets/counter.tsx
  * 'use comet'
- * import { defineComet } from '@zanix/space'
+ * import { defineComet } from '@zanix/space/comet'
  *
  * export function Counter({ initial }: { initial: number }) {/* ... *\/ }
  * export default defineComet(Counter, import.meta.url)
@@ -163,11 +163,17 @@ export function defineComet<P extends object>(
     return h(
       'div',
       {
-        // `display: contents` so this boundary never breaks a parent `display: grid`/`flex` layout
-        // by inserting an extra box between it and its real children — overridable by any more
-        // specific consumer CSS that genuinely needs a real box here.
-        style: { display: 'contents' },
-        [COMET_ID_ATTR]: sourceUrl,
+        // `display: contents` (so this boundary never breaks a parent `display: grid`/`flex`
+        // layout by inserting an extra box between it and its real children) comes from
+        // `builtin-css.ts`'s own stylesheet rule, targeting this same `COMET_ID_ATTR` selector —
+        // never an inline `style` prop here. See that module's own doc for why: a strict
+        // `style-src` with no `'unsafe-inline'` silently drops an inline `style` ATTRIBUTE
+        // (nonces don't cover it), which would otherwise leave every Comet boundary as a real,
+        // unstyled box in production for any app using the framework's own default CSP.
+        // A hash of the source path, never the raw path itself — see `hashSourceKey`'s own doc
+        // for why: the raw value would leak the server's local filesystem layout into every
+        // page's public HTML.
+        [COMET_ID_ATTR]: hashSourceKey(normalizeSourceKey(sourceUrl)),
         [COMET_STRATEGY_ATTR]: comet,
         [COMET_MEDIA_ATTR]: cometMedia,
         [COMET_MODULE_ATTR]: resolveCometModuleUrl(sourceUrl),

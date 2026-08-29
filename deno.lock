@@ -31,20 +31,20 @@
     "jsr:@zanix/auth@0.8": "0.8.1",
     "jsr:@zanix/datamaster@^1.7.0": "1.8.0",
     "jsr:@zanix/datamaster@^1.8.0": "1.8.0",
-    "jsr:@zanix/server@4": "4.0.0",
-    "jsr:@zanix/utils@4": "4.0.0",
-    "npm:@aws-sdk/client-s3@^3.700.0": "3.1118.0",
+    "npm:@aws-sdk/client-s3@^3.700.0": "3.1121.0",
     "npm:@babel/core@^7.29.0": "7.29.7",
     "npm:@deno/vite-plugin@^2.0.3": "2.0.3_vite@8.2.2",
     "npm:@formatjs/icu-messageformat-parser@^3.5.17": "3.5.17",
     "npm:@formatjs/intl@^4.1.19": "4.1.19",
-    "npm:@preact/preset-vite@^2.10.6": "2.10.6_@babel+core@7.29.7_vite@8.2.2_preact@10.29.8__preact-render-to-string@6.7.0_preact-render-to-string@6.7.0__preact@10.29.8",
+    "npm:@preact/preset-vite@^2.10.6": "2.10.6_@babel+core@7.29.7_vite@8.2.2_preact@10.29.8_preact-render-to-string@6.7.0",
+    "npm:@prefresh/core@^1.5.10": "1.5.10_preact@10.29.8_preact-render-to-string@6.7.0",
+    "npm:@prefresh/utils@^1.2.1": "1.2.1",
     "npm:@rolldown/plugin-babel@~0.2.3": "0.2.3_@babel+core@7.29.7_rolldown@1.2.5_vite@8.2.2",
     "npm:@tailwindcss/vite@^4.3.3": "4.3.3_vite@8.2.2",
     "npm:@types/react-dom@^19.2.0": "19.2.4_@types+react@19.2.18",
     "npm:@types/react@^19.2.0": "19.2.18",
     "npm:@vanilla-extract/vite-plugin@^5.2.6": "5.2.6_vite@8.2.2",
-    "npm:@vitejs/plugin-react@^6.0.5": "6.1.0_@rolldown+plugin-babel@0.2.3__@babel+core@7.29.7__rolldown@1.2.5__vite@8.2.2_babel-plugin-react-compiler@1.0.0_vite@8.2.2_@babel+core@7.29.7_rolldown@1.2.5",
+    "npm:@vitejs/plugin-react@^6.0.5": "6.1.0_@rolldown+plugin-babel@0.2.3_babel-plugin-react-compiler@1.0.0_vite@8.2.2_@babel+core@7.29.7_rolldown@1.2.5",
     "npm:babel-plugin-react-compiler@1": "1.0.0",
     "npm:happy-dom@^20.11.2": "20.11.6",
     "npm:mongoose@8": "8.24.4",
@@ -179,50 +179,23 @@
       "dependencies": [
         "jsr:@std/semver",
         "jsr:@zanix/asyncmq",
-        "jsr:@zanix/datamaster@^1.7.0",
-        "jsr:@zanix/server",
-        "jsr:@zanix/utils"
+        "jsr:@zanix/datamaster@^1.7.0"
       ]
     },
     "@zanix/asyncmq@0.8.0": {
-      "integrity": "a66f121a851132e99237cf71c2e4b611fb1cdd889f22fe61fc0f97eeb1b0400d",
-      "dependencies": [
-        "jsr:@zanix/server",
-        "jsr:@zanix/utils"
-      ]
+      "integrity": "a66f121a851132e99237cf71c2e4b611fb1cdd889f22fe61fc0f97eeb1b0400d"
     },
     "@zanix/auth@0.8.1": {
-      "integrity": "0c6cfac247238b2784b739dc57d74403242ba6f78abf3edc4f0e8b11ec9cfbae",
-      "dependencies": [
-        "jsr:@zanix/server",
-        "jsr:@zanix/utils"
-      ]
+      "integrity": "0c6cfac247238b2784b739dc57d74403242ba6f78abf3edc4f0e8b11ec9cfbae"
     },
     "@zanix/datamaster@1.8.0": {
       "integrity": "ad13d1c3af032d650df4ba455eda4b14640f1d7c726fbdd39e177f73834b602b",
       "dependencies": [
         "jsr:@db/sqlite",
         "jsr:@std/path@0.224",
-        "jsr:@zanix/server",
-        "jsr:@zanix/utils",
         "npm:@aws-sdk/client-s3",
         "npm:mongoose",
         "npm:redis"
-      ]
-    },
-    "@zanix/server@4.0.0": {
-      "integrity": "03117403ba5e0ee1575d4a0096282149d7b6a7e510f7a1572621958ea58fa3d8",
-      "dependencies": [
-        "jsr:@std/http",
-        "jsr:@std/path@0.224",
-        "jsr:@zanix/utils"
-      ]
-    },
-    "@zanix/utils@4.0.0": {
-      "integrity": "2ef04a760e011829ff14e198d6e5fc947ae0cf2615b519c1954ddb78b7b376e6",
-      "dependencies": [
-        "jsr:@std/fmt@0.224",
-        "jsr:@std/path@0.224"
       ]
     }
   },
@@ -237,8 +210,8 @@
         "tslib"
       ]
     },
-    "@aws-sdk/client-s3@3.1118.0": {
-      "integrity": "sha512-nh46pLKeRNFvTOZAJMfYR7kZ/KzhSqzhXVIJSwl4jJ/b2D+KOXL2jeOCryOvGgwpUQo9YNWFUg63cm2qr5MX9g==",
+    "@aws-sdk/client-s3@3.1121.0": {
+      "integrity": "sha512-hBnoqaVBeWdkgXcJElMXA2yUZWkBCBntu2qmN+tfqmzC+j4LzJC3ox8qIgS2WdMS1cb8UwyBogUVrkRXybNm0A==",
       "dependencies": [
         "@aws-sdk/checksums",
         "@aws-sdk/core",
@@ -991,7 +964,7 @@
     "@oxc-project/types@0.146.0": {
       "integrity": "sha512-XC0QsnnhVe7sLIWmYmdPw7x5P0h4W8vUU3Nv1ySgWXtvCz8NizoAEpGXA0sOYoJQV2Rl13LgURAHQ5cI5ILCSA=="
     },
-    "@preact/preset-vite@2.10.6_@babel+core@7.29.7_vite@8.2.2_preact@10.29.8__preact-render-to-string@6.7.0_preact-render-to-string@6.7.0__preact@10.29.8": {
+    "@preact/preset-vite@2.10.6_@babel+core@7.29.7_vite@8.2.2_preact@10.29.8_preact-render-to-string@6.7.0": {
       "integrity": "sha512-ZZ5RIT2ZVXg8UxRA8VZpoT8CdpDG7RFIqOT4bELqNBp85+HKvQBbgmh3gsoW1UOQXx26TLe+ZRNKI7q281Kckw==",
       "dependencies": [
         "@babel/core",
@@ -1011,7 +984,7 @@
     "@prefresh/babel-plugin@0.5.3": {
       "integrity": "sha512-57LX2SHs4BX2s1IwCjNzTE2OJeEepRCNf1VTEpbNcUyHfMO68eeOWGDIt4ob9aYlW6PEWZ1SuwNikuoIXANDtQ=="
     },
-    "@prefresh/core@1.5.10_preact@10.29.8__preact-render-to-string@6.7.0_preact-render-to-string@6.7.0__preact@10.29.8": {
+    "@prefresh/core@1.5.10_preact@10.29.8_preact-render-to-string@6.7.0": {
       "integrity": "sha512-7yPTFbG56sutaFu8krp3B4a200KOFUvrtlllKWRuLjsYXo9UUucHOZRcer+gtgMkFTpv6ob8TGcTwA32bSwa1w==",
       "dependencies": [
         "preact"
@@ -1020,7 +993,7 @@
     "@prefresh/utils@1.2.1": {
       "integrity": "sha512-vq/sIuN5nYfYzvyayXI4C2QkprfNaHUQ9ZX+3xLD8nL3rWyzpxOm1+K7RtMbhd+66QcaISViK7amjnheQ/4WZw=="
     },
-    "@prefresh/vite@2.4.12_preact@10.29.8__preact-render-to-string@6.7.0_vite@8.2.2_preact-render-to-string@6.7.0__preact@10.29.8": {
+    "@prefresh/vite@2.4.12_preact@10.29.8_vite@8.2.2_preact-render-to-string@6.7.0": {
       "integrity": "sha512-FY1fzXpUjiuosznMV0YM7XAOPZjB5FIdWS0W24+XnlxYkt9hNAwwsiKYn+cuTEoMtD/ZVazS5QVssBr9YhpCQA==",
       "dependencies": [
         "@babel/core",
@@ -1405,7 +1378,7 @@
         "vite"
       ]
     },
-    "@vitejs/plugin-react@6.1.0_@rolldown+plugin-babel@0.2.3__@babel+core@7.29.7__rolldown@1.2.5__vite@8.2.2_babel-plugin-react-compiler@1.0.0_vite@8.2.2_@babel+core@7.29.7_rolldown@1.2.5": {
+    "@vitejs/plugin-react@6.1.0_@rolldown+plugin-babel@0.2.3_babel-plugin-react-compiler@1.0.0_vite@8.2.2_@babel+core@7.29.7_rolldown@1.2.5": {
       "integrity": "sha512-qd2BzUBehkov86WFhg0JkEFEYyCLG9uPCe6qWTY/kRlss9OvJrOF2UbIWT7p+8IzZHkEu0DNGHc4HSv+JdDLsw==",
       "dependencies": [
         "@rolldown/plugin-babel",
@@ -2351,6 +2324,8 @@
       "npm:@babel/core@^7.29.0",
       "npm:@deno/vite-plugin@^2.0.3",
       "npm:@preact/preset-vite@^2.10.6",
+      "npm:@prefresh/core@^1.5.10",
+      "npm:@prefresh/utils@^1.2.1",
       "npm:@rolldown/plugin-babel@~0.2.3",
       "npm:@tailwindcss/vite@^4.3.3",
       "npm:@types/react-dom@^19.2.0",
@@ -2368,6 +2343,28 @@
       "npm:sharp@~0.35.3",
       "npm:tailwindcss@^4.3.3",
       "npm:vite@8"
-    ]
+    ],
+    "links": {
+      "jsr:@zanix/server@4.1.0": {
+        "dependencies": [
+          "jsr:@std/assert@0.224",
+          "jsr:@std/http@0.224",
+          "jsr:@std/path@0.224",
+          "jsr:@std/testing@1.0.9",
+          "jsr:@std/uuid@0.224",
+          "jsr:@zanix/utils@4",
+          "npm:graphql@16"
+        ]
+      },
+      "jsr:@zanix/utils@4.1.0": {
+        "dependencies": [
+          "jsr:@std/assert@0.224",
+          "jsr:@std/fmt@0.224",
+          "jsr:@std/fs@0.224",
+          "jsr:@std/path@0.224",
+          "jsr:@std/testing@1.0.9"
+        ]
+      }
+    }
   }
 }

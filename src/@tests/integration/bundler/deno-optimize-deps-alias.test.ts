@@ -437,6 +437,47 @@ Deno.test(
 )
 
 Deno.test(
+  'denoOptimizeDepsAliasPlugin: leaves a specifier that resolves to a remote JSR module alone — ' +
+    'never aliased to its raw URL, never added to optimizeDeps.include',
+  async () => {
+    const root = await Deno.makeTempDir({ dir: TMP_ROOT })
+    try {
+      // A real JSR package, never vendored into any local `node_modules` — `resolveDeno` resolves
+      // it straight to its canonical `https://jsr.io/...` specifier, the exact shape that crashed
+      // Vite's dep-scanner (`fs.readFileSync` on a URL string) before this plugin started skipping
+      // remote resolutions. `@std/uuid` is small and stable enough not to need its own fixture code.
+      await Deno.writeTextFile(
+        join(root, 'deno.json'),
+        JSON.stringify({ imports: { '@std/uuid': 'jsr:@std/uuid@^1.0.0' } }),
+      )
+      await Deno.writeTextFile(
+        join(root, 'counter.tsx'),
+        `'use comet'\nimport { generate } from '@std/uuid'\nexport default function Counter() { return generate() }\n`,
+      )
+      await withDevServer(root, async (server) => {
+        const hasRemoteAlias = server.config.resolve.alias.some((
+          entry: { replacement: unknown },
+        ) => typeof entry.replacement === 'string' && entry.replacement.startsWith('http'))
+        assertFalse(
+          hasRemoteAlias,
+          'a remote-resolved specifier must never be aliased to its raw URL',
+        )
+        assertFalse(
+          server.config.environments.client.optimizeDeps.include?.includes('@std/uuid'),
+          'a remote-resolved specifier needs no pre-bundling and must never reach include',
+        )
+        // The server itself must still come up and serve the Comet normally — this plugin
+        // skipping one specifier must never take down anything else.
+        const result = await server.environments.client.transformRequest('/counter.tsx')
+        assert(result?.code.includes('generate'), result?.code)
+      })
+    } finally {
+      await removeTempDirWithRetry(root)
+    }
+  },
+)
+
+Deno.test(
   "denoOptimizeDepsAliasPlugin: finds the nearest deno.json relative to root, not the process's own CWD",
   async () => {
     const root = await Deno.makeTempDir({ dir: TMP_ROOT })

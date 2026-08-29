@@ -42,6 +42,9 @@
 export {
   broadcastClientCssChanged,
   broadcastClientModuleChanged,
+  /** Notifies every connected dev client that Vite's own dependency optimizer needs a full
+   * reload — relays a real Vite-internal signal this engine would otherwise never bind. */
+  broadcastFullReloadNeeded,
   /** Notifies every connected dev client of an `ssr`-environment module change. */
   broadcastSsrModuleChanged,
   /** Reserved WebSocket route `SpaceDevSocket` registers — never collides with a real page
@@ -72,6 +75,15 @@ export {
 } from './dev-vite-hot-client.ts'
 export { isDevClientEnabled, setDevClientEnabled } from './dev-client-registry.ts'
 export { createDevAssetHandler, looksLikeDevAssetRequest } from './dev-asset-handler.ts'
+// Re-exported here (not just from the main barrel) so `zanix space dev`'s own orchestrator can
+// read a consumer's `definePreHandler(...)` registration alongside its other dev-only imports —
+// see `getUserPreHandler`'s own doc for why this is what makes dev/prod `preHandler` parity work.
+export { getUserPreHandler } from '../middleware/pre-handler-registry.ts'
+// Same reasoning as `getUserPreHandler` above, for `defineBootstrapSpaceAppConfig` instead — see
+// `getBootstrapSpaceAppConfig`'s own doc for why `zanix space dev` needs this reachable here too,
+// not only from the main barrel a production `mod.ts` imports.
+export { getBootstrapSpaceAppConfig } from '../runtime/bootstrap-config-registry.ts'
+export type { BootstrapRemoteAppOptions } from '@zanix/app/runtime'
 export { resolveDevCssHrefs } from './dev-css-hrefs.ts'
 export {
   getDevImportModule,
@@ -102,6 +114,17 @@ export type {
   /** Options for {@linkcode spacePlugin}. */
   SpacePluginOptions,
 } from '../bundler/space-plugin.ts'
+export {
+  /** Wires the default, zero-config client entry (`hydrateComets()`/`initOrbit()`, correctly
+   * `nonce`'d) into a dev session — needed here since `render-page-react.tsx`/
+   * `render-page-preact.ts` always request its own virtual id in dev, unless
+   * `SpaceAppConfig.clientEntry` configured a real override. */
+  clientEntryPlugin,
+} from '../bundler/client-entry-plugin.ts'
+export type {
+  /** Options for {@linkcode clientEntryPlugin}. */
+  ClientEntryPluginOptions,
+} from '../bundler/client-entry-plugin.ts'
 export {
   /** Reads back which renderer this app was configured for. */
   getActiveRenderer,

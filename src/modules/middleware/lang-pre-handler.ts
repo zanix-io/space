@@ -1,5 +1,6 @@
 import type { PreHandler } from '@zanix/server'
 import { assertZnxCookieName, PUBLIC_COOKIE_ATTRIBUTES } from '@zanix/helpers'
+import { setLangRegistration } from './lang-registry.ts'
 
 /** Path prefixes `langPreHandler` never redirects, regardless of `ignorePrefixes` — every
  * framework-internal route `@zanix/space` itself can register. A caller's own `ignorePrefixes`
@@ -11,6 +12,8 @@ const FRAMEWORK_PREFIXES: readonly string[] = [
   '/icons/',
   '/manifest.webmanifest',
   '/sw.js',
+  '/sitemap.xml',
+  '/robots.txt',
 ]
 
 /** Options for {@linkcode langPreHandler}. */
@@ -22,8 +25,9 @@ export type LangPreHandlerOptions = {
    * `availableLangs`. */
   defaultLang: string
   /** Extra path prefixes to never redirect, beyond the framework-internal ones this always
-   * skips (`/health`, `/ready`, `/assets/`, `/icons/`, `/manifest.webmanifest`, `/sw.js`) — e.g. a
-   * consumer app's own non-i18n API routes sharing the same port. */
+   * skips (`/health`, `/ready`, `/assets/`, `/icons/`, `/manifest.webmanifest`, `/sw.js`,
+   * `/sitemap.xml`, `/robots.txt`) — e.g. a consumer app's own non-i18n API routes sharing the
+   * same port. */
   ignorePrefixes?: string[]
   /**
    * Name of the cookie an explicitly-chosen language persists to (e.g. via a language switcher
@@ -117,12 +121,21 @@ function readCookie(request: Request, name: string): string | undefined {
  * reverting on the next un-prefixed URL — applies to language exactly as much.
  *
  * Never redirects a framework-internal route (`/health`, `/ready`, `/assets/`, `/icons/`,
- * `/manifest.webmanifest`, `/sw.js`) — `ignorePrefixes` extends that list, never replaces it.
+ * `/manifest.webmanifest`, `/sw.js`, `/sitemap.xml`, `/robots.txt`) — a crawler-facing route needs
+ * one canonical, unprefixed URL, never a per-language duplicate — `ignorePrefixes` extends that
+ * list, never replaces it.
  */
 export function langPreHandler(options: LangPreHandlerOptions): PreHandler {
   const { availableLangs, defaultLang, ignorePrefixes = [], cookieName = 'X-Znx-Lang' } = options
   assertZnxCookieName(cookieName, 'langPreHandler')
   const ignored = [...FRAMEWORK_PREFIXES, ...ignorePrefixes]
+  // Eager, same timing `setSitemapDeclaration`/`setValidationConfig` already use — read by
+  // `deriveAutoSitemapEntries` (`modules/bundler/auto-sitemap.ts`) so `sitemap: 'auto'` can expand
+  // a `:lang`-only dynamic route into one entry per `availableLangs`, instead of excluding it the
+  // way any other dynamic segment always is. `'lang'` is the one, non-configurable param name this
+  // whole mechanism already enforces — `routes/[lang]/...` is the only folder convention
+  // `langPreHandler` itself ever documents or supports.
+  setLangRegistration({ availableLangs, paramName: 'lang' })
 
   return (request) => {
     const url = new URL(request.url)

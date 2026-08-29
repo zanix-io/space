@@ -10,6 +10,7 @@ import { buildFastRefreshPreambleScript } from '../dev/dev-fast-refresh-preamble
 import type { HeadLinkTag, HeadMetaTag } from '../router/head-descriptor.ts'
 import { linkIdentityKey, metaIdentityKey } from '../router/head-descriptor.ts'
 import type { StylesheetRef } from './css-manifest.ts'
+import { BUILTIN_CSS } from './builtin-css.ts'
 
 /**
  * Options for {@linkcode renderToResponse}.
@@ -176,6 +177,21 @@ export async function renderToResponse(
       }
       {meta?.map((tag, index) => <meta key={metaIdentityKey(tag) ?? `meta-${index}`} {...tag} />)}
       {link?.map((tag) => <link key={linkIdentityKey(tag)} {...tag} />)}
+      {
+        // Gated on `cssHrefs !== undefined`, same signal Preact's own `render-page-preact.ts`
+        // already uses to distinguish "a real full document" from a fragment: `render-page-react.tsx`'s
+        // full-document branch always sets `cssHrefs` to a real array (even `[]`), while its
+        // fragment branch (and any bare, isolated `renderToResponse()` call with no options at
+        // all) never sets it — matching `head-markup.ts`'s own `serializeHeadMarkup`, which is
+        // ONLY ever called for a real full document, never a fragment. A fragment never needs its
+        // own copy of this rule: it's inserted into a page that already has it, from that page's
+        // own earlier full-document response — see `builtin-css.ts`'s own doc for why the rule
+        // must be a real stylesheet rule at all (never an inline `style` attribute — a strict
+        // `style-src` with no `'unsafe-inline'` silently drops those). Placed ahead of `cssHrefs`
+        // so an app's own global stylesheet can still override it via normal cascade order if it
+        // ever genuinely needs to.
+      }
+      {cssHrefs !== undefined && <style nonce={nonce}>{BUILTIN_CSS}</style>}
       {cssHrefs?.map((ref) => {
         const href = typeof ref === 'string' ? ref : ref.href
         const media = typeof ref === 'string' ? undefined : ref.media

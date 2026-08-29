@@ -55,6 +55,7 @@ export type { BuildSpaceClientOptions, BuildSpaceClientResult } from './build-cl
 export { discoverComets } from './discover-comets.ts'
 export { collectPageStyles, discoverPages } from './discover-pages.ts'
 export type { DiscoveredPage, DiscoveredPageStyle, ModuleImporter } from './discover-pages.ts'
+export { deriveAutoSitemapEntries } from './auto-sitemap.ts'
 export { validateBuild } from './validate-build.ts'
 export type { ValidateBuildOptions, ValidateBuildResult } from './validate-build.ts'
 export { hasDynamicSegment, runRenderProbe } from './render-probe.ts'

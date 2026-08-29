@@ -63,6 +63,36 @@ export type SitemapSource =
   | SitemapEntry[]
   | (() => SitemapEntry[] | Promise<SitemapEntry[]>)
 
+/** The part of `defineSpaceApp({ sitemap })`'s value that's knowable synchronously, before
+ * `setup()` ever runs — a literal array (kept as-is), or the `'auto'` marker. A function source
+ * resolves to `undefined` here: invoking it this early would mean running arbitrary app code (a
+ * database query) outside a real request, which {@linkcode SitemapSource}'s own doc already rules
+ * out for the SAME reason a build never invokes one either. */
+export type SitemapDeclaration = 'auto' | SitemapEntry[]
+
+let sitemapDeclaration: SitemapDeclaration | undefined
+
+/**
+ * Set eagerly by `defineSpaceApp({ sitemap })`, same timing as `setValidationConfig`/
+ * `setAssetsDirConfig` — a `zanix space build`/`zanix space dev` run imports `space.app.ts` but
+ * never calls `activateApps()`/`setup()`, so anything those commands need has to be readable
+ * immediately after import, not only from inside `setup()` (where `registerSitemap` itself still
+ * runs, unchanged).
+ */
+export function setSitemapDeclaration(value: SitemapDeclaration | undefined): void {
+  sitemapDeclaration = value
+}
+
+/** Read by `buildSpaceClient()`/`zanix space dev`'s own validation pass to derive
+ * `StaticAppInput.sitemapLocations` for the SEO004/SEO006 cross-checks, and by `defineSpaceApp`'s
+ * own `setup()` to decide how to register `'auto'` (see that function's own doc). `undefined`
+ * covers three distinct cases identically — `sitemap` omitted, declared as a function, or never
+ * captured because `defineSpaceApp()` has not run yet — none of which have a locations list to
+ * offer either way. */
+export function getSitemapDeclaration(): SitemapDeclaration | undefined {
+  return sitemapDeclaration
+}
+
 let cachedEntries: SitemapEntry[] | undefined
 let inFlight: Promise<SitemapEntry[]> | undefined
 
@@ -148,16 +178,18 @@ export function buildSitemapXml(entries: SitemapEntry[], origin: string): string
  * feature off" convention as `assetsDir`/`messagesDir`.
  *
  * **`sitemap.xml` is served as a real SSR route, not generated as a static file at build time —
- * this is a deliberate architectural decision, not an accidental limitation.** `@zanix/space` has
- * no general build-time data-generation phase at all today (`zanix space build`, via
- * `buildSpaceClient()`, only ever bundles the CLIENT — CSS/Comets/PWA icons — nothing server-side
- * or data-driven runs at that point); adding one JUST to freeze a sitemap would mean building new,
- * genuinely separate machinery for a single, low-traffic use case (crawlers, not real page views).
- * A live route also composes for free with everything `SitemapSource` already needs to support: a
- * static array costs nothing extra per request (see that type's own doc), and a function source
- * genuinely REQUIRES per-request evaluation to stay correct for a live product catalog — freezing
- * that case at build time would silently go stale between deploys, defeating the reason a function
- * source exists at all.
+ * this is a deliberate architectural decision, not an accidental limitation.** A live route
+ * composes for free with everything `SitemapSource` needs to support: a static array costs nothing
+ * extra per request (see that type's own doc), and a function source genuinely REQUIRES
+ * per-request evaluation to stay correct for a live product catalog — freezing that case at build
+ * time would silently go stale between deploys, defeating the reason a function source exists at
+ * all. `'auto'` (`SitemapDeclaration`) is the one case a build DOES precompute something for — it
+ * derives entries from this app's own static route tree (`deriveAutoSitemapEntries`,
+ * `modules/bundler/auto-sitemap.ts`), work with no database/loader involved, so running it during
+ * `zanix space build` carries none of the staleness/side-effect risk a real function source would.
+ * That precomputed result reaches production through the SAME build-output manifest convention
+ * `clientBuildDir` already uses for Comets/CSS/PWA (see `sitemap-manifest.ts`'s own doc) — served
+ * through this exact route unchanged, still never frozen to a static file on disk.
  *
  * A function `source` is called once and cached for the process lifetime, bypassed under
  * `znx space dev` (see {@linkcode SitemapSource}'s own doc for the exact guarantee, the

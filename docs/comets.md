@@ -12,7 +12,7 @@ A comet file needs three things — a directive, a named export, and its own `im
 ```tsx
 // comets/counter.tsx
 'use comet'
-import { defineComet } from '@zanix/space'
+import { defineComet } from '@zanix/space/comet'
 
 export function Counter({ initial }: { initial: number }) {
   const [count, setCount] = useState(initial)
@@ -41,16 +41,24 @@ discovers it and builds it as its own separate output chunk, rather than letting
 whatever page imports it to render it server-side.
 
 ```ts
-// main.ts — load the manifest cometPlugin wrote during the client build, before serving anything
-import { loadCometManifest } from '@zanix/space'
+// main.ts — load the manifests cometPlugin/clientEntryPlugin wrote during the client build,
+// before serving anything
+import { loadClientEntryManifest } from '@zanix/space'
+import { loadCometManifest } from '@zanix/space/comet'
 import { activateApps } from '@zanix/app/runtime'
 import { bootstrapServers } from '@zanix/server'
 import spaceApp from './space.app.ts'
 
-await loadCometManifest('./dist/client/comets-manifest.json')
+await loadCometManifest('./.dist/client/comets-manifest.json')
+await loadClientEntryManifest('./.dist/client/client-entry-manifest.json')
 await activateApps([spaceApp])
 await bootstrapServers({ ssr: { application: 'storefront' } })
 ```
+
+Set `defineSpaceApp({ clientBuildDir: './.dist/client' })` instead to skip both calls (and every
+other production manifest load — CSS, assets, PWA, sitemap): `setup()` loads
+`comets-manifest.json`/`client-entry-manifest.json` automatically from there, in production only —
+see `SpaceAppConfig.clientBuildDir`'s own doc for the exact ordering.
 
 ```tsx
 // used from any page's component, same as any other component
@@ -60,22 +68,40 @@ import Counter from '../comets/counter.tsx'
 <Counter initial={0} /> // hydrates immediately (comet defaults to 'load')
 ```
 
+**No client entry to write.** Every full-document response's own bootstrap script
+(`hydrateComets()`/`initOrbit()`, correctly `nonce`'d for a strict `script-src` CSP) is generated
+and wired in automatically — the same reasoning that already makes a Comet's own registration
+automatic (`'use comet'`, no manual step). Only set `SpaceAppConfig.clientEntry` (a real source file
+of your own) when a project genuinely needs EXTRA client-side code — analytics, a global error
+handler:
+
 ```ts
-// client entry — call once, after the page loads
-import { hydrateComets } from '@zanix/space/client'
+// space.app.ts — only if you need more than hydrateComets()/initOrbit()
+export default defineSpaceApp({
+  name: 'storefront',
+  clientEntry: './src/main.client.ts', // replaces the auto-generated default entirely
+})
+```
+
+```ts
+// src/main.client.ts — your own file is then fully responsible for calling these itself
+import { hydrateComets, initOrbit } from '@zanix/space/client'
 
 hydrateComets()
+initOrbit()
 ```
 
 > **Match the client barrel to your renderer.** `@zanix/space/client` is the **React** barrel; a
 > `renderer: 'preact'` app imports `@zanix/space/client/preact` instead — same exports, same
 > signatures, Preact's `hydrate`/`render` underneath rather than React's `hydrateRoot`/`createRoot`.
 > An app imports one or the other, never both, since `renderer` selects one for the whole project.
+> The auto-generated default already picks the right one for you — this only matters for a
+> `clientEntry` override you write yourself.
 >
-> Getting this wrong used to fail silently: the page server-rendered correctly, every comet boundary
-> and all its content appeared in the DOM, nothing threw anywhere — and no Comet was ever
-> interactive. `spacePlugin({ renderer })` now fails the client build with an explicit error if the
-> entry imports the wrong one, so the mismatch cannot reach a browser.
+> Getting this wrong would otherwise fail silently at runtime: the page server-renders correctly,
+> every comet boundary and all its content appears in the DOM, nothing throws anywhere — yet no
+> Comet is ever interactive. `spacePlugin({ renderer })` fails the client build with an explicit
+> error instead if the entry imports the wrong barrel, so the mismatch never reaches a browser.
 
 **Why this needs a manifest at all**: the same comet source file gets evaluated twice — once during
 server rendering (a direct Deno import, producing real HTML) and once in the client build (its own

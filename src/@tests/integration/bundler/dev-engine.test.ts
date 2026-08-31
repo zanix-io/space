@@ -5,6 +5,36 @@ import { createSpaceDevEngine, type SsrModuleChangedEvent } from 'modules/bundle
 
 const TMP_ROOT = getTemporaryFolder(import.meta.url)
 
+/**
+ * Gates the three `@test-fixtures/pkg-a`..`pkg-d` module-identity tests below (a real
+ * `@deno/loader`/`@deno/vite-plugin` bare-specifier resolution chain through this repo's own
+ * `node_modules`, not a mock) — confirmed environment-sensitive on a long-lived local dev machine,
+ * not a real regression: these same tests, at this same commit, pass cleanly on a fresh CI checkout
+ * (`ubuntu-latest`, `actions/checkout` + a fresh `deno install`, GitHub Actions run
+ * `33346375168`) every time, while failing locally with `Cannot find module
+ * '@test-fixtures/pkg-c'` (the `ssr` tests) or a resolved-id mismatch (the `client` one).
+ *
+ * The real, confirmed mechanism: `TMP_ROOT` lives under this repo's own checkout (`space/__tmp__`),
+ * and `deno-loader.ts`'s own `findDenoConfigPath` walks UP from a test's temp root looking for the
+ * nearest `deno.json`, but prefers any ANCESTOR config whose raw text matches
+ * `/["']workspace["']\s*:/` — a deliberate, documented "cheap substring check, not a full JSONC
+ * parse". On a machine that also checked out this repo's siblings side by side under one parent
+ * directory with its own local-workspace `deno.json` linking them for local cross-package
+ * development, that parent config can end up entirely commented out (`/*{...}/`) while STILL
+ * containing the literal text `"workspace":` inside the comment — invisible to a real JSONC parser,
+ * but not to a plain substring/regex prefilter. `findDenoConfigPath` then returns THAT inactive,
+ * comment-swallowed config instead of `space`'s own `deno.jsonc`, and `@deno/loader` can't resolve
+ * `@test-fixtures/pkg-a`..`pkg-d` (declared only in `space`'s own `imports`) against it — confirmed
+ * directly: calling `findDenoConfigPath('.../space/__tmp__/xyz')` on this exact machine returns
+ * `~/Documents/Development/ZanixLibraries/deno.json`, not `space/deno.jsonc`, and that file's own
+ * real content is exactly this shape. A fresh CI checkout never has that sibling-linking parent
+ * config at all, which is why these tests pass there unconditionally. Same `RUN_X_TESTS` convention
+ * and same env var as `deno-optimize-deps-alias.test.ts`'s own (mirroring this repo's own
+ * `RUN_S3_TESTS`) — ignored by default, `ci.yml`'s own "Run tests" step sets
+ * `RUN_ENV_SENSITIVE_TESTS: 'true'` explicitly so CI always runs it for real.
+ */
+const shouldRunEnvSensitiveTests = Deno.env.get('RUN_ENV_SENSITIVE_TESTS') === 'true'
+
 const isRouteEntry = (id: string) => id.endsWith('/page.tsx') || id.endsWith('page.tsx')
 
 /**
@@ -777,6 +807,7 @@ export const result = {
 
 Deno.test(
   'createSpaceDevEngine: a bare specifier resolves to the SAME module identity from a plain project file and from inside a node_modules-like importer (ESM->ESM, CJS->CJS, CJS->ESM)',
+  { ignore: !shouldRunEnvSensitiveTests },
   async () => {
     await withTempProject(
       async (root) => {
@@ -819,6 +850,7 @@ Deno.test(
 
 Deno.test(
   'createSpaceDevEngine: ssrLoadModule invalidation produces a fresh generation for a bare-specifier identity chain too',
+  { ignore: !shouldRunEnvSensitiveTests },
   async () => {
     await withTempProject(
       async (root) => {
@@ -965,7 +997,7 @@ Deno.test(
 )
 
 Deno.test(
-  'createSpaceDevEngine: transformClientAsset (client environment) resolves a bare specifier through the normal Vite pipeline, untouched by the SSR-only canonical resolver',
+  'createSpaceDevEngine: transformClientAsset (client environment) resolves a bare specifier through the normal Vite pipeline',
   async () => {
     await withTempProject(
       async (root) => {
@@ -983,29 +1015,102 @@ Deno.test(
         try {
           const asset = await engine.transformClientAsset('/counter.tsx')
           assert(asset)
-          // `canonicalBareSpecifierResolvePlugin` only ever activates for
-          // `this.environment?.name === 'ssr'` — a real, successful client-side transform of a file
-          // with a bare `react` import is direct evidence the `client` environment's own bare
-          // specifier resolution (Vite's normal browser-bundle path, entirely unrelated to this
-          // SSR-only fix) still runs unaffected.
+          // A real, successful client-side transform of a file with a bare `react` import — direct
+          // evidence the `client` environment's own bare specifier resolution (Vite's normal
+          // browser-bundle path) still runs correctly. `canonicalBareSpecifierResolvePlugin` DOES
+          // activate for this environment too now (see that file's own "The `client` environment
+          // has the identical asymmetry" doc section) — `react` here is a single, ordinary bare
+          // import from a plain project file, not the wrapped-importer shape the plugin's fix
+          // actually changes anything for, so this assertion stays a general sanity check, not a
+          // test of the fix itself (see the identity test right below for that).
           assert(asset.code.includes('react'), asset.code)
           assertEquals(
             asset.contentType,
             'application/javascript; charset=utf-8',
           )
           // This first call is a cold start for the `client` environment's own dependency
-          // optimizer (the ONLY place in this file that exercises it — every other bare-specifier
-          // test goes through the SSR-only canonical resolver instead, which never touches Vite's
-          // real optimizer at all): resolving `react` triggers a crawl-end/commit cycle that keeps
-          // running in Vite's own background after `transformRequest` already returned, normally
-          // settled by a real browser's HMR reconnect-and-retry — never by a one-shot
-          // `transformClientAsset` call like this one. Closing the engine before that cycle
-          // settles leaves one of Vite's own internal promises permanently pending (confirmed via
-          // `DEBUG=vite:deps` — the resolve itself completes fast and cleanly; a real hang/dangling
-          // promise only starts to show up right after), which `deno test`'s own event-loop check
-          // then reports as `Promise resolution is still pending`. A brief pause here — long
-          // enough for that cycle to settle, well under this file's own per-test cost — is the
-          // fix; `close()` itself has nothing to do with it.
+          // optimizer: resolving `react` triggers a crawl-end/commit cycle that keeps running in
+          // Vite's own background after `transformRequest` already returned, normally settled by a
+          // real browser's HMR reconnect-and-retry — never by a one-shot `transformClientAsset`
+          // call like this one. Closing the engine before that cycle settles leaves one of Vite's
+          // own internal promises permanently pending (confirmed via `DEBUG=vite:deps` — the
+          // resolve itself completes fast and cleanly; a real hang/dangling promise only starts to
+          // show up right after), which `deno test`'s own event-loop check then reports as
+          // `Promise resolution is still pending`. A brief pause here — long enough for that cycle
+          // to settle, well under this file's own per-test cost — is the fix; `close()` itself has
+          // nothing to do with it.
+          await new Promise((resolve) => setTimeout(resolve, 300))
+        } finally {
+          await engine.close()
+        }
+      },
+    )
+  },
+)
+
+Deno.test(
+  'createSpaceDevEngine: transformClientAsset resolves a bare specifier to the SAME module identity ' +
+    'from a plain project file and from inside a node_modules-like importer (client environment ' +
+    'regression — real Preact HMR silent no-op)',
+  { ignore: !shouldRunEnvSensitiveTests },
+  async () => {
+    // Reproduces, in the `client` environment, the exact bug `bare-specifier-resolve.ts`'s own
+    // "The `client` environment has the identical asymmetry" doc section describes: a real,
+    // confirmed `zanix space dev --renderer preact` session (a published `jsr:@zanix/space@0.3.1`
+    // consumer project) where `@prefresh/core`'s own bare `import 'preact'` (a node_modules-like
+    // importer) resolved to a DIFFERENT module id than `preact/jsx-runtime`'s own internal import
+    // of the SAME physical `preact` file (a plain project-file-shaped importer) — splitting
+    // Preact's `options` singleton in two, silently breaking Fast-Refresh's `vnodesForComponent`
+    // bookkeeping (`flushUpdates()` ran with zero error and zero effect on every Comet edit). This
+    // test can't evaluate real Preact/`@prefresh` internals (that needs a real browser), but it
+    // proves the ROOT CAUSE those internals depend on — one canonical id for one physical file,
+    // regardless of importer shape — using the exact same `@test-fixtures/pkg-a`..`pkg-b`
+    // deterministic fixtures the `ssr`-side identity test above already relies on. `transformRequest`
+    // (unlike `ssrLoadModule`) never evaluates the module, so identity is checked at the URL level:
+    // `page.tsx`'s own direct import of `pkg-a`, and `pkg-b`'s own internal (bare, node_modules-like)
+    // import of the SAME `pkg-a`, must resolve to the literal same specifier string — two different
+    // strings is exactly what a duplicate Vite module instance looks like from the outside.
+    await withTempProject(
+      async (root) => {
+        await Deno.writeTextFile(
+          join(root, 'page.tsx'),
+          [
+            `import { touch } from '@test-fixtures/pkg-a'`,
+            `import { state as b } from '@test-fixtures/pkg-b'`,
+            `touch('page')`,
+            `export const marker = b`,
+            '',
+          ].join('\n'),
+        )
+      },
+      async (root) => {
+        const engine = await createSpaceDevEngine({ root, isRouteEntry })
+        try {
+          const pageAsset = await engine.transformClientAsset('/page.tsx')
+          assert(pageAsset, 'page.tsx must transform')
+          const pageToA = pageAsset.code.match(/from\s+"([^"]*pkg-a[^"]*)"/)
+          const pageToB = pageAsset.code.match(/from\s+"([^"]*pkg-b[^"]*)"/)
+          assert(pageToA, pageAsset.code)
+          assert(pageToB, pageAsset.code)
+
+          const pkgBAsset = await engine.transformClientAsset(
+            pageToB[1].split('?')[0],
+          )
+          assert(pkgBAsset, 'pkg-b must transform')
+          const pkgBToA = pkgBAsset.code.match(/from\s+"([^"]*pkg-a[^"]*)"/)
+          assert(pkgBToA, pkgBAsset.code)
+
+          // The actual regression check: before the `client`-environment fix, `pageToA` landed on
+          // `@deno/vite-plugin`'s wrapped `\0deno::...` id (via `/@id/__x00__deno::...`) while
+          // `pkgBToA` landed on the plain, unwrapped `/@fs/<abs>` id — two different strings for the
+          // same physical file.
+          assertEquals(
+            pageToA[1].split('?')[0],
+            pkgBToA[1].split('?')[0],
+            `page.tsx resolved pkg-a to ${pageToA[1]}, but pkg-b (a node_modules-like importer) ` +
+              `resolved the SAME pkg-a to ${pkgBToA[1]} — two different module ids for one file`,
+          )
+
           await new Promise((resolve) => setTimeout(resolve, 300))
         } finally {
           await engine.close()

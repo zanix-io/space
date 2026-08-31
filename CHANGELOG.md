@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.2] - 2026-08-31
 
 ### Added
 
@@ -31,9 +31,35 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
   (`run.ts`/`record-baseline.ts`/`check-baseline.ts`) share one implementation instead of drifting
   copies of it.
 
-## [0.3.2] - 2026-08-31
-
 ### Fixed
+
+- **Preact Comet HMR silently applied nothing under `zanix space dev`** — a real Comet edit
+  re-imported successfully (a genuine `200 OK` for the cache-busted module URL, the dev socket's own
+  `client-module-changed` → `window.__spaceApplyClientUpdate` → `import.meta.hot.accept` path all
+  firing correctly) yet the DOM never updated and nothing was logged, indistinguishable from HMR not
+  working at all. Root cause: the `client` Vite environment had the same `@deno/vite-plugin`
+  bare-specifier resolution asymmetry `canonicalBareSpecifierResolvePlugin` already fixes for `ssr`
+  (see `bare-specifier-resolve.ts`'s own doc) — it only needs an importer shaped like a real npm
+  package living inside `node_modules` and importing another bare specifier, the same ingredient
+  `react-dom`'s own `require('react')` supplies for the pre-existing `ssr`-side `Invalid hook call`
+  bug this plugin was originally written for. `@prefresh/core`'s own `import 'preact'` is exactly
+  that ingredient for Preact's dev-mode Fast Refresh — confirmed live: it resolved to a different
+  module id than `preact/jsx-runtime`'s own internal import of the same physical `preact` file,
+  splitting Preact's `options` singleton in two. `@prefresh/core` patches Fast Refresh's re-render
+  bookkeeping (`vnodesForComponent`) onto ONE copy; every vnode a Comet actually renders is created
+  through the OTHER, unpatched copy — so `replaceComponent`'s own `vnodesForComponent.get(OldType)`
+  lookup always misses, and the whole update flushes as a silent no-op. React never hit this: under
+  Vite 8/Rolldown, `react()`'s Fast Refresh is Rolldown's own native `oxc.jsx` transform, not a
+  Babel-injected npm package — there is no `node_modules`-resident package analogous to
+  `@prefresh/core` importing `react`/`react-dom` via a bare specifier for the asymmetry to ever
+  trigger. Fixed by letting `canonicalBareSpecifierResolvePlugin`'s canonical resolution run for the
+  `client` environment too, not just `ssr` — closing the same class of duplicate-module-instance bug
+  at its one real source instead of patching around it per-package. Verified against a real,
+  published-JSR consumer project: `preact` now resolves to the identical
+  `/node_modules/.vite/deps/
+  preact.js` id from both `@prefresh/core`'s and the Comet's own JSX
+  runtime's imports (previously a wrapped `@deno/vite-plugin` virtual id vs. a plain `/@fs/` path),
+  and editing a Comet now applies live, with no reload, confirmed in a real browser session.
 
 - **`composeSegments`'s own "no `error.tsx` anywhere" render-phase fallback crashed for every real
   consumer of this package**, the SSR-render-time sibling of `0.3.1`'s `buildSpaceClient` fix above.

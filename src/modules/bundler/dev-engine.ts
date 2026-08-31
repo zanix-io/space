@@ -506,15 +506,20 @@ export async function createSpaceDevEngine(
     // for bare specifiers (see its own doc), and must run before `deno()`'s own `resolveId` gets a
     // chance to. `deno()`'s own resolution stays the fallback for anything the canonical hook
     // deliberately leaves alone (relative/absolute/virtual/scheme-prefixed ids) — see that file's
-    // own doc.
+    // own doc. Unlike the other three plugins here, this one's own `resolveId` hook DOES act on the
+    // `client` environment too (not just `ssr`) — see that file's own "The `client` environment has
+    // the identical asymmetry" section for the real, confirmed Preact HMR regression this closes.
     //
     // `cjsInteropFallbackPlugin()` is listed before `deno()` so its `transform` hook always runs,
     // regardless of which of the two resolution paths described in its own doc a given file
     // arrives through; `deno({ onLoad })` is the primary integration point for the common path.
     //
     // All four fix real, confirmed `zanix space dev` blockers — see `native-runtime-modules.ts`'s,
-    // `ssr-module-evaluator.ts`'s, `bare-specifier-resolve.ts`'s, and `cjs-interop.ts`'s own docs —
-    // none of them touch the `client` environment or production SSR.
+    // `ssr-module-evaluator.ts`'s, `bare-specifier-resolve.ts`'s, and `cjs-interop.ts`'s own docs.
+    // `nativeRuntimeModulesPlugin()`/`cjsInteropFallbackPlugin()`/`deno({ onLoad })` stay `ssr`-only
+    // in effect (the first two are inherently SSR-shaped concerns; `onLoad` only ever fires for
+    // `deno()`'s own SSR-side module loading) — `canonicalBareSpecifierResolvePlugin()` is the one
+    // exception, per its own doc above.
     plugins: [
       nativeRuntimeModulesPlugin(),
       canonicalBareSpecifierResolvePlugin(),

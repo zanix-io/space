@@ -1,6 +1,7 @@
 import { createElement, Fragment } from 'preact'
 import type { ComponentChildren, ComponentType, VNode } from 'preact'
 import { fromFileUrl, resolve } from '@std/path'
+import { isFileUrl } from '@zanix/helpers'
 import type { ClassConstructor } from '@zanix/server'
 import type { ErrorBoundaryProps, LayoutProps, PageContext } from 'typings/page.ts'
 import logger from '@zanix/logger'
@@ -133,7 +134,23 @@ async function composeSegments<Params>(
       .DefaultErrorView as ComponentType<
         ErrorBoundaryProps
       >
-    const defaultErrorViewPath = await Deno.realPath(fromFileUrl(DEFAULT_ERROR_VIEW_PREACT_URL))
+    // Same mechanism `build-client.ts`'s own `errorBoundaryFiles.add` call already works around:
+    // `DEFAULT_ERROR_VIEW_PREACT_URL` is a real `https://jsr.io/...` URL for any consumer
+    // resolving this package via `jsr:@zanix/space` (never a local checkout), and
+    // `fromFileUrl()`/`Deno.realPath()` only accept the local `file://` case, throwing outright on
+    // a real `https:` one — crashing every render that reaches this "no error.tsx anywhere"
+    // fallback. A remaining gap: `resolveCometModuleUrl` below still expects a manifest keyed by a
+    // LOCAL comet's own `chunk.facadeModuleId` (`comet-plugin.ts`'s `generateBundle`) — for this
+    // remote entry that id is an opaque `\0deno::...`-wrapped one, never the plain URL
+    // `normalizeSourceKey` computes here, so the manifest lookup misses and falls back to the raw
+    // URL itself. That only affects CLIENT-SIDE re-hydration of this fallback boundary after a
+    // later error (an app with zero `error.tsx` anywhere) — the server-rendered response itself
+    // (this function's own return value) is correct once the crash below is gone, since
+    // `DefaultErrorView` itself is imported via the plain `DEFAULT_ERROR_VIEW_PREACT_SPECIFIER`
+    // relative import above, unaffected by this URL at all.
+    const defaultErrorViewPath = isFileUrl(DEFAULT_ERROR_VIEW_PREACT_URL)
+      ? await Deno.realPath(fromFileUrl(DEFAULT_ERROR_VIEW_PREACT_URL))
+      : DEFAULT_ERROR_VIEW_PREACT_URL
     node = createElement(SpaceErrorBoundary, {
       fallback: DefaultErrorView,
       params: paramsRecord,

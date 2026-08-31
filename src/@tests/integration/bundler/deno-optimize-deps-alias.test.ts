@@ -16,11 +16,11 @@ const TMP_ROOT = getTemporaryFolder(import.meta.url)
  * `33346375168`) every time, while failing locally with `Cannot find module '@test-fixtures/
  * pkg-c'`/discovery assertions coming back empty — consistent with a stale local `node_modules/
  * .vite` dep-optimizer cache or `@deno/loader` resolution state that a fresh checkout never
- * accumulates. `SKIP_LOCAL_ENV_SENSITIVE_TESTS` defaults to unset (these tests run normally
- * everywhere, including CI, which never sets it) — set it locally (shell profile/`.env`) to skip
- * this subset on a machine where they're known to misbehave, without weakening CI's own coverage.
+ * accumulates. Same `RUN_X_TESTS` convention this repo's own `RUN_S3_TESTS` already uses: ignored
+ * by default (a plain local `deno test` never runs this subset), `ci.yml`'s own "Run tests" step
+ * sets `RUN_ENV_SENSITIVE_TESTS: 'true'` explicitly so CI always runs it for real.
  */
-const SKIP_LOCAL_ENV_SENSITIVE_TESTS = Deno.env.get('SKIP_LOCAL_ENV_SENSITIVE_TESTS') === 'true'
+const shouldRunEnvSensitiveTests = Deno.env.get('RUN_ENV_SENSITIVE_TESTS') === 'true'
 
 /**
  * A real, minimal Vite dev server — `denoOptimizeDepsAliasPlugin()` alongside `deno()`, matching
@@ -144,7 +144,7 @@ Deno.test(
 
 Deno.test(
   'denoOptimizeDepsAliasPlugin: discovers a specifier a Comet imports directly, without it ever being in optimizeDeps.include',
-  { ignore: SKIP_LOCAL_ENV_SENSITIVE_TESTS },
+  { ignore: !shouldRunEnvSensitiveTests },
   async () => {
     const root = await Deno.makeTempDir({ dir: TMP_ROOT })
     try {
@@ -175,7 +175,7 @@ Deno.test(
 
 Deno.test(
   "denoOptimizeDepsAliasPlugin: discovers a specifier reached only through a Comet's own relative helper file",
-  { ignore: SKIP_LOCAL_ENV_SENSITIVE_TESTS },
+  { ignore: !shouldRunEnvSensitiveTests },
   async () => {
     const root = await Deno.makeTempDir({ dir: TMP_ROOT })
     try {
@@ -210,7 +210,7 @@ Deno.test(
 
 Deno.test(
   "denoOptimizeDepsAliasPlugin: never adds a newly-discovered specifier to the ssr environment's own optimizeDeps.include",
-  { ignore: SKIP_LOCAL_ENV_SENSITIVE_TESTS },
+  { ignore: !shouldRunEnvSensitiveTests },
   async () => {
     const root = await Deno.makeTempDir({ dir: TMP_ROOT })
     try {
@@ -298,7 +298,7 @@ Deno.test(
 Deno.test(
   "denoOptimizeDepsAliasPlugin: a specifier declared only in a non-client environment's own " +
     'optimizeDeps.include (never at the top level) is still discovered and aliased',
-  { ignore: SKIP_LOCAL_ENV_SENSITIVE_TESTS },
+  { ignore: !shouldRunEnvSensitiveTests },
   async () => {
     const root = await Deno.makeTempDir({ dir: TMP_ROOT })
     try {
@@ -333,7 +333,7 @@ Deno.test(
 Deno.test(
   'denoOptimizeDepsAliasPlugin: two comets sharing the same relative helper file only walk it ' +
     "once (the visited-guard), and still discover the helper's own specifier correctly",
-  { ignore: SKIP_LOCAL_ENV_SENSITIVE_TESTS },
+  { ignore: !shouldRunEnvSensitiveTests },
   async () => {
     const root = await Deno.makeTempDir({ dir: TMP_ROOT })
     try {
@@ -402,7 +402,7 @@ Deno.test(
 Deno.test(
   'denoOptimizeDepsAliasPlugin: skips an absolute-path import specifier — never treated as a ' +
     'bare package specifier, while a real bare specifier alongside it still gets discovered',
-  { ignore: SKIP_LOCAL_ENV_SENSITIVE_TESTS },
+  { ignore: !shouldRunEnvSensitiveTests },
   async () => {
     const root = await Deno.makeTempDir({ dir: TMP_ROOT })
     try {
@@ -436,7 +436,7 @@ Deno.test(
 Deno.test(
   'denoOptimizeDepsAliasPlugin: a relative import to a genuinely missing file is skipped, ' +
     'without throwing — and a real specifier alongside it is still discovered',
-  { ignore: SKIP_LOCAL_ENV_SENSITIVE_TESTS },
+  { ignore: !shouldRunEnvSensitiveTests },
   async () => {
     const root = await Deno.makeTempDir({ dir: TMP_ROOT })
     try {
@@ -501,7 +501,7 @@ Deno.test(
 
 Deno.test(
   "denoOptimizeDepsAliasPlugin: finds the nearest deno.json relative to root, not the process's own CWD",
-  { ignore: SKIP_LOCAL_ENV_SENSITIVE_TESTS },
+  { ignore: !shouldRunEnvSensitiveTests },
   async () => {
     const root = await Deno.makeTempDir({ dir: TMP_ROOT })
     try {

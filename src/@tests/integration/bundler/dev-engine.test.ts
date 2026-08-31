@@ -13,11 +13,12 @@ const TMP_ROOT = getTemporaryFolder(import.meta.url)
  * (`ubuntu-latest`, `actions/checkout` + a fresh `deno install`, GitHub Actions run
  * `33346375168`) every time, while failing locally with `Cannot find module
  * '@test-fixtures/pkg-c'` — consistent with a stale local `node_modules/.vite` dep-optimizer cache
- * or `@deno/loader` resolution state a fresh checkout never accumulates. Same convention and same
- * env var as `deno-optimize-deps-alias.test.ts`'s own — defaults to unset (these tests run
- * normally everywhere, including CI, which never sets it).
+ * or `@deno/loader` resolution state a fresh checkout never accumulates. Same `RUN_X_TESTS`
+ * convention and same env var as `deno-optimize-deps-alias.test.ts`'s own (mirroring this repo's
+ * own `RUN_S3_TESTS`) — ignored by default, `ci.yml`'s own "Run tests" step sets
+ * `RUN_ENV_SENSITIVE_TESTS: 'true'` explicitly so CI always runs it for real.
  */
-const SKIP_LOCAL_ENV_SENSITIVE_TESTS = Deno.env.get('SKIP_LOCAL_ENV_SENSITIVE_TESTS') === 'true'
+const shouldRunEnvSensitiveTests = Deno.env.get('RUN_ENV_SENSITIVE_TESTS') === 'true'
 
 const isRouteEntry = (id: string) => id.endsWith('/page.tsx') || id.endsWith('page.tsx')
 
@@ -791,7 +792,7 @@ export const result = {
 
 Deno.test(
   'createSpaceDevEngine: a bare specifier resolves to the SAME module identity from a plain project file and from inside a node_modules-like importer (ESM->ESM, CJS->CJS, CJS->ESM)',
-  { ignore: SKIP_LOCAL_ENV_SENSITIVE_TESTS },
+  { ignore: !shouldRunEnvSensitiveTests },
   async () => {
     await withTempProject(
       async (root) => {
@@ -834,7 +835,7 @@ Deno.test(
 
 Deno.test(
   'createSpaceDevEngine: ssrLoadModule invalidation produces a fresh generation for a bare-specifier identity chain too',
-  { ignore: SKIP_LOCAL_ENV_SENSITIVE_TESTS },
+  { ignore: !shouldRunEnvSensitiveTests },
   async () => {
     await withTempProject(
       async (root) => {

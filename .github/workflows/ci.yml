@@ -112,6 +112,12 @@ jobs:
           # already uses.
           RUN_S3_TESTS: 'true'
           S3_ENDPOINT: http://localhost:8333
+          # Same convention as RUN_S3_TESTS above: the `deno-optimize-deps-alias.test.ts`/
+          # `dev-engine.test.ts` subset this flag gates is a real dep-optimizer/`@deno/loader`
+          # resolution suite, ignored by default because it's confirmed to fail on a long-lived
+          # local dev machine's own stale `node_modules/.vite` cache — a fresh runner like this one
+          # never accumulates that state, so CI must explicitly opt back in to always run it.
+          RUN_ENV_SENSITIVE_TESTS: 'true'
         # `--min-dep-age=0`: this repo's dependencies (e.g. `@zanix/utils`) get published and
         # consumed here within the same day; without this flag, Deno's own minimum-dependency-age
         # safety check can reject a fresh resolution of a package published too recently.

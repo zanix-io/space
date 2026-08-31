@@ -83,6 +83,50 @@ import { getSharedLoader } from './deno-loader.ts'
  * Vite's own baseline features, not something `@deno/vite-plugin` adds. A bare specifier resolving
  * to real, JSX-containing `.tsx` source transpiles and evaluates correctly end to end. No workaround
  * is needed here.
+ *
+ * ## The `client` environment has the identical asymmetry — a real, live HMR regression
+ *
+ * This plugin's `resolveId` hook runs for the `client` environment too, not only `ssr`: the exact
+ * same `@deno/vite-plugin` asymmetry this file's header documents (a bare specifier resolving to two
+ * different ids depending on whether its importer is itself `node_modules`-resident) reproduces just
+ * as much for the `client` environment — it only needs an importer shaped like `react-dom`'s own
+ * internal `require('react')` in the SSR case: a real npm package, living inside `node_modules`,
+ * importing another package via a bare specifier. Confirmed empirically (`zanix space dev --renderer
+ * preact`, a real, published `jsr:@zanix/space@0.3.1` consumer project, Preact comet HMR silently
+ * not applying): the served dev responses showed `@prefresh/core`'s own `import { Component } from
+ * 'preact'` resolving to
+ * `/@fs/<abs-path>/node_modules/.deno/preact@.../preact/dist/preact.module.js` (the "wrapped
+ * importer" branch's plain-absolute-path output, taking Vite's `/@fs/` route), while the SAME
+ * physical file, reached through `preact/jsx-runtime`'s own internal (relative, not bare) import of
+ * `preact`, resolved to the "clean" `/node_modules/.deno/preact@.../preact/dist/preact.module.js`
+ * route instead — two different module ids, two different `preact` instances, two different
+ * `options` objects. Preact's Fast Refresh depends on `@prefresh/core` patching the SAME `options`
+ * singleton object Preact's own `createElement`/`jsxDEV` reads from (see `@prefresh/core`'s own
+ * `runtime/vnode.js`) — with two instances, `@prefresh/core`'s `vnodesForComponent.get(OldType)`
+ * (`replaceComponent`, `@prefresh/core`'s own `src/index.js`) always misses, and `flushUpdates()`
+ * completes with zero error and zero effect: a real Comet edit re-imports successfully (a genuine
+ * `200 OK` for the cache-busted module URL, confirmed via the dev socket's own
+ * `client-module-changed` → `window.__spaceApplyClientUpdate` path all firing correctly), yet the
+ * DOM never updates and nothing is logged — indistinguishable, from the outside, from Comet HMR
+ * simply not working at all.
+ *
+ * React never reproduced this because its dev-mode Fast Refresh here has no equivalent ingredient:
+ * under Vite 8/Rolldown, `react()` (`space-plugin.ts`) uses Rolldown's own native `oxc.jsx` refresh
+ * transform, not a Babel-injected npm package — there is no `node_modules`-resident package
+ * analogous to `@prefresh/core` importing `react`/`react-dom` via a bare specifier for the asymmetry
+ * to ever trigger. Preact's toolchain (`@prefresh/vite`/`@prefresh/core`/`@prefresh/utils`, real npm
+ * packages, real bare-specifier imports of `preact` from inside `node_modules`) is what supplies the
+ * missing ingredient — which is also why this went unnoticed until Preact HMR was specifically
+ * exercised against a real published consumer project rather than this repo's own fixtures (most of
+ * which, per this file's own note above, never populate a real on-disk `node_modules` the asymmetry
+ * needs to diverge from Vite's plain resolver in the first place).
+ *
+ * The fix is the same one already proven for `ssr`: let this plugin's canonical resolution run for
+ * `client` too, so `@deno/vite-plugin`'s own asymmetric branch never gets a chance to diverge there
+ * either. Nothing about {@linkcode resolveBareSpecifierCanonically} itself is `ssr`-specific — `root`
+ * comes from `this.environment.config.root` (already environment-agnostic), and the packages this
+ * matters for (`preact`, `@prefresh/core`, `@prefresh/utils`) are plain, isomorphic ESM with no
+ * `browser`-vs-`node` export-condition split for `@deno/loader`'s resolution to get wrong.
  */
 /**
  * The actual canonical resolution, factored out so `cjs-interop.ts` can call it directly — not
@@ -195,7 +239,8 @@ export function canonicalBareSpecifierResolvePlugin(): Plugin {
   return {
     name: 'zanix-space-dev-canonical-bare-specifier-resolve',
     resolveId(id, importer) {
-      if (this.environment?.name !== 'ssr') return null
+      const envName = this.environment?.name
+      if (envName !== 'ssr' && envName !== 'client') return null
       return resolveBareSpecifierCanonically(id, this.environment.config.root, importer)
     },
   }

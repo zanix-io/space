@@ -45,8 +45,25 @@ import { setValidationConfig } from 'modules/validation/config-registry.ts'
  * `createLogApiController` itself only ever actually RUNS server-side, inside the `async setup`
  * callback below, so resolving it there — via this non-literal specifier, not a top-level import —
  * keeps `log.controller.ts` out of that graph entirely. Single consumer (this file) — stays inline,
- * not promoted to a shared specifiers file, per this package's own established convention. */
-const LOG_CONTROLLER_SPECIFIER = 'modules/log-api/controllers/log.controller.ts'
+ * not promoted to a shared specifiers file, per this package's own established convention.
+ *
+ * Resolved via `import.meta.resolve()` (a real, absolute `file://`/`https://jsr.io/...` URL),
+ * NOT a bare `modules/...` specifier — confirmed via a real, isolated reproduction (not assumed)
+ * that a bare prefix-mapped specifier used inside a DYNAMIC `import()` is resolved against the
+ * RUNNING PROCESS's own root import map, not against this package's own `deno.jsonc` `"modules/":
+ * "./src/modules/"` scope, even though the exact same alias resolves this package's other,
+ * statically-imported `modules/...` specifiers above correctly. For any real consumer (no
+ * `modules/` alias of its own) this failed outright with "not a dependency and not in import map";
+ * for a consumer that happens to declare an UNRELATED `modules/` alias of its own (e.g. `@zanix/cli`'s
+ * own dev checkout, which aliases `modules/` to ITS OWN `./src/modules/`), it silently resolved to
+ * that consumer's own tree instead — `Module not found ".../cli/src/modules/log-api/controllers/
+ * log.controller.ts"` — since `defineSpaceApp`'s `logApi` registration is unconditional, this broke
+ * every real `zanix space dev`/`build` invocation, not a corner case. `import.meta.resolve()`
+ * computes the URL relative to THIS file's own location at call time — still a non-literal value
+ * from Vite's own static-analysis point of view (nothing here for `es-module-lexer`/Rollup to
+ * pattern-match as a static import target), so the worker-bundling concern above still holds,
+ * without depending on any consumer's import map at all. */
+const LOG_CONTROLLER_SPECIFIER = import.meta.resolve('../log-api/controllers/log.controller.ts')
 
 // Re-exported (not just imported) because `defineSpaceApp` below returns it — see
 // `typings/manifest.ts`'s own doc comment for why referenced public types must themselves be

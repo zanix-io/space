@@ -56,8 +56,7 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
   `client` environment too, not just `ssr` — closing the same class of duplicate-module-instance bug
   at its one real source instead of patching around it per-package. Verified against a real,
   published-JSR consumer project: `preact` now resolves to the identical
-  `/node_modules/.vite/deps/
-  preact.js` id from both `@prefresh/core`'s and the Comet's own JSX
+  `/node_modules/.vite/deps/preact.js` id from both `@prefresh/core`'s and the Comet's own JSX
   runtime's imports (previously a wrapped `@deno/vite-plugin` virtual id vs. a plain `/@fs/` path),
   and editing a Comet now applies live, with no reload, confirmed in a real browser session.
 

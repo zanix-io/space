@@ -130,6 +130,22 @@ jobs:
           NO_COLOR: '1'
         run: deno task bench:space | tee space-output.txt
 
+      # A REAL gate, unlike the reporting-only step above — see `check-baseline.ts`'s own doc for
+      # why only the four deterministic metrics (`htmlTransferredBytes`/`jsTransferredBytes`/
+      # `jsRequestCount`/`hydratedBoundaryCount`) are eligible to fail a run at all: they don't move
+      # with this runner's own load, unlike the FCP/LCP/interaction numbers the step above reports.
+      # Lives in this manual/weekly job, not `ci.yml`'s own per-PR `deno test` step, for the exact
+      # same reason `bench:space` itself does — same build+Chromium pipeline, same cost and flake
+      # surface this job's own header comment already accepted as a manual-only tradeoff. Runs a
+      # SECOND full build+measure pass rather than reusing the run above — `deno task bench:space`
+      # exits 0 unconditionally by design (see its own module doc), so its output was never in a
+      # shape this step could gate on without re-running the measurement itself.
+      - name: Check the deterministic byte/count baseline
+        shell: bash
+        env:
+          NO_COLOR: '1'
+        run: deno task bench:baseline:check | tee baseline-check-output.txt
+
       - name: Publish results to the job summary
         if: always()
         shell: bash
@@ -147,5 +163,14 @@ jobs:
             echo
             echo '```'
             cat space-output.txt
+            echo '```'
+            echo
+            echo '### Deterministic baseline check'
+            echo
+            echo 'Gates only on `htmlTransferredBytes`/`jsTransferredBytes` (±10%) and'
+            echo '`jsRequestCount`/`hydratedBoundaryCount` (exact match) — see `check-baseline.ts`.'
+            echo
+            echo '```'
+            cat baseline-check-output.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

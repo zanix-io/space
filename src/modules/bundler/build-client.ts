@@ -2,6 +2,7 @@ import type { Plugin } from 'vite'
 import { build } from 'vite'
 import deno from '@deno/vite-plugin'
 import { fromFileUrl, relative, resolve } from '@std/path'
+import { isFileUrl } from '@zanix/helpers'
 import type { PwaConfig } from 'typings/pwa.ts'
 import { spacePlugin } from './space-plugin.ts'
 import { cometPlugin } from './comet-plugin.ts'
@@ -205,7 +206,12 @@ export interface BuildSpaceClientResult {
  * sanitization here (not just avoiding slashes) is what keeps `toEntryName`'s OWN output and
  * Rollup's internal `chunk.name` for the SAME entry always identical, for any file path. */
 function toEntryName(root: string, filePath: string): string {
-  return relative(root, filePath)
+  // A scheme-prefixed filePath (http(s):, for the default error view's own real JSR-hosted URL —
+  // see the `errorBoundaryFiles.add` call below) is a remote entry, never a real filesystem path:
+  // `relative()` expects two real paths and mishandles a URL outright, so the URL string itself is
+  // sanitized directly instead of round-tripping it through `relative()` first.
+  const base = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(filePath) ? filePath : relative(root, filePath)
+  return base
     .replace(/\.[^./]+$/, '')
     .replace(/[\\/]/g, '-')
     .replace(/[^a-zA-Z0-9_-]/g, '_')
@@ -324,7 +330,23 @@ export async function buildSpaceClient(
     const defaultErrorViewUrl = renderer === 'preact'
       ? DEFAULT_ERROR_VIEW_PREACT_URL
       : DEFAULT_ERROR_VIEW_REACT_URL
-    errorBoundaryFiles.add(await Deno.realPath(fromFileUrl(defaultErrorViewUrl)))
+    // `defaultErrorViewUrl` is `DEFAULT_ERROR_VIEW_REACT_URL`/`DEFAULT_ERROR_VIEW_PREACT_URL`
+    // (`default-view-specifiers.ts`), itself `new URL(relativeSpecifier, import.meta.url).href` —
+    // for any REAL consumer (this package resolved via `jsr:@zanix/space`, never a local checkout)
+    // that's a genuine `https://jsr.io/@zanix/space/<version>/...` URL, not `file://`.
+    // `fromFileUrl()`/`Deno.realPath()` only accept the local `file://` case — calling either on a
+    // real `https:` URL throws outright, crashing every production build that reaches this branch
+    // (any app with at least one page whose composition chain has no `error.tsx` of its own — see
+    // `needsDefaultErrorView` above), for every consumer except this package's own test suite and
+    // anyone TEMP-linking a local checkout. For the remote case, the URL is passed straight
+    // through unresolved instead: `deno()`/`prefixPlugin` already resolve any other JSR-hosted
+    // bare/relative specifier the exact same way, so a real HTTPS entry needs no special handling
+    // beyond `toEntryName`'s own scheme-aware branch above.
+    errorBoundaryFiles.add(
+      isFileUrl(defaultErrorViewUrl)
+        ? await Deno.realPath(fromFileUrl(defaultErrorViewUrl))
+        : defaultErrorViewUrl,
+    )
   }
   for (const errorFile of errorBoundaryFiles) {
     const entryName = toEntryName(realRoot, errorFile)

@@ -31,6 +31,25 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
   (`run.ts`/`record-baseline.ts`/`check-baseline.ts`) share one implementation instead of drifting
   copies of it.
 
+## [0.3.2] - 2026-08-31
+
+### Fixed
+
+- **`composeSegments`'s own "no `error.tsx` anywhere" render-phase fallback crashed for every real
+  consumer of this package**, the SSR-render-time sibling of `0.3.1`'s `buildSpaceClient` fix above.
+  `DEFAULT_ERROR_VIEW_REACT_URL`/`DEFAULT_ERROR_VIEW_PREACT_URL` are real, absolute URLs computed
+  against `import.meta.url` — a genuine `https://jsr.io/@zanix/space/<version>/...` URL for any real
+  consumer resolving this package via `jsr:@zanix/space`, never `file://`.
+  `render-page-react.tsx`/`render-page-preact.ts` unconditionally ran that URL through
+  `fromFileUrl()`/`Deno.realPath()`, which only accept the local `file://` case and throw outright
+  on a real `https:` one, crashing every render that reaches this fallback (an app with at least one
+  page whose composition chain has no `error.tsx` of its own). Fixed the same way as
+  `build-client.ts`: a non-`file://` URL is passed straight through unresolved. A known remaining
+  gap: `resolveCometModuleUrl` still expects a manifest keyed by a local comet's own
+  `chunk.facadeModuleId`, an opaque wrapped id this remote entry never produces, so the manifest
+  lookup misses and falls back to the raw URL — this only affects client-side re-hydration of the
+  fallback boundary after a LATER error, never the server-rendered response itself.
+
 ## [0.3.1] - 2026-08-30
 
 ### Fixed

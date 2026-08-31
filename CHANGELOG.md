@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **A deterministic byte/count baseline for the `bench:space` architecture benchmark**
+  (`deno task bench:baseline`/`bench:baseline:check`). `bench:space` itself stays report-only (its
+  own doc already says so, correctly — FCP/LCP/interaction timings and even the renderer ratios in
+  `bench:renderer` move with whatever else a shared machine is doing, and gating on them would
+  produce noise, not signal), but four of its metrics —
+  `htmlTransferredBytes`/`jsTransferredBytes`/`jsRequestCount`/`hydratedBoundaryCount` — are
+  genuinely deterministic: the same build serves the same bytes every time, so a real regression
+  there (a dependency leaking into the wrong renderer's bundle, an extra request, a missing hydrated
+  boundary) is a real signal, not noise. `bench:baseline` records these into a committed
+  `baseline.json`; `bench:baseline:check` re-measures and diffs against it, failing on a byte metric
+  growing past a 10% tolerance or a discrete count changing at all. Deliberately NOT
+  `@zanix/server`'s own `bench:baseline` shape (a hand-curated `baseline.ts` with
+  statistically-derived regression margins) — that machinery exists because `server`'s ops/sec
+  numbers are genuinely noisy timings needing repeated measurement to know how much noise a gate
+  must absorb; these four metrics need no such margin, since a single run already is the ground
+  truth. Wired into `benchmarks.yml`'s existing manual/weekly `space` job, right after `bench:space`
+  itself — not into `ci.yml`'s per-PR `deno test` step, for the same cost/flake reason that job's
+  own header comment already gives for keeping `bench:space` off every PR. `variants/measure-all.ts`
+  factors the actual build+render+Chromium-measure pipeline out of `run.ts` so all three scripts
+  (`run.ts`/`record-baseline.ts`/`check-baseline.ts`) share one implementation instead of drifting
+  copies of it.
+
 ## [0.3.1] - 2026-08-30
 
 ### Fixed

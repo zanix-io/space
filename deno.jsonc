@@ -322,6 +322,13 @@
     // permission, so the grant stays exactly that narrow.
     "bench:renderer": "deno bench --allow-env",
     "bench:space": "deno run --allow-all src/@tests/benchmarks/space/run.ts",
+    // The deterministic-subset baseline (`htmlTransferredBytes`/`jsTransferredBytes`/
+    // `jsRequestCount`/`hydratedBoundaryCount` — see `record-baseline.ts`'s own doc for why only
+    // these four, unlike `bench:space`'s own FCP/LCP/interaction numbers). `bench:baseline`
+    // re-records `baseline.json`; `bench:baseline:check` diffs a fresh run against it and exits
+    // non-zero on a real regression.
+    "bench:baseline": "deno run --allow-all src/@tests/benchmarks/space/record-baseline.ts",
+    "bench:baseline:check": "deno run --allow-all src/@tests/benchmarks/space/check-baseline.ts",
     // A manual spike, NOT a benchmark and NOT a test — it produces no metrics and is not an
     // acceptance criterion. Named here purely so it is discoverable via `deno task`: it covers the
     // two things `deno test` cannot reach today (`reuseRetainedComets`, and a real Orbit A→B→A

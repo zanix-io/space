@@ -1,6 +1,7 @@
 import type { ComponentType, ReactElement, ReactNode } from 'react'
 import { Fragment, Suspense } from 'react'
 import { fromFileUrl, resolve } from '@std/path'
+import { isFileUrl } from '@zanix/helpers'
 import type { ClassConstructor } from '@zanix/server'
 import type { ErrorBoundaryProps, LayoutProps, PageContext } from 'typings/page.ts'
 import logger from '@zanix/logger'
@@ -237,7 +238,20 @@ async function composeSegments<Params>(
     // `error-boundary-marker.ts`'s own module doc) — `DefaultErrorView` is JUST as unreachable
     // from React's own postponed-recovery `<template>` without it: `build-client.ts` bundles this
     // SAME file, unconditionally, for exactly this branch.
-    const defaultErrorViewPath = await Deno.realPath(fromFileUrl(DEFAULT_ERROR_VIEW_REACT_URL))
+    // Same mechanism `build-client.ts`'s own `errorBoundaryFiles.add` call already works around
+    // (see `render-page-preact.ts`'s own doc, mirrored here): `DEFAULT_ERROR_VIEW_REACT_URL` is a
+    // real `https://jsr.io/...` URL for any consumer resolving this package via `jsr:@zanix/space`
+    // (never a local checkout), and `fromFileUrl()`/`Deno.realPath()` only accept the local
+    // `file://` case, throwing outright on a real `https:` one — crashing every render that
+    // reaches this "no error.tsx anywhere" fallback. A remaining gap: `resolveCometModuleUrl`
+    // below still expects a manifest keyed by a LOCAL comet's own `chunk.facadeModuleId`, which is
+    // an opaque wrapped id for this remote entry, never the plain URL `normalizeSourceKey`
+    // computes here — the manifest lookup misses and falls back to the raw URL, affecting only
+    // CLIENT-SIDE re-hydration of this fallback after a LATER error, never the server-rendered
+    // response itself (correct once the crash below is gone).
+    const defaultErrorViewPath = isFileUrl(DEFAULT_ERROR_VIEW_REACT_URL)
+      ? await Deno.realPath(fromFileUrl(DEFAULT_ERROR_VIEW_REACT_URL))
+      : DEFAULT_ERROR_VIEW_REACT_URL
     node = (
       <div
         {...{

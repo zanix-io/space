@@ -5,6 +5,86 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **A deterministic byte/count baseline for the `bench:space` architecture benchmark**
+  (`deno task bench:baseline`/`bench:baseline:check`). `bench:space` itself stays report-only (its
+  own doc already says so, correctly — FCP/LCP/interaction timings and even the renderer ratios in
+  `bench:renderer` move with whatever else a shared machine is doing, and gating on them would
+  produce noise, not signal), but four of its metrics —
+  `htmlTransferredBytes`/`jsTransferredBytes`/`jsRequestCount`/`hydratedBoundaryCount` — are
+  genuinely deterministic: the same build serves the same bytes every time, so a real regression
+  there (a dependency leaking into the wrong renderer's bundle, an extra request, a missing hydrated
+  boundary) is a real signal, not noise. `bench:baseline` records these into a committed
+  `baseline.json`; `bench:baseline:check` re-measures and diffs against it, failing on a byte metric
+  growing past a 10% tolerance or a discrete count changing at all. Deliberately NOT
+  `@zanix/server`'s own `bench:baseline` shape (a hand-curated `baseline.ts` with
+  statistically-derived regression margins) — that machinery exists because `server`'s ops/sec
+  numbers are genuinely noisy timings needing repeated measurement to know how much noise a gate
+  must absorb; these four metrics need no such margin, since a single run already is the ground
+  truth. Wired into `benchmarks.yml`'s existing manual/weekly `space` job, right after `bench:space`
+  itself — not into `ci.yml`'s per-PR `deno test` step, for the same cost/flake reason that job's
+  own header comment already gives for keeping `bench:space` off every PR. `variants/measure-all.ts`
+  factors the actual build+render+Chromium-measure pipeline out of `run.ts` so all three scripts
+  (`run.ts`/`record-baseline.ts`/`check-baseline.ts`) share one implementation instead of drifting
+  copies of it.
+
+## [0.3.2] - 2026-08-31
+
+### Fixed
+
+- **`composeSegments`'s own "no `error.tsx` anywhere" render-phase fallback crashed for every real
+  consumer of this package**, the SSR-render-time sibling of `0.3.1`'s `buildSpaceClient` fix above.
+  `DEFAULT_ERROR_VIEW_REACT_URL`/`DEFAULT_ERROR_VIEW_PREACT_URL` are real, absolute URLs computed
+  against `import.meta.url` — a genuine `https://jsr.io/@zanix/space/<version>/...` URL for any real
+  consumer resolving this package via `jsr:@zanix/space`, never `file://`.
+  `render-page-react.tsx`/`render-page-preact.ts` unconditionally ran that URL through
+  `fromFileUrl()`/`Deno.realPath()`, which only accept the local `file://` case and throw outright
+  on a real `https:` one, crashing every render that reaches this fallback (an app with at least one
+  page whose composition chain has no `error.tsx` of its own). Fixed the same way as
+  `build-client.ts`: a non-`file://` URL is passed straight through unresolved. A known remaining
+  gap: `resolveCometModuleUrl` still expects a manifest keyed by a local comet's own
+  `chunk.facadeModuleId`, an opaque wrapped id this remote entry never produces, so the manifest
+  lookup misses and falls back to the raw URL — this only affects client-side re-hydration of the
+  fallback boundary after a LATER error, never the server-rendered response itself.
+
+## [0.3.1] - 2026-08-30
+
+### Fixed
+
+- **`defineSpaceApp`'s always-on `logApi` registration crashed for every real consumer of this
+  package.** `LOG_CONTROLLER_SPECIFIER` (`modules/runtime/define-space-app.ts`) resolved
+  `log.controller.ts` through a bare, non-relative dynamic specifier
+  (`'modules/log-api/controllers/log.controller.ts'`) that only resolves correctly when the RUNNING
+  process's own root import map happens to declare a matching `modules/` alias pointing at this
+  package's own `src/modules/` — true only inside this package's own test suite (and, by accident,
+  inside `@zanix/cli`'s own dev checkout, which declares an UNRELATED `modules/` alias for its own
+  tree). For every real consumer this either failed outright
+  (`not a dependency and
+  not in import map`) or, worse, silently misresolved into the CONSUMER's
+  own unrelated `modules/` directory when one happened to exist, surfacing as a confusing
+  `Module not found` deep inside someone else's project. Since `logApi` is never opt-in, this broke
+  `zanix space dev`/`zanix
+  space build` for every project. Fixed by resolving the specifier via
+  `import.meta.resolve('../log-api/controllers/log.controller.ts')` instead — a real, absolute URL
+  computed relative to this file's own location, needing no cooperation from any consumer's import
+  map, while remaining just as invisible to Vite's static client-bundle analysis (the whole reason
+  this was a non-literal specifier to begin with).
+- **`buildSpaceClient`'s own default error-view auto-comet crashed for every real consumer of this
+  package**, for any app with at least one page whose composition chain has no `error.tsx` of its
+  own — the common case, not an edge one. `DEFAULT_ERROR_VIEW_REACT_URL`/
+  `DEFAULT_ERROR_VIEW_PREACT_URL` (`modules/router/default-view-specifiers.ts`) are real, absolute
+  URLs computed against `import.meta.url` — a genuine `https://jsr.io/@zanix/space/<version>/...`
+  URL for any real consumer resolving this package via `jsr:@zanix/space`, never `file://`.
+  `build-client.ts` unconditionally ran that URL through `fromFileUrl()`/`Deno.realPath()`, which
+  only accept the local `file://` case and throw outright on a real `https:` one — a crash this
+  package's own test suite never caught, since its own tests exercise a local checkout. Fixed by
+  passing a non-`file://` URL straight through unresolved (`toEntryName` gained a matching
+  scheme-aware branch, since `relative()` also only accepts two real filesystem paths) — `deno()`/
+  `prefixPlugin` already resolve any other JSR-hosted specifier the same way.
+
 ## [0.3.0] - 2026-08-30
 
 ### Added

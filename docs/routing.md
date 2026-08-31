@@ -13,7 +13,7 @@ routes/
   products/
     layout.tsx   # wraps page.tsx and every nested route below it — never a route of its own
     loading.tsx  # Suspense fallback for this segment and everything nested under it
-    error.tsx    # error boundary for this segment (see the limitation below)
+    error.tsx    # error boundary for this segment (see how recovery works below)
     page.tsx
     [id]/
       page.tsx   # wrapped by both routes/products/layout.tsx AND any layout.tsx here too
@@ -28,12 +28,29 @@ export default function ProductsLayout({ children }: LayoutProps) {
 }
 ```
 
-**A real limitation, not a bug**: React's server renderer only recovers a thrown error for content
-inside a `Suspense` boundary (Space always adds one where `error.tsx` exists), so a failing segment
-stays a `200` instead of a shell-breaking `500` — but the fallback's own content only becomes
-visible once the whole page hydrates client-side, which this package's Comet-only hydration story
-doesn't do. Until then, `error.tsx` is real protection against the response breaking; it just
-doesn't render its own UI yet.
+`layout.tsx`/`loading.tsx`/`error.tsx` are never restricted to `routesDir`'s own root — each can
+live at any directory level, scoping to that segment and everything nested below it. A route's error
+is resolved by walking from its own matched leaf up toward the root, using the nearest `error.tsx`
+found along the way — so a project can have one `error.tsx` at the root as a catch-all default, and
+another, more specific one a few levels deeper for a segment that needs its own recovery UI. See "A
+thrown `loader` never leaks raw JSON" below for the exact same leaf-to-root lookup, reused unchanged
+for a data-phase throw.
+
+**How a React failure actually recovers**: React's server renderer only recovers a thrown error for
+content inside a `Suspense` boundary (Space always adds one where `error.tsx` exists), so a failing
+segment stays a `200` instead of a shell-breaking `500` — but `render()`'s own `hasError` branch
+never actually runs during that same server response: React instead ships a postponed-recovery
+marker and finishes that one segment on the client. Every auto-generated client entry already calls
+`hydrateErrorBoundaries()` alongside `hydrateComets()`/`initOrbit()` (see
+[`docs/comets.md`](./comets.md#wiring-it-up)) for exactly this — it finds that marker and mounts the
+real `error.tsx` Fallback fresh, no extra wiring needed. Preact has no such gap to begin with:
+`preact-render-to-string`'s synchronous render recovers into an already-mounted boundary directly,
+so the Fallback's real markup is already correct and visible with zero client JS;
+`hydrateErrorBoundaries` still runs there too, purely to attach a working `reset` handler. Either
+way, `error.tsx`'s own `reset` prop is always `retryOutlet` once interactive — a real re-fetch/swap
+of the current page, not a local re-render of the segment's original children: this Fallback was
+mounted fresh, with no live reference to whatever originally threw, so only a real round-trip to the
+server can actually recover.
 
 ### Document shell
 
@@ -107,21 +124,87 @@ Three consequences worth stating plainly:
   renderer's document is already being produced (the real matrix is `renderer × pwa`, four
   combinations), with its own artifacts validated separately from the HTML.
 
+### Redirecting a page
+
+`SpacePageController.redirect` sends a page's own request elsewhere before `loader`/`component` ever
+run — evaluated on every `GET`, so a redirecting page never fetches data or renders anything:
+
+```tsx
+// routes/old-products/page.tsx
+import { Page, SpacePageController } from '@zanix/space'
+
+@Page()
+export default class OldProductsPage extends SpacePageController {
+  public static override redirect = { to: '/products', code: 301 }
+
+  // Required by the base class even though it's never reached at runtime — an unconditional
+  // redirect always wins before `component` is ever read.
+  public override component = () => null
+}
+```
+
+```ts
+export type RedirectConfig = {
+  to: string
+  code?: 301 | 302 | 307 | 308 // defaults to 301
+  condition?: (ctx: PageContext<unknown>) => boolean // defaults to always-true
+}
+```
+
+`to` resolves against the incoming request's own URL when relative, so `'/products'` and
+`'https://example.com/products'` both work. `condition`, when given, is evaluated against the
+request first — the redirect applies only when it returns `true`; omit it entirely for an
+unconditional redirect:
+
+```tsx
+public static override redirect = {
+  to: '/en',
+  condition: (ctx) => !ctx.request.headers.get('accept-language')?.startsWith('es'),
+}
+```
+
+An unconditional redirect is inferred at build time — `zanix space build`'s own document validation
+(see [`docs/validation.md`](./validation.md#exempting-a-route)) treats that page as never producing
+a document, so it's exempt from the usual per-route head/SEO checks. A `condition`-gated redirect
+isn't inferrable that way (whether it fires depends on the request), so it stays subject to the
+normal checks.
+
+**Always a `static` field** — `RedirectConfig` lives on the class itself
+(`SpacePageController.redirect`), never on an instance. Declaring `public override redirect = {...}`
+without `static` compiles (TypeScript's `override` check only validates instance members against the
+base class's own instance members, and silently ignores the mismatch here) but is never read:
+`handleGet` reads the class's own static `redirect`, not `this.redirect`, so a redirect declared
+this way never actually happens.
+
 ### Not-found page
 
-`routesDir`'s own `not-found.tsx` (a plain component, same convention as `error.tsx`) is what a
-request with no matching route serves — wrapped in the same root layout as every other page, going
-through the same `DocumentModel`/head resolution as any other page under either renderer:
+`routesDir`'s own `not-found.tsx` is what a request with no matching route serves — wrapped in the
+same root layout as every other page, going through the same `DocumentModel`/head resolution as any
+other page under either renderer. Unlike `error.tsx` above, this one is a **whole-app singleton, not
+a per-segment file**: it's only ever discovered at `routesDir`'s own root — a copy placed under a
+nested directory (`routes/products/not-found.tsx`) is never found, since there's no per-route
+"unmatched" segment to walk up from the way a thrown error has one. This holds even in an app routed
+under `[lang]` (see [`docs/i18n.md`](./i18n.md)): `routes/[lang]/not-found.tsx` is never discovered
+either — the file stays at the literal `routes/not-found.tsx`, and the SAME one serves every
+language's own unmatched request, regardless of which `[lang]` prefix the URL carried:
 
 ```tsx
 // routes/not-found.tsx
-export default function NotFound() {
+import type { NotFoundProps } from '@zanix/space'
+
+export default function NotFound({ lang, messages }: NotFoundProps) {
   return <h1>Page not found</h1>
 }
 
 // Optional — omit and the framework's own default (`{ title: 'Page not found' }`) applies.
 export const head = { title: 'Page not found', meta: [{ name: 'robots', content: 'noindex' }] }
 ```
+
+`NotFoundProps` is entirely optional to declare — a `NotFound` that takes no props at all, as the
+plain example above, works exactly the same way. `messages`, when the app declares `messagesDir`, is
+a pre-resolved catalog for the request's own `lang` — see
+[`docs/i18n.md`](./i18n.md#error-and-not-found-pages) for how it resolves without a matched route to
+read `:lang` from.
 
 ```ts
 // main.ts — opt in explicitly, same as application; @zanix/space never wires this up on its own
@@ -163,8 +246,27 @@ starts:
   built-in default above.
 
 The real error is always logged before any of this returns; `error.tsx` (custom or the built-in
-default) never receives more than `ErrorBoundaryProps.error` — nothing this framework decided is
-safe to persist/report on its own behalf.
+default) only ever receives `ErrorBoundaryProps.error` plus, when the app declares `messagesDir`, a
+pre-resolved `messages` catalog (see [`docs/i18n.md`](./i18n.md#error-and-not-found-pages)) —
+nothing else this framework decided is safe to persist/report on its own behalf.
+
+### Serving JSON instead of a document — `defineSpaceApp({ errorResponse: 'json' })`
+
+`errorResponse` decides what this package's own BUILT-IN not-found/error fallback renders when a
+route declares none of its own — `'view'` (the default) renders a real HTML document, `'json'`
+returns a plain, redacted JSON body instead (`serializeError`'s own safe allowlist, never `stack`),
+for an app built on `@zanix/space` purely for its routing, with no document shell of its own:
+
+```ts
+export default defineSpaceApp({ name: 'api-only', errorResponse: 'json' })
+```
+
+It never overrides an app's OWN `error.tsx`/`not-found.tsx` — declaring one is already an explicit
+choice to render a real page, regardless of this flag; it only decides what happens when a route
+declares none at all. It also never applies to a render-phase failure with no `error.tsx` anywhere
+in a page's own composition chain (`DefaultErrorView` above) — by the time that fallback is reached,
+the response has typically already started streaming as `text/html`, with no way to retroactively
+become JSON.
 
 Both this package's own built-in `DefaultNotFoundView` and `DefaultErrorView` carry a stable
 `data-space="not-found"`/`data-space="error"` attribute on their root element — an optional

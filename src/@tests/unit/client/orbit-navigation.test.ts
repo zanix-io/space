@@ -1,7 +1,8 @@
 import { assert, assertEquals, assertFalse } from '@std/assert'
 import { installTimerMock, resetDom } from './dom-test-setup.ts'
-import { initOrbit } from 'modules/client/orbit.ts'
+import { initOrbit, retryOutlet } from 'modules/client/orbit.ts'
 import { ORBIT_FRAGMENT_HEADER, ORBIT_OUTLET_ATTR } from 'modules/router/orbit-protocol.ts'
+import { setCometHydrator, setErrorBoundaryHydrator } from 'modules/client/hydrator-registry.ts'
 
 // `swapOutlet`/`onClick`/`onPopState` — the orchestration half of this module `orbit.test.ts`
 // deliberately leaves out (see that file's own doc): a real click/popstate, a real fetch, a real
@@ -310,6 +311,65 @@ Deno.test(
     await flush()
 
     assertEquals(fetchCalls.length, 1, 'the same click must only ever be handled once')
+  },
+)
+
+Deno.test(
+  'swapOutlet: BOTH the comet hydrator and the error-boundary hydrator are called with the fresh ' +
+    'outlet after every swap, not just the comet one — hydrator-registry.ts registers them ' +
+    'independently, and orbit.ts must call both',
+  async () => {
+    const { anchor, outlet } = setUp()
+    fetchImpl = () => Promise.resolve(okResponse(outletHtml('<p>new content</p>')))
+
+    const cometCalls: ParentNode[] = []
+    const errorBoundaryCalls: ParentNode[] = []
+    setCometHydrator((root = view.document) => void cometCalls.push(root))
+    setErrorBoundaryHydrator((root = view.document) => void errorBoundaryCalls.push(root))
+
+    try {
+      click(anchor)
+      await flush()
+
+      assertEquals(cometCalls, [outlet])
+      assertEquals(errorBoundaryCalls, [outlet])
+    } finally {
+      // Module-level registry state — never leaked into a later, unrelated test in this same file.
+      setCometHydrator(() => {})
+      setErrorBoundaryHydrator(() => {})
+    }
+  },
+)
+
+Deno.test(
+  'retryOutlet: a segment whose error PERSISTS across a retry still gets hydrateErrorBoundaries ' +
+    'called again on the freshly swapped outlet — the real regression this covers: a failing ' +
+    "segment's own 'reset' (retryOutlet) swaps in a BRAND NEW, un-recovered failure marker, which " +
+    'would otherwise sit there inert forever (hydrateErrorBoundaries only ever runs once, from the ' +
+    'client entry, at the very first page load) instead of recovering a second time',
+  async () => {
+    setUp()
+    fetchImpl = () => Promise.resolve(okResponse(outletHtml('<p>still failing</p>')))
+
+    const errorBoundaryCalls: ParentNode[] = []
+    setErrorBoundaryHydrator((root = view.document) => void errorBoundaryCalls.push(root))
+
+    try {
+      await retryOutlet()
+
+      assertEquals(
+        errorBoundaryCalls.length,
+        1,
+        'hydrateErrorBoundaries must run again after the retry',
+      )
+      assertEquals(
+        historyCalls,
+        [{ method: 'replaceState', url: CURRENT.href }],
+        'a retry of the SAME url is never a new history entry',
+      )
+    } finally {
+      setErrorBoundaryHydrator(() => {})
+    }
   },
 )
 

@@ -1,5 +1,5 @@
 import { ORBIT_FRAGMENT_HEADER, ORBIT_OUTLET_ATTR } from '../router/orbit-protocol.ts'
-import { getCometHydrator } from './hydrator-registry.ts'
+import { getCometHydrator, getErrorBoundaryHydrator } from './hydrator-registry.ts'
 import { findAnchor, resolveLinkInfo } from './link-info.ts'
 import { getPrefetchedFragment, initPrefetch, rescanPrefetchTargets } from './prefetch.ts'
 import type { PrefetchOptions } from './prefetch.ts'
@@ -250,6 +250,13 @@ async function swapOutlet(href: string, replace: boolean): Promise<void> {
     // directly (as it once did, React's) silently re-hydrates a Preact app with React on every
     // navigation. See `hydrator-registry.ts`'s own doc.
     getCometHydrator()?.(outlet)
+    // Same reasoning, same registry — and not merely for symmetry: a `retryOutlet()` swap (this
+    // module's own `reset` for a freshly client-mounted `error.tsx` Fallback) lands right back
+    // here. Without this call, a segment that fails AGAIN on retry would swap in its own new,
+    // un-recovered failure marker and never get a second chance to hydrate it — this page's error
+    // UI would just go blank/inert on the second failure, having already used its one and only
+    // `hydrateErrorBoundaries()` call at initial page load. See `hydrator-registry.ts`'s own doc.
+    getErrorBoundaryHydrator()?.(outlet)
     rescanPrefetchTargets(outlet)
   }
 
@@ -258,6 +265,29 @@ async function swapOutlet(href: string, replace: boolean): Promise<void> {
 
   if (replace) history.replaceState(null, '', href)
   else history.pushState(null, '', href)
+}
+
+/**
+ * Re-fetches the CURRENT page's own content from the server and swaps it into the outlet in
+ * place — reusing the exact same fetch+swap {@linkcode swapOutlet} already runs for a normal
+ * click-driven navigation, just aimed at `location.href` instead of a link's `href`.
+ *
+ * This is the real "reset" `hydrate-error-boundaries.ts`/`hydrate-error-boundaries-preact.ts` wire
+ * up for a freshly client-mounted `error.tsx` Fallback: that mount never received the ORIGINAL
+ * component that failed (see those modules' own doc for why — React's own postponed-recovery
+ * marker never ships it, and a Preact boundary's real server-rendered Fallback has no live
+ * reference to its own erstwhile `children` either), so there is nothing of its own to retry
+ * in-place. A genuine round-trip to the server is the only thing that can actually recover from a
+ * transient failure — `location.reload()` would do that too, but also throw away scroll position
+ * and every other Comet already hydrated on the page, for no reason a full Orbit fragment swap
+ * doesn't already avoid.
+ *
+ * `replace: true`, not `false` — a retry of the SAME url a person is already on is never a new
+ * history entry, the same reasoning `onPopState` below already applies to a back/forward
+ * navigation landing on an already-known url.
+ */
+export function retryOutlet(): Promise<void> {
+  return swapOutlet(location.href, true)
 }
 
 function onClick(event: MouseEvent): void {

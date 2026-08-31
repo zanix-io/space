@@ -180,6 +180,7 @@ export type { RtoTypes } from '@zanix/types'
 export type {
   ErrorBoundaryProps,
   LayoutProps,
+  NotFoundProps,
   PageActionContext,
   PageContext,
   PageFieldErrors,
@@ -275,7 +276,7 @@ export type {
 // configured directory without this package knowing anything about what a build step does with
 // it (compiling ICU, or not, is entirely `@zanix/cli`'s own concern — see that package's own
 // `compile-messages.ts`).
-export { getMessagesDir } from 'modules/i18n/messages-registry.ts'
+export { DEFAULT_IMPLICIT_LANG, getMessagesDir } from 'modules/i18n/messages-registry.ts'
 
 export {
   buildCanonicalLink,

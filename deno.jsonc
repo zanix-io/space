@@ -4,13 +4,11 @@
   "zanix": {
     "project": "library"
   },
-  "links": ["../server", "../utils"],
   "compilerOptions": {
     "strict": true,
     "noImplicitAny": true,
     "jsx": "react-jsx",
-    "jsxImportSource": "react",
-    "types": ["../utils/src/typings/index.d.ts"]
+    "jsxImportSource": "react"
   },
   "lint": {
     "rules": {
@@ -48,7 +46,7 @@
       "**/__tmp__"
     ],
     "plugins": [
-      "jsr:@zanix/utils@^4.0.0/linter/deno-zanix-plugin"
+      "jsr:@zanix/utils@^4.1.0/linter/deno-zanix-plugin"
     ],
     "report": "pretty"
   },
@@ -79,17 +77,17 @@
     // `@zanix/auth`'s own removal) for why a merely-declared, never-shipped-code alias still costs
     // real `node_modules/.deno` materialization on its own.
     "@zanix/app": "jsr:@zanix/app@^0.2.1",
-    "@zanix/server": "jsr:@zanix/server@^4.0.0",
-    "@zanix/errors": "jsr:@zanix/utils@^4.0.0/errors",
-    "@zanix/logger": "jsr:@zanix/utils@^4.0.0/logger",
+    "@zanix/server": "jsr:@zanix/server@^4.1.0",
+    "@zanix/errors": "jsr:@zanix/utils@^4.1.0/errors",
+    "@zanix/logger": "jsr:@zanix/utils@^4.1.0/logger",
     // Browser-safe logger entry point (`createClientLogger`/`Logger#ingest`) — see
     // `modules/client/client-logger.ts`'s own doc for why client-bundled code imports THIS alias
     // instead of `@zanix/logger` above, which pulls in `WorkerManager`/`Deno.readTextFile`.
-    "@zanix/logger/client": "jsr:@zanix/utils@^4.0.0/logger/client",
-    "@zanix/helpers": "jsr:@zanix/utils@^4.0.0/helpers",
-    "@zanix/workers": "jsr:@zanix/utils@^4.0.0/workers",
-    "@zanix/validator": "jsr:@zanix/utils@^4.0.0/validator",
-    "@zanix/types": "jsr:@zanix/utils@^4.0.0/types",
+    "@zanix/logger/client": "jsr:@zanix/utils@^4.1.0/logger/client",
+    "@zanix/helpers": "jsr:@zanix/utils@^4.1.0/helpers",
+    "@zanix/workers": "jsr:@zanix/utils@^4.1.0/workers",
+    "@zanix/validator": "jsr:@zanix/utils@^4.1.0/validator",
+    "@zanix/types": "jsr:@zanix/utils@^4.1.0/types",
     "react": "npm:react@^19.2.0",
     "react-dom": "npm:react-dom@^19.2.0",
     "@types/react": "npm:@types/react@^19.2.0",

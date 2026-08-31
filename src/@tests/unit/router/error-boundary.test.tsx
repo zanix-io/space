@@ -1,5 +1,6 @@
 import { assert, assertEquals, assertStrictEquals } from '@std/assert'
 import logger from '@zanix/logger'
+import { serializeError } from '@zanix/errors'
 import { SpaceErrorBoundary } from 'modules/router/error-boundary.tsx'
 import type { ErrorBoundaryProps } from 'typings/page.ts'
 import type { ErrorInfo } from 'react'
@@ -52,12 +53,12 @@ function withRealSetState(
 // -------------------------------------------------------------------------------------------
 
 Deno.test(
-  'SpaceErrorBoundary.getDerivedStateFromError: returns { hasError: true, error } for whatever ' +
-    'was thrown',
+  'SpaceErrorBoundary.getDerivedStateFromError: returns { hasError: true, error, formattedError } ' +
+    'for whatever was thrown — formattedError is serializeError(error), computed once, right here',
   () => {
     const error = new Error('boom')
     const state = SpaceErrorBoundary.getDerivedStateFromError(error)
-    assertEquals(state, { hasError: true, error })
+    assertEquals(state, { hasError: true, error, formattedError: serializeError(error) })
   },
 )
 
@@ -65,7 +66,11 @@ Deno.test(
   'SpaceErrorBoundary.getDerivedStateFromError: works for a non-Error thrown value too',
   () => {
     const state = SpaceErrorBoundary.getDerivedStateFromError('a thrown string')
-    assertEquals(state, { hasError: true, error: 'a thrown string' })
+    assertEquals(state, {
+      hasError: true,
+      error: 'a thrown string',
+      formattedError: serializeError('a thrown string'),
+    })
   },
 )
 
@@ -76,7 +81,7 @@ Deno.test(
 Deno.test(
   'componentDidCatch: logs the error and the component stack via logger.error',
   () => {
-    const instance = new SpaceErrorBoundary({ children: null, fallback: Fallback })
+    const instance = new SpaceErrorBoundary({ children: null, fallback: Fallback, params: {} })
     const spy = spyOnLoggerError()
     try {
       const error = new Error('segment blew up')
@@ -100,17 +105,22 @@ Deno.test(
 
 Deno.test('render: renders children unchanged while hasError is false', () => {
   const children = <p>healthy content</p>
-  const instance = new SpaceErrorBoundary({ children, fallback: Fallback })
+  const instance = new SpaceErrorBoundary({ children, fallback: Fallback, params: {} })
   assertStrictEquals(instance.render(), children)
 })
 
 Deno.test(
   'render: once hasError is true, renders the fallback with the caught error and a reset callback',
   () => {
-    const instance = new SpaceErrorBoundary({ children: <p>healthy</p>, fallback: Fallback })
+    const instance = new SpaceErrorBoundary({
+      children: <p>healthy</p>,
+      fallback: Fallback,
+      params: {},
+    })
     const caught = new Error('caught during render')
+    const formattedCaught = serializeError(caught)
     // Manufactured state — exactly what getDerivedStateFromError would have produced.
-    instance.state = { hasError: true, error: caught }
+    instance.state = { hasError: true, error: caught, formattedError: formattedCaught }
 
     const output = instance.render()
     assert(output !== null && typeof output === 'object')
@@ -118,6 +128,7 @@ Deno.test(
     const element = output as any
     assertStrictEquals(element.type, Fallback)
     assertStrictEquals(element.props.error, caught)
+    assertStrictEquals(element.props.formattedError, formattedCaught)
     assertEquals(typeof element.props.reset, 'function')
   },
 )
@@ -129,16 +140,21 @@ Deno.test(
 Deno.test(
   'reset: clears hasError back to false and drops the caught error, via setState',
   () => {
-    const instance = new SpaceErrorBoundary({ children: <p>healthy</p>, fallback: Fallback })
+    const instance = new SpaceErrorBoundary({
+      children: <p>healthy</p>,
+      fallback: Fallback,
+      params: {},
+    })
     withRealSetState(instance)
-    instance.state = { hasError: true, error: new Error('caught') }
+    const caught = new Error('caught')
+    instance.state = { hasError: true, error: caught, formattedError: serializeError(caught) }
 
     // `reset` is private at the type level — this is the one legitimate way to reach it from a
     // test, same as `render()`/`componentDidCatch` are reached by their own public signatures.
     const boundary = instance as unknown as { reset: () => void }
     boundary.reset()
 
-    assertEquals(instance.state, { hasError: false, error: undefined })
+    assertEquals(instance.state, { hasError: false, error: undefined, formattedError: {} })
     // And render() now reflects the reset — back to children, not the fallback.
     assertStrictEquals(instance.render(), instance.props.children)
   },

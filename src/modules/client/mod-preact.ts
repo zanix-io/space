@@ -18,6 +18,10 @@ export {
 } from '../render/read-initial-state.ts'
 /** Hydrates every Comet boundary in `root` via Preact core's `hydrate`/`render`. */
 export { hydrateComets } from './hydrate-comets-preact.ts'
+/** Attaches real interactivity to every `error.tsx` Fallback this page's SSR pass already rendered
+ * — see `hydrate-error-boundaries-preact.ts`'s own doc for why Preact needs no leftover-marker
+ * detection the way `@zanix/space/client`'s own counterpart does. */
+export { hydrateErrorBoundaries } from './hydrate-error-boundaries-preact.ts'
 export {
   /** Runs a Comet's hydration according to its own `CometStrategy` (`load`/`idle`/`visible`/
    * `media`/`none`). */

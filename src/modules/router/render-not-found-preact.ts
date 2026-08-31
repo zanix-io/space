@@ -1,6 +1,6 @@
 import { createElement, Fragment } from 'preact'
 import type { ComponentChildren, ComponentType } from 'preact'
-import type { LayoutProps } from 'typings/page.ts'
+import type { LayoutProps, NotFoundProps } from 'typings/page.ts'
 import { renderToResponse } from '../render/render-to-response-preact.ts'
 import { resolveCssHrefs } from '../render/css-manifest.ts'
 import { resolvePwaHead } from '../pwa/pwa-registry.ts'
@@ -32,16 +32,16 @@ import type { NotFoundRenderContext } from './not-found-renderer-registry.ts'
 export function renderNotFoundResponse(
   context: NotFoundRenderContext,
 ): Promise<Response> {
-  const { NotFound, RootLayout, head, fragmentOnly } = context
+  const { NotFound, RootLayout, head, fragmentOnly, lang, messages } = context
 
-  const View = NotFound as ComponentType
+  const View = NotFound as ComponentType<NotFoundProps>
   // `display: contents` comes from `builtin-css.ts`'s own stylesheet rule, targeting this same
   // `ORBIT_OUTLET_ATTR` selector — never an inline `style` prop here (a strict `style-src` with
   // no `'unsafe-inline'` silently drops those).
   const outlet = createElement(
     'div',
     { [ORBIT_OUTLET_ATTR]: '' },
-    createElement(View, null),
+    createElement(View, { lang, messages }),
   )
 
   const resolvedHead = resolveHead([head])

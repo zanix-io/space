@@ -502,6 +502,29 @@ export interface SpaceAppConfig {
    */
   renderer?: 'react' | 'preact'
   /**
+   * What this app's own BUILT-IN error/not-found fallback (`DefaultErrorView`/`DefaultNotFoundView`)
+   * renders when a route declares no `error.tsx`/`not-found.tsx` of its own. Defaults to `'view'` —
+   * the same behavior as omitting this field entirely (a real, rendered HTML document, wrapped in
+   * the app's root layout).
+   *
+   * `'json'` is for an app that never wants to serve a rendered HTML page at all — a pure API/
+   * backend built on `@zanix/space` purely for its routing, with no document shell of its own. The
+   * JSON body is `serializeError(error)` (`@zanix/errors`) for a data-phase (`loader`) failure, or
+   * `serializeError(new HttpError('NOT_FOUND'))` for a 404 — the SAME redacted, structured shape
+   * `logger.error(...)` and `@zanix/server`'s own HTTP error responses already use everywhere else
+   * in this ecosystem.
+   *
+   * Never overrides an app's OWN `error.tsx`/`not-found.tsx` — declaring one is already an explicit
+   * choice to render a real page, regardless of this flag; it only decides what happens when a
+   * route declares none at all. Also never applies to a RENDER-phase failure with no `error.tsx`
+   * anywhere in a page's own composition chain (`composeSegments`'s own `DefaultErrorView` fallback,
+   * see that function's own doc): by the time that's reached, React's own response has typically
+   * already started streaming as `text/html`, with no way to retroactively become JSON — keeping
+   * that ONE fallback format-independent (always HTML, on both renderers) avoids a flag that would
+   * silently work for Preact and not for React.
+   */
+  errorResponse?: 'view' | 'json'
+  /**
    * Document validation policy for this project — which rules participate, at what severity, and
    * whether warnings block a build.
    *

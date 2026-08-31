@@ -26,6 +26,8 @@ Deno.test(
       ErrorFallback: FallbackView,
       RootLayout: undefined,
       error: new Error('fixture-loader-boom'),
+      formattedError: {},
+      params: {},
       fragmentOnly: true,
     }
 
@@ -51,6 +53,8 @@ Deno.test(
         ErrorFallback: FallbackView,
         RootLayout: undefined,
         error: new Error('fixture-loader-boom'),
+        formattedError: {},
+        params: {},
         fragmentOnly: false,
       })
       const html = await response.text()

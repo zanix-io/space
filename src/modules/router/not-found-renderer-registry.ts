@@ -1,5 +1,6 @@
 import { InternalError } from '@zanix/errors'
 import type { HeadDescriptor } from './head-descriptor.ts'
+import type { Messages } from '../i18n/load-messages.ts'
 
 /**
  * Everything a `NotFoundRenderer` needs to produce a not-found document, with no renderer-specific
@@ -22,6 +23,14 @@ export type NotFoundRenderContext = {
   head: HeadDescriptor | undefined
   /** `true` for an Orbit navigation that hit a 404 — returns just the outlet fragment. */
   fragmentOnly: boolean
+  /** This request's resolved language, if this app calls `langPreHandler(...)` — resolved via
+   * `resolveRequestLang` (cookie → `Accept-Language` → `defaultLang`), since a 404 has no matched
+   * route to read a `:lang` param from. `undefined` when no `langPreHandler` is registered at
+   * all. Passed straight through to the app's own `not-found.tsx`, if it accepts it. */
+  lang: string | undefined
+  /** `not-found-handler.ts`'s own `loadMessages({ lang })` result, resolved lazily — only once a
+   * 404 is actually being rendered. See `NotFoundProps.messages`'s own doc for the full contract. */
+  messages?: Messages
 }
 
 /**

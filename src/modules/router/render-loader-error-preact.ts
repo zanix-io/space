@@ -28,7 +28,8 @@ import type { LoaderErrorRenderContext } from './loader-error-renderer-registry.
 export function renderLoaderErrorResponse(
   context: LoaderErrorRenderContext,
 ): Promise<Response> {
-  const { ErrorFallback, RootLayout, error, fragmentOnly } = context
+  const { ErrorFallback, RootLayout, error, formattedError, fragmentOnly, params, messages } =
+    context
 
   const Fallback = ErrorFallback as ComponentType<ErrorBoundaryProps>
   // Same no-op `reset` reasoning as React's own counterpart — a fresh server render, not a
@@ -39,7 +40,7 @@ export function renderLoaderErrorResponse(
   const outlet = createElement(
     'div',
     { [ORBIT_OUTLET_ATTR]: '' },
-    createElement(Fallback, { error, reset: () => {} }),
+    createElement(Fallback, { error, formattedError, reset: () => {}, params, messages }),
   )
 
   if (fragmentOnly) {

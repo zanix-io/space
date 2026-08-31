@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.3.0] - 2026-08-29
+## [0.3.0] - 2026-08-30
 
 ### Added
 
@@ -29,22 +29,6 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
   compiles anything) does `loadMessages()` still read `messagesDir` live. See `@zanix/cli`'s own
   CHANGELOG for the matching `writeCompiledMessagesTree` fix this pairs with.
 
-### Fixed
-
-- **`Messages` (`loadMessages()`'s own return type) no longer lies once `zanix space build` has
-  compiled `messagesDir`.** It was `Record<string, string>`, but the build compiles every catalog
-  value to ICU AST in place — so in production a value is actually a `CompiledMessageNode[]`, not a
-  `string`, with no type error at any call site that interpolated `messages[key]` directly as a JSX
-  child. That pattern rendered fine under `zanix space dev` (which never compiles) and crashed in
-  production ("Objects are not valid as a React child"). `Messages` is now
-  `Record<string, string |
-  CompiledMessageNode[]>`, and this package's own
-  README/`docs/i18n.md`/JSDoc examples now show the safe pattern (`@zanix/space-ui`'s
-  `IntlProvider`/`useIntl().formatMessage()`, which already accepted either shape) as the primary
-  usage, not direct interpolation.
-
-### Added
-
 - **`SpaceAppConfig.clientEntry`, and a zero-config, auto-generated default client entry.** Every
   full-document response's own bootstrap script now wires `hydrateComets()`/`initOrbit()` in
   automatically, correctly `nonce`'d for a strict `script-src` CSP, with no file to write — the same
@@ -57,21 +41,6 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
   `hydrateComets()`/`initOrbit()` itself. A production boot loads this entry's own build manifest
   via the new `loadClientEntryManifest('./.dist/client/client-entry-manifest.json')`, the same
   convention `loadCometManifest`/`loadCssManifest` already follow.
-
-### Changed
-
-- **`defineComet`, `loadCometManifest`, and `resolveCometModuleUrl` moved from `@zanix/space` (`.`)
-  to `@zanix/space/comet`.** Breaking for any Comet still importing `defineComet` from
-  `'@zanix/space'` directly — update it to `'@zanix/space/comet'`. This closes a real, confirmed
-  browser-build failure: `.` also carries genuinely server/dev-only code in the same barrel
-  (`defineSpaceApp`, and `SpaceDevSocket`, a real TC39-decorated class a normal browser-side
-  transform can't even parse) — a plain ES module barrel resolves every one of its own export
-  statements' source files the moment anything is imported from it, so a Comet's own
-  `import { defineComet } from '@zanix/space'` forced that entire server-side graph into the client
-  bundle too. Type-only exports (`CometComponent`, `CometBoundaryComponent`, ...) are unaffected —
-  erased at build time, still available from `.`.
-
-### Added
 
 - **`SpaceAppConfig.clientBuildDir`** — set to the client build's own output directory (e.g.
   `'./.dist/client'`) and this app's `setup()` automatically loads every production manifest a real
@@ -134,7 +103,87 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
   `@prefresh/core`, where a stale version-hash reference silently loaded a second, duplicate module
   instance and broke Preact Fast-Refresh with no error.
 
+- **`hydrateErrorBoundaries()`** (`@zanix/space/client`, `@zanix/space/client/preact`;
+  `modules/client/hydrate-error-boundaries.ts`/`-preact.ts`, `modules/client/reconstruct-error.ts`,
+  `modules/router/error-boundary-marker.ts`) — the client-side half of `error.tsx` recovery, wired
+  into every auto-generated client entry (`client-entry-plugin.ts`) right alongside
+  `hydrateComets()`/`initOrbit()`. On React, mounts the real `error.tsx` Fallback fresh once it
+  finds React's own postponed streaming-SSR recovery marker (`<!--$!-->` + `<template>`) — the
+  client-side counterpart `error-boundary.tsx`'s own doc previously described as "not implemented
+  yet." On Preact, attaches real interactivity (a working `reset` button) to a Fallback whose SSR
+  pass already rendered correctly, since Preact core's own renderer never gives up on a boundary the
+  way React's does. Re-invoked after every Orbit outlet swap (`hydrator-registry.ts`'s new
+  `getErrorBoundaryHydrator`/`setErrorBoundaryHydrator`) so a retried, still-failing segment
+  recovers again — not just once, at initial page load.
+- **`ErrorBoundaryProps.params`/`.messages`/`.formattedError`, and `reset` is now a real retry** —
+  an `error.tsx` now receives this segment's own resolved route params, its resolved i18n message
+  catalog (`messages`, `undefined` when the app has no `messagesDir`; falls back to the new
+  `DEFAULT_IMPLICIT_LANG` catalog folder for a segment with no real `lang` param), and
+  `formattedError` (`serializeError(error)` from `@zanix/errors`, the same redacted shape
+  `logger.error`/`@zanix/server`'s own HTTP error responses already use), alongside the raw `error`.
+  Once client-hydrated, `reset` is `retryOutlet` (`modules/client/orbit.ts`) — a real Orbit
+  re-fetch/swap of the current page, not a local in-place re-render: a freshly mounted Fallback has
+  no live reference to whatever originally threw, so only a real round-trip to the server can
+  actually recover.
+- **`NotFoundProps` (new type)** — `not-found.tsx` can now declare `{ lang, messages }` in its own
+  default export's props, resolved via the new `resolveRequestLang()`
+  (`modules/middleware/lang-pre-handler.ts`, cookie → `Accept-Language` → `defaultLang`, the same
+  priority `langPreHandler` itself already applies) for a 404, which has no matched route to draw a
+  `:lang` param from. Optional — an existing `not-found.tsx` declaring neither keeps working
+  unchanged.
+- **A page with NO `error.tsx` anywhere in its own composition chain no longer crashes with a raw,
+  empty `500` on a render-phase failure.** `composeSegments` (`render-page-react.tsx`/
+  `render-page-preact.ts`) now wraps the whole page in a fallback `SpaceErrorBoundary` using this
+  package's own `DefaultErrorView`, exactly as `loader-error-handler.ts` already did on the
+  data-phase (`loader`) side — auto-bundled as a real client entry (`build-client.ts`, gated on at
+  least one page actually needing it) the same way an author's own `error.tsx` already is.
+  `cometPlugin`'s own `CometPluginOptions.knownEntryPaths` now also seeds `comets-manifest.json`
+  entries directly (not just skips duplicate-chunk forcing), which is what makes an auto-discovered
+  `error.tsx`/`DefaultErrorView` — never author-marked `'use comet'` — resolvable client-side at
+  all.
+- **`SpaceAppConfig.errorResponse: 'view' | 'json'`**
+  (`modules/router/error-response-format-registry.ts`) — for an app built on `@zanix/space` purely
+  for its routing, with no document shell of its own: when a route declares no
+  `error.tsx`/`not-found.tsx`, the built-in fallback can now return a plain JSON body
+  (`httpErrorResponse(error)`/`httpErrorResponse(new HttpError('NOT_FOUND'))`, `@zanix/server`)
+  instead of a rendered HTML document. Checked only in `loader-error-handler.ts`/
+  `not-found-handler.ts` — never overrides an app's own `error.tsx`/`not-found.tsx`, and never
+  applies to the render-phase "no error.tsx anywhere" fallback above, which by the time it's reached
+  has typically already started streaming `text/html`, with no way to retroactively become JSON.
+- **`createReloader()`/`ReloadDescriptor`** (`@zanix/space/comet`, `modules/comets/reloader.ts`) —
+  replays a `RestClient`/`GraphQLClient` call a Comet received a `reload: true` descriptor for, as a
+  plain prop, the same way it already receives its initial data. Renderer-neutral, always rejects on
+  failure rather than swallowing it — no `onError` option of its own. New `docs/data-fetching.md`
+  documents the full round trip, including `@zanix/server`'s own `reloadDescriptor`/
+  `reloadableHeaders`/`schemaApplication` contract on the other side of the wire (that half ships
+  from `@zanix/server`'s own release, not this package's).
+
+### Changed
+
+- **`defineComet`, `loadCometManifest`, and `resolveCometModuleUrl` moved from `@zanix/space` (`.`)
+  to `@zanix/space/comet`.** Breaking for any Comet still importing `defineComet` from
+  `'@zanix/space'` directly — update it to `'@zanix/space/comet'`. This closes a real, confirmed
+  browser-build failure: `.` also carries genuinely server/dev-only code in the same barrel
+  (`defineSpaceApp`, and `SpaceDevSocket`, a real TC39-decorated class a normal browser-side
+  transform can't even parse) — a plain ES module barrel resolves every one of its own export
+  statements' source files the moment anything is imported from it, so a Comet's own
+  `import { defineComet } from '@zanix/space'` forced that entire server-side graph into the client
+  bundle too. Type-only exports (`CometComponent`, `CometBoundaryComponent`, ...) are unaffected —
+  erased at build time, still available from `.`.
+
 ### Fixed
+
+- **`Messages` (`loadMessages()`'s own return type) no longer lies once `zanix space build` has
+  compiled `messagesDir`.** It was `Record<string, string>`, but the build compiles every catalog
+  value to ICU AST in place — so in production a value is actually a `CompiledMessageNode[]`, not a
+  `string`, with no type error at any call site that interpolated `messages[key]` directly as a JSX
+  child. That pattern rendered fine under `zanix space dev` (which never compiles) and crashed in
+  production ("Objects are not valid as a React child"). `Messages` is now
+  `Record<string, string |
+  CompiledMessageNode[]>`, and this package's own
+  README/`docs/i18n.md`/JSDoc examples now show the safe pattern (`@zanix/space-ui`'s
+  `IntlProvider`/`useIntl().formatMessage()`, which already accepted either shape) as the primary
+  usage, not direct interpolation.
 
 - **`zanix space dev` silently registered zero real routes for every `@Page(...)`-decorated page —
   every request 404s, with no error anywhere.** `createSpaceDevEngine`'s own `ssrLoadModule`
@@ -272,6 +321,31 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
   `'server-only'` directive that makes that failure mode actionable rather than a bare "module not
   found." Now marked `'server-only'`, consistent with every other server-only module in this
   package.
+
+- **A route with no dynamic segments at all (e.g. the plain `population` template's root `/`, no
+  `[lang]`) could crash `resolvePageChrome`/`renderLoaderErrorPage`/an app's own `error.tsx`/
+  `not-found.tsx` on an unguarded `params.lang` read.** `ctx.payload.params` is `undefined`, never
+  `{}`, for that case — `toPageContext` (`space-page-controller.ts`) now defaults it once, at the
+  source, instead of three independent call sites each guarding (or forgetting to guard) against it
+  themselves.
+- **`zanix space dev` 404'd on this package's own built-in `default-error-view.tsx`/`-preact.ts`,
+  and on any file a Deno workspace member resolves OUTSIDE the dev server's own project root** (a
+  sibling `@zanix/space`/`@zanix/space-ui` checkout linked via `deno.json`'s `workspace`, for
+  instance) — `resolveCometModuleUrl` (`comet-manifest.ts`) now emits Vite's own
+  `/@fs/<absolute-path>` convention for exactly that case instead of an un-prefixed absolute path no
+  dev route ever answers, and `createSpaceDevEngine` now sets `server.fs.strict: false` — Vite's
+  default `fs.allow` walk stops at the first `.git`/lockfile boundary it finds, which a Deno
+  workspace member's own `.git` (every project `zanix new` scaffolds has one) never lets it cross to
+  reach the shared workspace root.
+- **Resolving `DEFAULT_ERROR_VIEW_REACT_URL`/`DEFAULT_ERROR_VIEW_PREACT_URL`
+  (`default-view-specifiers.ts`) via `import.meta.resolve` broke every page render under
+  `zanix space dev`** — its own Vite-based SSR module runner intercepts `import.meta.resolve` but
+  leaves the plain `import.meta.url` property untouched, so calling it threw
+  `TypeError
+  [ERR_UNSUPPORTED_ESM_URL_SCHEME]` the moment
+  `render-page-react.tsx`/`render-page-preact.ts` loaded through that runner (which they always do,
+  in dev). Fixed by resolving via plain `new URL(specifier, import.meta.url)` algebra instead — pure
+  string computation, never touches Vite's patched function.
 
 ## [0.2.0] - 2026-08-26
 

@@ -1,6 +1,6 @@
 import { createElement, Fragment } from 'preact'
 import type { ComponentChildren, ComponentType, VNode } from 'preact'
-import { resolve } from '@std/path'
+import { fromFileUrl, resolve } from '@std/path'
 import type { ClassConstructor } from '@zanix/server'
 import type { ErrorBoundaryProps, LayoutProps, PageContext } from 'typings/page.ts'
 import logger from '@zanix/logger'
@@ -10,12 +10,19 @@ import { resolveClientEntryUrl } from '../render/client-entry.ts'
 import { resolvePwaHead } from '../pwa/pwa-registry.ts'
 import { isDevClientEnabled } from '../dev/dev-client-registry.ts'
 import { SpaceErrorBoundary } from './error-boundary-preact.ts'
-import { getPageTree } from './page-tree-registry.ts'
+import { findNearestErrorBoundary, getPageTree } from './page-tree-registry.ts'
 import { resolveSegmentData } from './segment-loader.ts'
 import { applyDocumentShell } from './document-shell-preact.ts'
 import { serializeHeadMarkup } from '../render/head-markup.ts'
 import type { DocumentModel } from '../render/document-model.ts'
 import { ORBIT_OUTLET_ATTR } from './orbit-protocol.ts'
+import { resolveCometModuleUrl } from '../comets/comet-manifest.ts'
+import {
+  DEFAULT_ERROR_VIEW_PREACT_SPECIFIER,
+  DEFAULT_ERROR_VIEW_PREACT_URL,
+} from './default-view-specifiers.ts'
+import { loadMessages } from '../i18n/load-messages.ts'
+import { DEFAULT_IMPLICIT_LANG, getMessagesDir } from '../i18n/messages-registry.ts'
 import type { SpacePageController } from './space-page-controller.ts'
 import { resolveHead } from './head-descriptor.ts'
 import type { HeadDescriptor, ResolvedHead } from './head-descriptor.ts'
@@ -86,6 +93,19 @@ async function composeSegments<Params>(
     segments,
     pageCtx as unknown as PageContext,
   )
+  // Same eager, once-per-request resolution as `render-page-react.tsx`'s own `composeSegments` —
+  // see `ErrorBoundaryProps.messages`'s own doc for why this can't be deferred to the point of
+  // failure the way a `loader`'s own throw can.
+  const messages = getMessagesDir() !== undefined
+    ? await loadMessages({
+      // `paramsRecord` itself is `undefined` for a route with no dynamic segments at all (e.g.
+      // the plain `population` template's root `/`, no `[lang]`) — never just missing a `lang`
+      // key on an otherwise-real object, so the optional-chain (not a plain `??`-after-access)
+      // matters here.
+      lang: paramsRecord?.lang ?? DEFAULT_IMPLICIT_LANG,
+      population: (pageCtx as unknown as PageContext).population,
+    })
+    : undefined
 
   // Most-specific-first, same reasoning/order as `render-page-react.tsx`'s own `composeSegments` —
   // the page's own head, then each segment from nearest (leaf) to farthest (root).
@@ -100,6 +120,29 @@ async function composeSegments<Params>(
 
   // deno-lint-ignore no-explicit-any
   let node: VNode<any> = element
+
+  // No segment ANYWHERE in this page's own composition chain declares an `error.tsx` — same real,
+  // reproduced gap `render-page-react.tsx`'s own `composeSegments` doc describes (a render-phase
+  // throw with nothing to catch it produces an empty `500`), and the same fix: fall back to this
+  // package's own built-in `DefaultErrorView`, exactly like `loader-error-handler.ts` already does
+  // on the data-phase side. Unlike React's counterpart this needs no `Suspense`/marker-wrapper
+  // gymnastics — `SpaceErrorBoundary` (Preact) already handles both (real synchronous recovery,
+  // and its own conditional marker emission) once it's simply given a `moduleUrl` to resolve.
+  if (findNearestErrorBoundary(segments) === undefined) {
+    const DefaultErrorView = (await import(DEFAULT_ERROR_VIEW_PREACT_SPECIFIER))
+      .DefaultErrorView as ComponentType<
+        ErrorBoundaryProps
+      >
+    const defaultErrorViewPath = await Deno.realPath(fromFileUrl(DEFAULT_ERROR_VIEW_PREACT_URL))
+    node = createElement(SpaceErrorBoundary, {
+      fallback: DefaultErrorView,
+      params: paramsRecord,
+      messages,
+      moduleUrl: resolveCometModuleUrl(defaultErrorViewPath),
+      children: node,
+    })
+  }
+
   for (let i = segments.length - 1; i >= 0; i--) {
     // Cast here, not in `ResolvedSegment`'s own declared type — `page-tree-registry.ts` stores
     // these as `unknown` on purpose (shared with `render-page-react.tsx`, which casts to React's
@@ -112,8 +155,16 @@ async function composeSegments<Params>(
       | ComponentType<ErrorBoundaryProps>
       | undefined
     if (ErrorFallback) {
+      // `undefined` for a `ResolvedSegment` built by hand with no real file path — same
+      // `resolveCometModuleUrl` call React's own `composeSegments` makes, see either
+      // `ResolvedSegment.errorFilePath`'s or `error-boundary-preact.ts`'s own doc for why this
+      // renderer's `SpaceErrorBoundary` decides, itself, whether to actually use it.
+      const errorFilePath = segments[i].errorFilePath
       node = createElement(SpaceErrorBoundary, {
         fallback: ErrorFallback,
+        params: paramsRecord,
+        messages,
+        moduleUrl: errorFilePath ? resolveCometModuleUrl(errorFilePath) : undefined,
         children: node,
       })
     }

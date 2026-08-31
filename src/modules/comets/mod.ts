@@ -22,3 +22,5 @@ export type {
 } from 'typings/comet.ts'
 export { loadCometManifest, resolveCometModuleUrl } from './comet-manifest.ts'
 export type { CometManifest } from './comet-manifest.ts'
+export { createReloader } from './reloader.ts'
+export type { ReloadDescriptor } from './reloader.ts'

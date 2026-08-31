@@ -22,6 +22,12 @@
  */
 import { COMET_ID_ATTR } from '../comets/marker.ts'
 import { ORBIT_OUTLET_ATTR } from '../router/orbit-protocol.ts'
+import { ERROR_BOUNDARY_MODULE_ATTR } from '../router/error-boundary-marker.ts'
 
-/** The complete built-in CSS text — one rule, both attributes, `display: contents`. */
-export const BUILTIN_CSS = `[${COMET_ID_ATTR}],[${ORBIT_OUTLET_ATTR}]{display:contents}`
+/** The complete built-in CSS text — one rule, all three attributes, `display: contents`.
+ * `ERROR_BOUNDARY_MODULE_ATTR` covers the wrapper `composeSegments` (either renderer) adds around a
+ * segment declaring `error.tsx` — same reasoning as the other two: without this, that wrapper's own
+ * default `display: block` would insert an extra box into a parent's `display: grid`/`flex` layout,
+ * on every page using `error.tsx`, whether or not it ever actually errors. */
+export const BUILTIN_CSS =
+  `[${COMET_ID_ATTR}],[${ORBIT_OUTLET_ATTR}],[${ERROR_BOUNDARY_MODULE_ATTR}]{display:contents}`

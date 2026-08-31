@@ -1,7 +1,7 @@
 import type { Plugin } from 'vite'
 import { build } from 'vite'
 import deno from '@deno/vite-plugin'
-import { relative, resolve } from '@std/path'
+import { fromFileUrl, relative, resolve } from '@std/path'
 import type { PwaConfig } from 'typings/pwa.ts'
 import { spacePlugin } from './space-plugin.ts'
 import { cometPlugin } from './comet-plugin.ts'
@@ -14,6 +14,11 @@ import { createAssetManifestRegistry } from 'modules/assets/asset-manifest-regis
 import { resolvePwaPluginOptions } from './resolve-pwa-plugin-options.ts'
 import { discoverComets } from './discover-comets.ts'
 import { collectPageStyles, discoverPages } from './discover-pages.ts'
+import { scanPageFiles } from 'modules/router/scan-page-files.ts'
+import {
+  DEFAULT_ERROR_VIEW_PREACT_URL,
+  DEFAULT_ERROR_VIEW_REACT_URL,
+} from 'modules/router/default-view-specifiers.ts'
 import { getGlobalCssPaths, type StylesheetRef } from 'modules/render/css-manifest.ts'
 import { CLIENT_ENTRY_VIRTUAL_ID, getClientEntry } from 'modules/render/client-entry.ts'
 import { clientEntryPlugin } from './client-entry-plugin.ts'
@@ -276,6 +281,56 @@ export async function buildSpaceClient(
     input[entryName] = comet
     cometEntries[entryName] = normalizeSourceKey(comet)
   }
+  // Every route's own `error.tsx`, treated as an auto-comet — needed by BOTH renderers' own
+  // `hydrateErrorBoundaries` client entry point, not only React's: even Preact's real `hydrate()`
+  // (which reconciles against markup its SSR pass already rendered correctly — see
+  // `hydrate-error-boundaries-preact.ts`'s own doc) still needs to `import()` the SAME component
+  // reference back client-side, which needs a real, built chunk in production exactly like any
+  // other comet does. A raw `scanPageFiles` call, not `discoveredPages` below (whose OWN
+  // `DiscoveredPage` shape never carries `segments`/`errorFilePath` at all — it answers a
+  // deliberately narrower question, see that module's own doc) — a second, cheap, pure filesystem
+  // walk, never a module import, so it costs nothing beyond what `discoverPages` already redoes
+  // internally for the exact same `routesDir` anyway.
+  const scannedPages = await scanPageFiles(routesDir)
+  const rawErrorFilePaths = new Set<string>()
+  for (const page of scannedPages) {
+    for (const segment of page.segments) {
+      if (segment.errorFilePath) rawErrorFilePaths.add(segment.errorFilePath)
+    }
+  }
+  const errorBoundaryFiles = new Set(
+    await Promise.all([...rawErrorFilePaths].map((path) => Deno.realPath(path))),
+  )
+  // This package's own built-in `DefaultErrorView`/`DefaultErrorView` (Preact) — the SAME auto-comet
+  // treatment, for the SAME reason: `render-page-react.tsx`'s/`render-page-preact.ts`'s own
+  // `composeSegments` falls back to it whenever a page's composition chain declares NO `error.tsx`
+  // anywhere, and that fallback is exactly as unreachable from the client without a real built chunk
+  // as an author's own `error.tsx` would be. Resolved from THIS package's own module location (never
+  // the app's `routesDir`) via `import.meta.resolve`, so it's found regardless of where a consuming
+  // app's own dependency cache placed `@zanix/space`. Only the ACTIVE renderer's own default view is
+  // included — the other one is never even reachable at runtime (see `page-renderer-registry.ts`).
+  //
+  // Gated on at least one page whose OWN composition chain has no `error.tsx` anywhere — not just
+  // "this app has pages at all" (a real, confirmed regression before THAT narrower guard existed:
+  // it still force-bundled this file for an app where every single page already has full
+  // `error.tsx` coverage, for which `composeSegments`'s own fallback branch can never actually be
+  // reached), and not unconditional either (an even earlier regression: bundling this for an app
+  // with NO pages/`routesDir` at all, breaking every other test in this file that builds a bare
+  // comet and asserts "exactly one chunk").
+  const needsDefaultErrorView = scannedPages.some((page) =>
+    page.segments.every((segment) => !segment.errorFilePath)
+  )
+  if (needsDefaultErrorView) {
+    const defaultErrorViewUrl = renderer === 'preact'
+      ? DEFAULT_ERROR_VIEW_PREACT_URL
+      : DEFAULT_ERROR_VIEW_REACT_URL
+    errorBoundaryFiles.add(await Deno.realPath(fromFileUrl(defaultErrorViewUrl)))
+  }
+  for (const errorFile of errorBoundaryFiles) {
+    const entryName = toEntryName(realRoot, errorFile)
+    input[entryName] = errorFile
+  }
+
   const resolvedGlobalCss = await Promise.all(
     globalCss.map(async (stylesheet) => {
       const href = typeof stylesheet === 'string' ? stylesheet : stylesheet.href
@@ -444,7 +499,7 @@ export async function buildSpaceClient(
       clientEntryPlugin({ renderer, entryId: resolvedClientEntry }),
       deno(),
       ...spacePlugin({ renderer }),
-      cometPlugin({ knownEntryPaths: comets }),
+      cometPlugin({ knownEntryPaths: [...comets, ...errorBoundaryFiles] }),
       ...cssPlugin({ ...css, cometEntries, globalEntries, pageEntries }),
       ...(pwa ? [pwaPlugin(resolvePwaPluginOptions(pwa, root))] : []),
       // An explicit, shared `manifestRegistry` — never either plugin's own internal fallback one —

@@ -27,7 +27,8 @@ import type { LoaderErrorRenderContext } from './loader-error-renderer-registry.
 export function renderLoaderErrorResponse(
   context: LoaderErrorRenderContext,
 ): Promise<Response> {
-  const { ErrorFallback, RootLayout, error, fragmentOnly } = context
+  const { ErrorFallback, RootLayout, error, formattedError, fragmentOnly, params, messages } =
+    context
 
   const Fallback = ErrorFallback as ComponentType<ErrorBoundaryProps>
   // `reset` is a no-op here, deliberately: this response is a fresh server render, not a client-side
@@ -38,7 +39,13 @@ export function renderLoaderErrorResponse(
     // `ORBIT_OUTLET_ATTR` selector — never an inline `style` prop here (a strict `style-src` with
     // no `'unsafe-inline'` silently drops those).
     <div {...{ [ORBIT_OUTLET_ATTR]: '' }}>
-      <Fallback error={error} reset={() => {}} />
+      <Fallback
+        error={error}
+        formattedError={formattedError}
+        reset={() => {}}
+        params={params}
+        messages={messages}
+      />
     </div>
   )
 

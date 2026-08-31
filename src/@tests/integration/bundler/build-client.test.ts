@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertFalse } from '@std/assert'
-import { join } from '@std/path'
+import { fromFileUrl, join } from '@std/path'
 import sharp from 'sharp'
 import { getTemporaryFolder } from '@zanix/helpers'
 import { buildSpaceClient } from 'modules/bundler/build-client.ts'
@@ -138,6 +138,108 @@ Deno.test(
 
       const code = await Deno.readTextFile(join(assetsDir, jsFile))
       assert(code.includes('counter'), code)
+    })
+  },
+)
+
+Deno.test(
+  "buildSpaceClient: a route's own error.tsx is built as an auto-comet — no 'use comet' " +
+    'directive needed, real chunk, real comets-manifest.json entry — the same manifest ' +
+    "resolveCometModuleUrl reads back for a segment's own hydrateErrorBoundaries client entry",
+  async () => {
+    await withTempDir(async (root) => {
+      const routesDir = join(root, 'routes')
+      await Deno.mkdir(routesDir, { recursive: true })
+      await Deno.writeTextFile(join(routesDir, 'page.tsx'), 'export default null\n')
+      const errorPath = join(routesDir, 'error.tsx')
+      await Deno.writeTextFile(
+        errorPath,
+        'export default function FixtureError() { return "boom-fallback" }\n',
+      )
+
+      const result = await buildSpaceClient({ root, routesDir, css: { tailwind: false } })
+
+      const assetsDir = join(result.outDir, 'assets')
+      const jsFile = await theOneJsFile(assetsDir)
+
+      const manifest = JSON.parse(
+        await Deno.readTextFile(join(result.outDir, 'comets-manifest.json')),
+      )
+      const realErrorPath = await Deno.realPath(errorPath)
+      assertEquals(manifest[realErrorPath], `/assets/${jsFile}`)
+
+      const code = await Deno.readTextFile(join(assetsDir, jsFile))
+      assert(code.includes('boom-fallback'), code)
+    })
+  },
+)
+
+Deno.test(
+  "buildSpaceClient: the same auto-comet treatment applies under renderer: 'preact' too — not " +
+    "React-only. Even Preact's own hydrateErrorBoundaries needs a real built chunk to `import()` " +
+    "back client-side for its `hydrate()` call, exactly like React's `createRoot` mount does",
+  async () => {
+    await withTempDir(async (root) => {
+      const routesDir = join(root, 'routes')
+      await Deno.mkdir(routesDir, { recursive: true })
+      await Deno.writeTextFile(join(routesDir, 'page.tsx'), 'export default null\n')
+      const errorPath = join(routesDir, 'error.tsx')
+      await Deno.writeTextFile(
+        errorPath,
+        'export default function FixtureError() { return "boom-fallback-preact" }\n',
+      )
+
+      const result = await buildSpaceClient({
+        root,
+        routesDir,
+        renderer: 'preact',
+        css: { tailwind: false },
+      })
+
+      const assetsDir = join(result.outDir, 'assets')
+      const jsFile = await theOneJsFile(assetsDir)
+
+      const manifest = JSON.parse(
+        await Deno.readTextFile(join(result.outDir, 'comets-manifest.json')),
+      )
+      const realErrorPath = await Deno.realPath(errorPath)
+      assertEquals(manifest[realErrorPath], `/assets/${jsFile}`)
+
+      const code = await Deno.readTextFile(join(assetsDir, jsFile))
+      assert(code.includes('boom-fallback-preact'), code)
+    })
+  },
+)
+
+Deno.test(
+  "buildSpaceClient: this package's own built-in DefaultErrorView is bundled as an auto-comet " +
+    'TOO, unconditionally — a route declaring no error.tsx at all still needs a real client chunk ' +
+    'for the render-phase fallback (composeSegments) to recover from, exactly like an app-authored ' +
+    'error.tsx does',
+  async () => {
+    await withTempDir(async (root) => {
+      const routesDir = join(root, 'routes')
+      await Deno.mkdir(routesDir, { recursive: true })
+      await Deno.writeTextFile(join(routesDir, 'page.tsx'), 'export default null\n')
+
+      const result = await buildSpaceClient({ root, routesDir, css: { tailwind: false } })
+
+      const manifest = JSON.parse(
+        await Deno.readTextFile(join(result.outDir, 'comets-manifest.json')),
+      )
+      const defaultErrorViewPath = await Deno.realPath(
+        fromFileUrl(import.meta.resolve('../../../modules/router/default-error-view.tsx')),
+      )
+      const builtUrl = manifest[defaultErrorViewPath]
+      assert(
+        builtUrl,
+        `expected a manifest entry for the built-in DefaultErrorView: ${
+          JSON.stringify(manifest, null, 2)
+        }`,
+      )
+
+      const code = await Deno.readTextFile(join(result.outDir, builtUrl.replace(/^\//, '')))
+      assert(code.includes('Something went wrong'), code)
     })
   },
 )

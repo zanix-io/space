@@ -85,7 +85,12 @@ Deno.test(
   "deriveAutoSitemapEntries: with langPreHandler registered, a ':lang'-only dynamic route " +
     'expands into one entry per availableLangs, each cross-referencing the others via alternates',
   () => {
-    setLangRegistration({ availableLangs: ['en', 'es'], paramName: 'lang' })
+    setLangRegistration({
+      availableLangs: ['en', 'es'],
+      paramName: 'lang',
+      defaultLang: 'en',
+      cookieName: 'X-Znx-Lang',
+    })
     try {
       const entries = deriveAutoSitemapEntries([page({ routePath: ':lang' })])
       assertEquals(entries, [
@@ -108,7 +113,12 @@ Deno.test(
   "deriveAutoSitemapEntries: a ':lang' segment followed by a static suffix expands correctly, " +
     'substituting only the lang segment',
   () => {
-    setLangRegistration({ availableLangs: ['en', 'es'], paramName: 'lang' })
+    setLangRegistration({
+      availableLangs: ['en', 'es'],
+      paramName: 'lang',
+      defaultLang: 'en',
+      cookieName: 'X-Znx-Lang',
+    })
     try {
       const entries = deriveAutoSitemapEntries([page({ routePath: ':lang/about' })])
       assertEquals(entries.map((entry) => entry.loc), ['/en/about', '/es/about'])
@@ -123,7 +133,12 @@ Deno.test(
     "excludes entirely — ':region' has no fixed set to enumerate either, even with langPreHandler " +
     'registered',
   () => {
-    setLangRegistration({ availableLangs: ['en', 'es'], paramName: 'lang' })
+    setLangRegistration({
+      availableLangs: ['en', 'es'],
+      paramName: 'lang',
+      defaultLang: 'en',
+      cookieName: 'X-Znx-Lang',
+    })
     try {
       const entries = deriveAutoSitemapEntries([
         page({ routePath: ':lang/regions/:region' }),
@@ -149,7 +164,12 @@ Deno.test(
   'deriveAutoSitemapEntries: a custom paramName is respected — a dynamic segment matching a ' +
     'DIFFERENT name than the registered one is NOT treated as the lang param',
   () => {
-    setLangRegistration({ availableLangs: ['en', 'es'], paramName: 'locale' })
+    setLangRegistration({
+      availableLangs: ['en', 'es'],
+      paramName: 'locale',
+      defaultLang: 'en',
+      cookieName: 'X-Znx-Lang',
+    })
     try {
       // `:lang` here is coincidentally shaped like the default convention, but the registration
       // names `locale` instead — this must still exclude, not expand.
@@ -169,7 +189,12 @@ Deno.test(
   'deriveAutoSitemapEntries: an expanded lang route still respects redirect/noindex — checked ' +
     'once per page, applying to every expanded language variant alike',
   () => {
-    setLangRegistration({ availableLangs: ['en', 'es'], paramName: 'lang' })
+    setLangRegistration({
+      availableLangs: ['en', 'es'],
+      paramName: 'lang',
+      defaultLang: 'en',
+      cookieName: 'X-Znx-Lang',
+    })
     try {
       const entries = deriveAutoSitemapEntries([
         page({

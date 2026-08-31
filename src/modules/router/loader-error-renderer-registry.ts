@@ -1,4 +1,6 @@
 import { InternalError } from '@zanix/errors'
+import type { serializeError } from '@zanix/errors'
+import type { Messages } from '../i18n/load-messages.ts'
 
 /**
  * Everything a `LoaderErrorRenderer` needs to produce a fallback document for a thrown `loader`,
@@ -23,8 +25,23 @@ export type LoaderErrorRenderContext = {
   /** The value `loader`/`resolveSegmentData` threw — passed through unchanged as
    * `ErrorBoundaryProps.error`, never assumed to be an `Error` instance. */
   error: unknown
+  /** `serializeError(error)` (`@zanix/errors`), computed once here by `loader-error-handler.ts` —
+   * passed straight through as `ErrorBoundaryProps.formattedError`. See that field's own doc for
+   * why this is additive, never a replacement for `error` above. */
+  formattedError: ReturnType<typeof serializeError>
   /** `true` for an Orbit navigation whose `loader` threw — returns just the outlet fragment. */
   fragmentOnly: boolean
+  /** This route's own resolved params (e.g. `{ lang: 'en' }`) — passed straight through as
+   * `ErrorBoundaryProps.params`, the SAME object a render-phase `error.tsx` already receives via
+   * `SpaceErrorBoundary`. Unlike a render-phase throw, a data-phase one DOES have this available
+   * unconditionally: the route already matched before its own `loader` threw. */
+  params: Record<string, string>
+  /** `loader-error-handler.ts`'s own `loadMessages(...)` result — resolved LAZILY, only inside its
+   * own catch, unlike the render-phase path's eager resolution (`composeSegments`): a data-phase
+   * throw is already inside a plain async function with no Suspense/streaming timing to work
+   * around, so there's nothing forcing this to be computed for a request that never fails. See
+   * `ErrorBoundaryProps.messages`'s own doc for the full contract. */
+  messages?: Messages
 }
 
 /**

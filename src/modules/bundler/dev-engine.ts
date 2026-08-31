@@ -435,6 +435,24 @@ export async function createSpaceDevEngine(
     appType: 'custom',
     server: {
       middlewareMode: true,
+      // A real consuming app's own `deno.json` `workspace` can link a bare specifier
+      // (`@zanix/space`, `@zanix/space-ui`, ...) straight to a SIBLING package's checkout,
+      // entirely outside `options.root` — `comet-manifest.ts`'s own `resolveCometModuleUrl`
+      // dev-mode fallback then requests it as a plain `/@fs/<absolute-path>`, Vite's own
+      // convention for exactly this. Vite's default `fs.allow` (`searchForWorkspaceRoot`) walks
+      // up from `root` and stops at the FIRST `.git`/lockfile boundary it finds — a Deno workspace
+      // MEMBER with its own `.git` (as any project scaffolded by `zanix new` has) never reaches
+      // the shared workspace root that way, so a cross-package file like this is silently treated
+      // as "not found" (`ERR_LOAD_URL`), not denied — confirmed empirically, not assumed (a real
+      // `default-error-view.tsx` 404 in `zanix space dev`, reproduced with a bare `createServer()`
+      // against a temp root outside this very repo). `fs.strict: false` is the one fix that
+      // doesn't need to know the workspace's own shape (member `.git` boundaries, lockfile
+      // presence, or a missing root `.git` altogether): this dev server only ever serves whatever
+      // Vite's OWN module resolution already decided to load — a page, a Comet, this package's own
+      // built-in views — never an arbitrary client-supplied path, so widening what CAN be served
+      // costs nothing a production request path could ever reach (`modules/dev/` is never imported
+      // by `modules/render/`/`modules/router/`, see `dev-asset-handler.ts`'s own doc).
+      fs: { strict: false },
       watch: {
         usePolling: true,
         interval: 100,

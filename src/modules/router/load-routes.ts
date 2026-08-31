@@ -315,6 +315,14 @@ async function loadRoutesOnce(
             error: segment.errorFilePath
               ? (await importModule(segment.errorFilePath)).default
               : undefined,
+            // Realpath'd here, once, right where the file is already known to exist (the
+            // `segment.errorFilePath ?` guard above already proved that) — see `ResolvedSegment`'s
+            // own doc for why this exact form (not the raw, routesDir-relative path) is what
+            // `resolveCometModuleUrl` needs to ever match `buildSpaceClient`'s own manifest key for
+            // the SAME file.
+            errorFilePath: segment.errorFilePath
+              ? await Deno.realPath(resolve(segment.errorFilePath))
+              : undefined,
           }
         }),
       ),

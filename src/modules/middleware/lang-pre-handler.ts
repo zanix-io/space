@@ -1,6 +1,6 @@
 import type { PreHandler } from '@zanix/server'
 import { assertZnxCookieName, PUBLIC_COOKIE_ATTRIBUTES } from '@zanix/helpers'
-import { setLangRegistration } from './lang-registry.ts'
+import { getLangRegistration, setLangRegistration } from './lang-registry.ts'
 
 /** Path prefixes `langPreHandler` never redirects, regardless of `ignorePrefixes` — every
  * framework-internal route `@zanix/space` itself can register. A caller's own `ignorePrefixes`
@@ -134,8 +134,9 @@ export function langPreHandler(options: LangPreHandlerOptions): PreHandler {
   // a `:lang`-only dynamic route into one entry per `availableLangs`, instead of excluding it the
   // way any other dynamic segment always is. `'lang'` is the one, non-configurable param name this
   // whole mechanism already enforces — `routes/[lang]/...` is the only folder convention
-  // `langPreHandler` itself ever documents or supports.
-  setLangRegistration({ availableLangs, paramName: 'lang' })
+  // `langPreHandler` itself ever documents or supports. `defaultLang`/`cookieName` are captured
+  // too, read by `resolveRequestLang` below for a request with no matched route at all.
+  setLangRegistration({ availableLangs, paramName: 'lang', defaultLang, cookieName })
 
   return (request) => {
     const url = new URL(request.url)
@@ -169,4 +170,26 @@ export function langPreHandler(options: LangPreHandlerOptions): PreHandler {
       },
     })
   }
+}
+
+/**
+ * Resolves a request's language with NO matched route to draw a `:lang` param from — a genuine
+ * 404 (`createNotFoundHandler`'s own `onError` path) never reaches route matching at all, unlike a
+ * page's own `error.tsx` (which can read `params.lang` directly off `ErrorBoundaryProps`). Same
+ * cookie → `Accept-Language` → `defaultLang` priority `langPreHandler` itself already applies —
+ * one resolution order, not two independently-maintained ones.
+ *
+ * Returns `undefined` when this app never called `langPreHandler(...)` at all (no i18n routing
+ * configured) — the same "feature is simply off" contract every other eager registry in this
+ * package already follows.
+ */
+export function resolveRequestLang(request: Request): string | undefined {
+  const registration = getLangRegistration()
+  if (!registration) return undefined
+
+  const { availableLangs, defaultLang, cookieName } = registration
+  const existingCookie = readCookie(request, cookieName)
+  return (existingCookie && availableLangs.includes(existingCookie) ? existingCookie : undefined) ??
+    resolveAcceptLanguage(request.headers.get('accept-language'), availableLangs) ??
+    defaultLang
 }

@@ -48,7 +48,9 @@ Deno.test('resolveCometModuleUrl: with no manifest, strips the project root pref
 })
 
 Deno.test(
-  'resolveCometModuleUrl: with no manifest, falls back to the raw url if it is outside the root',
+  "resolveCometModuleUrl: with no manifest, a source OUTSIDE the root resolves via Vite's own " +
+    '/@fs/ convention — confirmed as a real, reproduced 404 before this branch existed (this ' +
+    "package's own built-in DefaultErrorView, which lives outside an app's own devRoot)",
   () => {
     setCometManifest(undefined)
 
@@ -57,7 +59,7 @@ Deno.test(
       '/project',
     )
 
-    assertEquals(url, 'file:///elsewhere/counter.tsx')
+    assertEquals(url, '/@fs/elsewhere/counter.tsx')
   },
 )
 

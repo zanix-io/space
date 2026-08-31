@@ -69,11 +69,13 @@ import Counter from '../comets/counter.tsx'
 ```
 
 **No client entry to write.** Every full-document response's own bootstrap script
-(`hydrateComets()`/`initOrbit()`, correctly `nonce`'d for a strict `script-src` CSP) is generated
-and wired in automatically — the same reasoning that already makes a Comet's own registration
-automatic (`'use comet'`, no manual step). Only set `SpaceAppConfig.clientEntry` (a real source file
-of your own) when a project genuinely needs EXTRA client-side code — analytics, a global error
-handler:
+(`hydrateComets()`/`hydrateErrorBoundaries()`/`initOrbit()`, correctly `nonce`'d for a strict
+`script-src` CSP) is generated and wired in automatically — the same reasoning that already makes a
+Comet's own registration automatic (`'use comet'`, no manual step). `hydrateErrorBoundaries()`
+attaches interactivity to any `error.tsx` Fallback the page's own SSR pass already rendered — see
+[`docs/routing.md`](./routing.md#layouts-loading-and-error-segments) for the full recovery contract.
+Only set `SpaceAppConfig.clientEntry` (a real source file of your own) when a project genuinely
+needs EXTRA client-side code — analytics, a global error handler:
 
 ```ts
 // space.app.ts — only if you need more than hydrateComets()/initOrbit()
@@ -85,9 +87,10 @@ export default defineSpaceApp({
 
 ```ts
 // src/main.client.ts — your own file is then fully responsible for calling these itself
-import { hydrateComets, initOrbit } from '@zanix/space/client'
+import { hydrateComets, hydrateErrorBoundaries, initOrbit } from '@zanix/space/client'
 
 hydrateComets()
+hydrateErrorBoundaries()
 initOrbit()
 ```
 

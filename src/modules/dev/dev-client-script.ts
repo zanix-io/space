@@ -55,6 +55,13 @@ export interface DevClientScriptOptions {
  *   instances for the same page). No `urls`/`affectedRoutes` to compare against, unlike the other
  *   three kinds — this is a Vite-internal recovery signal, not tied to any specific file.
  *
+ * Deliberately does NOT try to recover from `socket.onclose` (e.g. `@zanix/cli`'s own
+ * `zanix space dev` restarting its whole process on a `space.app.ts` change): a reconnect-then-poll
+ * mechanism was tried and pulled back out — it only ever recovered the FIRST such restart
+ * reliably, not a second one, for reasons that didn't reproduce consistently enough to fix with
+ * confidence. A person notices the dead connection and reloads manually instead — worse UX for
+ * that one case, but predictable, unlike a "mostly works" auto-reload.
+ *
  * A pure function — no I/O of its own, easy to unit-test (`new Function(source)` confirms valid
  * JS syntax, the same technique `buildServiceWorkerSource` already uses).
  *

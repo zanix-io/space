@@ -7,9 +7,15 @@ Deno.test('getLangRegistration: undefined until langPreHandler registers one', (
 })
 
 Deno.test('setLangRegistration/getLangRegistration: round-trips exactly', () => {
-  setLangRegistration({ availableLangs: ['en', 'es'], paramName: 'lang' })
+  const registration = {
+    availableLangs: ['en', 'es'],
+    paramName: 'lang',
+    defaultLang: 'en',
+    cookieName: 'X-Znx-Lang',
+  }
+  setLangRegistration(registration)
   try {
-    assertEquals(getLangRegistration(), { availableLangs: ['en', 'es'], paramName: 'lang' })
+    assertEquals(getLangRegistration(), registration)
   } finally {
     setLangRegistration(undefined)
   }

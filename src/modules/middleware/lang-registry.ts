@@ -19,6 +19,15 @@ export type LangRegistration = {
   /** Same `paramName` `langPreHandler({ paramName })` resolved to (its own `'lang'` default,
    * already applied by the caller — this registry never re-applies a default of its own). */
   paramName: string
+  /** Same `defaultLang` the app's own `langPreHandler({ defaultLang })` call declared — read by
+   * `resolveRequestLang` (`lang-pre-handler.ts`) to resolve a language for a request with NO
+   * matched route at all (a genuine 404), the one case that can't fall back to a route param the
+   * way `error.tsx`'s `ErrorBoundaryProps.params` already can. */
+  defaultLang: string
+  /** Same `cookieName` the app's own `langPreHandler({ cookieName })` resolved to (its own
+   * `'X-Znx-Lang'` default, already applied by the caller) — read by `resolveRequestLang` for the
+   * same reason as `defaultLang` above. */
+  cookieName: string
 }
 
 let registration: LangRegistration | undefined

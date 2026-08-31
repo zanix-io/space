@@ -30,6 +30,7 @@ import { registerRobots } from 'modules/seo/robots.ts'
 import { getDevImportModule, setDevRoutesReloader } from 'modules/dev/dev-engine-registry.ts'
 import { isDevClientEnabled } from 'modules/dev/dev-client-registry.ts'
 import { setActiveRenderer } from 'modules/router/active-renderer.ts'
+import { setErrorResponseFormat } from 'modules/router/error-response-format-registry.ts'
 import { getRoutesDir, setRoutesDir } from 'modules/router/routes-dir-registry.ts'
 import { getInstalledRenderer } from 'modules/router/renderer-runtime.ts'
 import { InternalError } from '@zanix/errors'
@@ -115,6 +116,7 @@ export function defineSpaceApp(config: SpaceAppConfig): ZanixAppDefinition {
     sitemap,
     robots,
     renderer,
+    errorResponse,
     serialization,
     validation,
     optimize,
@@ -134,6 +136,11 @@ export function defineSpaceApp(config: SpaceAppConfig): ZanixAppDefinition {
   // nothing — see `SpaceAppConfig.serialization`'s own doc for what enabling it changes.
   setExtendedSerialization(serialization?.extendedTypes)
   if (pwa !== undefined) setPwaConfig(pwa === false ? undefined : pwa)
+  // Same eager timing as `theme`/`headers` above — `setErrorResponseFormat` just sets a
+  // module-level registry value, read at request time by `loader-error-handler.ts`/
+  // `not-found-handler.ts`, never at build/dev-orchestration time, so there is no
+  // `zanix space build`-needs-this-early concern the way `renderer`/`routesDir` below have.
+  setErrorResponseFormat(errorResponse)
   if (globalCss !== undefined) addGlobalCssPaths(globalCss)
   if (clientEntry !== undefined) setClientEntry(clientEntry)
   // Eager, same point as `headers`/`pwa`/`globalCss` above — unlike those, this doesn't drive any

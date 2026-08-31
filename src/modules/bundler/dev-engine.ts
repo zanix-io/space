@@ -1,10 +1,21 @@
-import type { HotUpdateOptions, Plugin, PluginOption, ViteDevServer } from 'vite'
+import type {
+  EnvironmentModuleNode,
+  HotPayload,
+  HotUpdateOptions,
+  Plugin,
+  PluginOption,
+  ViteDevServer,
+} from 'vite'
 import { createServer, createServerModuleRunner } from 'vite'
 import deno from '@deno/vite-plugin'
+import { isDenoSpecifier, parseDenoSpecifier } from '@deno/vite-plugin/resolver'
 import { computeAffectedRoutes } from './affected-routes.ts'
 import { RealImportEvaluator } from './ssr-module-evaluator.ts'
 import { cjsInteropFallbackPlugin, denoOnLoadCjsInterop } from './cjs-interop.ts'
 import { canonicalBareSpecifierResolvePlugin } from './bare-specifier-resolve.ts'
+import { nativeRuntimeModulesPlugin } from './native-runtime-modules.ts'
+import { USE_COMET_DIRECTIVE } from './comet-directive.ts'
+import { formatServerOnlyViolation, SERVER_ONLY_DIRECTIVE } from './server-only-directive.ts'
 
 // `HotUpdateOptions`/`Plugin`/`PluginOption` are intentionally NOT re-exported here, same
 // reasoning as `space-plugin.ts`'s own `Plugin` doc comment: all are deeply recursive
@@ -23,6 +34,23 @@ export interface SsrModuleChangedEvent {
   changeType: HotUpdateOptions['type']
   /** Route-boundary module ids reachable from `file`, per {@linkcode computeAffectedRoutes}. */
   affectedRoutes: string[]
+  /**
+   * Whether `file` itself (not one of `affectedRoutes`) starts with the `'use comet'` directive —
+   * lets a caller tell "the route's own file, or a server-only dependency (a `layout.tsx`, a
+   * `loader`), changed — a connected browser genuinely needs a fresh document" apart from "only a
+   * Comet changed, and it already reports its own `client-module-changed` update separately (see
+   * `onClientModuleChanged`'s own doc) — that alone is enough to bring a connected page up to
+   * date, without discarding whatever client-only state (a Comet's own `useState`, a form draft)
+   * a full reload would".
+   *
+   * A Comet is reachable from the `ssr` environment's own module graph too (its initial HTML is
+   * still server-rendered), so editing one fires `onSsrModuleChanged` exactly the same as editing
+   * the route file itself would — this field is what lets a caller choose to still refresh this
+   * app's own route registry/compiled dispatch table (so the NEXT real, fresh request reflects the
+   * edit) while skipping only the "tell an already-connected browser to reload" side effect for
+   * this one case.
+   */
+  isComet: boolean
 }
 
 /** Options for {@linkcode createSpaceDevEngine}. */
@@ -78,6 +106,23 @@ export interface SpaceDevEngineOptions {
   isRouteEntry: (id: string) => boolean
   /** Called once per file change that affects the `ssr` environment. See its own doc. */
   onSsrModuleChanged?: (event: SsrModuleChangedEvent) => void
+  /**
+   * Called whenever Vite's OWN dependency optimizer decides a full browser reload is needed —
+   * relayed from its internal `environment.hot.send({ type: 'full-reload' })` calls (confirmed
+   * against `vite@8.2.2`'s own source; this engine's own `client` environment `hot` channel is
+   * always a real, always-present object — even with zero real network clients ever connected,
+   * see `createSpaceDevEngine`'s own doc — so wrapping its `send` method catches every one of
+   * these emissions uniformly, no per-call-site instrumentation needed). Real Vite relies on its
+   * own WebSocket/HMR channel to relay this straight to the browser; this engine never binds that
+   * channel to anything real, so without this option, the signal went nowhere — a real, confirmed
+   * incident: a mid-session dependency re-optimize (discovering a dependency it didn't know about
+   * during its first scan) changes a pre-bundled dependency's own version hash, and a page already
+   * holding a transform result that embeds the STALE hash loads a second, genuinely duplicate
+   * module instance of that dependency — confirmed live for `@prefresh/core`, silently breaking
+   * Preact Fast-Refresh with zero error and no automatic recovery. A caller broadcasts this over
+   * `SpaceDevSocket` (`broadcastFullReloadNeeded`) — see that function's own doc.
+   */
+  onFullReloadNeeded?: () => void
 }
 
 /**
@@ -166,10 +211,116 @@ function unwrapViteId(url: string): string {
   return url.slice(ID_PREFIX.length).replace(NULL_BYTE_PLACEHOLDER, '\0')
 }
 
+/** Whether `filePath` itself starts with the `'use comet'` directive — see
+ * {@linkcode SsrModuleChangedEvent.isComet}'s own doc for why `ssrHotUpdatePlugin` needs this.
+ * Re-reads the file directly (the same regex `discoverComets`/`comet-plugin.ts` already use for
+ * the identical check at build time) rather than inspecting `ctx.modules`' own transformed code —
+ * simpler, and this only ever runs once per real file save, never a hot path. A file that no
+ * longer exists (a delete) is never a Comet as far as this check is concerned — nothing left to
+ * read the directive from. */
+async function isCometFile(filePath: string): Promise<boolean> {
+  try {
+    return USE_COMET_DIRECTIVE.test(await Deno.readTextFile(filePath))
+  } catch {
+    return false
+  }
+}
+
+/** Same check as {@linkcode isCometFile}, against {@linkcode SERVER_ONLY_DIRECTIVE} instead — see
+ * {@linkcode findDevChainToComet}'s own doc for where this is actually used. */
+async function isServerOnlyFile(filePath: string): Promise<boolean> {
+  try {
+    return SERVER_ONLY_DIRECTIVE.test(await Deno.readTextFile(filePath))
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The real, on-disk absolute path behind an `EnvironmentModuleNode` — for any real `@zanix/space`
+ * subpath import (`@zanix/space`, `@zanix/space-ui`, ... all live OUTSIDE the project root, in a
+ * separate package directory), `@deno/vite-plugin`'s own `resolveViteSpecifier` resolves it to one
+ * of its own virtual `\0deno::<loader>::<id>::<resolved>#deno` specifiers (`toDenoSpecifier`) —
+ * NEVER a plain path Vite would recognize as one. Crucially, this means checking `mod.id` for
+ * {@linkcode isDenoSpecifier} MUST run before ever trusting `mod.file`: Vite's own module graph
+ * unconditionally sets `mod.file = cleanUrl(resolvedId)` for every node, virtual or not — for one
+ * of these, that's just the SAME virtual specifier string with its own trailing `#deno` marker
+ * stripped (`cleanUrl`'s only real effect here), never an actual file. Checking `mod.file` FIRST
+ * (this function's own original, buggy shape) silently "succeeds" with that stripped-but-still-
+ * virtual string, which {@linkcode isServerOnlyFile}/{@linkcode isCometFile} then fail to read as
+ * a file and quietly treat as "not a match" — the exact reason a real, confirmed
+ * `@zanix/space/assets-manifest` violation went completely undetected in dev before this was
+ * caught: `mod.file` was truthy, just permanently wrong. `mod.id` (never mangled by `cleanUrl`)
+ * always still carries the full specifier, `#deno` suffix included, so {@linkcode parseDenoSpecifier}
+ * (the same public helper `@deno/vite-plugin` uses internally, already relied on elsewhere in this
+ * package — see `bare-specifier-resolve.ts`'s own doc) reliably recovers the real path from it.
+ *
+ * `mod.file` is only ever trusted directly once `mod.id` is confirmed NOT to be a Deno specifier —
+ * the ordinary case for a plain project-local file, where it already IS the real path.
+ */
+function realFilePathOf(mod: EnvironmentModuleNode): string | null {
+  if (mod.id && isDenoSpecifier(mod.id)) {
+    const { resolved } = parseDenoSpecifier(mod.id)
+    // `resolved` is only ever a real filesystem path for an `esm`-kind local/JSR source — an
+    // `http(s):` URL (a remote import) has no on-disk file to read, and can never carry
+    // `'server-only'`/`'use comet'` as source `deno.readTextFile` could check anyway.
+    return resolved.startsWith('http:') || resolved.startsWith('https:') ? null : resolved
+  }
+  return mod.file
+}
+
+/**
+ * `transformClientAsset`'s own counterpart to `comet-plugin.ts`'s build-time
+ * `findChainToComet`/`buildEnd` enforcement — same violation (a `'server-only'` module reachable
+ * from a Comet), same shared {@linkcode formatServerOnlyViolation} message, but walked against
+ * Vite's own dev `EnvironmentModuleNode.importers` (populated incrementally as the dev server
+ * discovers import relationships, request by request) instead of a full Rollup build's own
+ * reverse module graph. `mod` here is already confirmed server-only by the caller.
+ *
+ * Breadth-first over `importers` (the same "who pulled this in" direction the build-time walk
+ * uses), stopping at the first ancestor `isCometFile` recognizes. Dev's own graph is necessarily
+ * incomplete compared to a real build's (only relationships a request has actually exercised so
+ * far are known) — if no Comet ancestor has been discovered yet, this still returns a real,
+ * one-element chain (the offending file alone), which {@linkcode formatServerOnlyViolation}
+ * already renders as something actionable, just without an import trail.
+ */
+async function findDevChainToComet(mod: EnvironmentModuleNode): Promise<string[]> {
+  const visited = new Set<EnvironmentModuleNode>([mod])
+  const parent = new Map<EnvironmentModuleNode, EnvironmentModuleNode>()
+  const queue: EnvironmentModuleNode[] = [mod]
+
+  while (queue.length > 0) {
+    const current = queue.shift()
+    if (!current) break
+
+    for (const importer of current.importers) {
+      if (visited.has(importer)) continue
+      visited.add(importer)
+      parent.set(importer, current)
+
+      const importerPath = realFilePathOf(importer)
+      // deno-lint-ignore no-await-in-loop -- genuine sequential graph walk, same as comet-plugin.ts
+      if (importerPath && await isCometFile(importerPath)) {
+        const chain: EnvironmentModuleNode[] = [importer]
+        for (let node = importer; node !== mod;) {
+          const next = parent.get(node)
+          if (next === undefined) break
+          node = next
+          chain.push(node)
+        }
+        return chain.map((node) => realFilePathOf(node) ?? node.url)
+      }
+      queue.push(importer)
+    }
+  }
+
+  return [realFilePathOf(mod) ?? mod.url]
+}
+
 function ssrHotUpdatePlugin(options: SpaceDevEngineOptions): Plugin {
   return {
     name: 'zanix-space-dev-hot-update',
-    hotUpdate(ctx) {
+    async hotUpdate(ctx) {
       if (this.environment.name !== 'ssr') {
         // `client`-environment CSS (`globalCss`, served as a real `<link>` — see
         // `onClientCssChanged`'s own doc) is intercepted here and relayed over the same
@@ -208,6 +359,7 @@ function ssrHotUpdatePlugin(options: SpaceDevEngineOptions): Plugin {
         file: ctx.file,
         changeType: ctx.type,
         affectedRoutes,
+        isComet: await isCometFile(ctx.file),
       })
 
       // An empty array tells Vite "this update was fully handled" — nothing further to
@@ -283,6 +435,24 @@ export async function createSpaceDevEngine(
     appType: 'custom',
     server: {
       middlewareMode: true,
+      // A real consuming app's own `deno.json` `workspace` can link a bare specifier
+      // (`@zanix/space`, `@zanix/space-ui`, ...) straight to a SIBLING package's checkout,
+      // entirely outside `options.root` — `comet-manifest.ts`'s own `resolveCometModuleUrl`
+      // dev-mode fallback then requests it as a plain `/@fs/<absolute-path>`, Vite's own
+      // convention for exactly this. Vite's default `fs.allow` (`searchForWorkspaceRoot`) walks
+      // up from `root` and stops at the FIRST `.git`/lockfile boundary it finds — a Deno workspace
+      // MEMBER with its own `.git` (as any project scaffolded by `zanix new` has) never reaches
+      // the shared workspace root that way, so a cross-package file like this is silently treated
+      // as "not found" (`ERR_LOAD_URL`), not denied — confirmed empirically, not assumed (a real
+      // `default-error-view.tsx` 404 in `zanix space dev`, reproduced with a bare `createServer()`
+      // against a temp root outside this very repo). `fs.strict: false` is the one fix that
+      // doesn't need to know the workspace's own shape (member `.git` boundaries, lockfile
+      // presence, or a missing root `.git` altogether): this dev server only ever serves whatever
+      // Vite's OWN module resolution already decided to load — a page, a Comet, this package's own
+      // built-in views — never an arbitrary client-supplied path, so widening what CAN be served
+      // costs nothing a production request path could ever reach (`modules/dev/` is never imported
+      // by `modules/render/`/`modules/router/`, see `dev-asset-handler.ts`'s own doc).
+      fs: { strict: false },
       watch: {
         usePolling: true,
         interval: 100,
@@ -322,20 +492,31 @@ export async function createSpaceDevEngine(
     // any project dependency) against this project's own `deno.json` import map before anything
     // else in the pipeline needs to resolve one. Without it, only relative imports work.
     //
-    // `canonicalBareSpecifierResolvePlugin()` is listed FIRST, ahead of everything else — it fixes
-    // a real module-identity bug in `@deno/vite-plugin`'s own resolver for bare specifiers (see its
-    // own doc), and must run before `deno()`'s own `resolveId` gets a chance to. `deno()`'s own
-    // resolution stays the fallback for anything the canonical hook deliberately leaves alone
-    // (relative/absolute/virtual/scheme-prefixed ids) — see that file's own doc.
+    // `nativeRuntimeModulesPlugin()` is listed FIRST, ahead of even `canonicalBareSpecifierResolvePlugin()`
+    // — it fixes a real module-identity bug of THIS package's own making (not `@deno/vite-plugin`'s):
+    // without it, `@zanix/space`/`@zanix/server` get resolved and transformed like any other project
+    // dependency, ending up as a SECOND, independent copy from the one the native `zanix space dev`
+    // process already imported to run `defineSpaceApp`/`loadRoutes`/`bootstrapServers()` — silently
+    // breaking every `@Page()` registration (see that file's own doc for the full mechanism, and why
+    // it must run before ANY other resolver gets a chance to resolve these two specifiers into a
+    // real, Vite-transformable file path).
+    //
+    // `canonicalBareSpecifierResolvePlugin()` is listed next, ahead of everything else it still
+    // needs to precede — it fixes a real module-identity bug in `@deno/vite-plugin`'s own resolver
+    // for bare specifiers (see its own doc), and must run before `deno()`'s own `resolveId` gets a
+    // chance to. `deno()`'s own resolution stays the fallback for anything the canonical hook
+    // deliberately leaves alone (relative/absolute/virtual/scheme-prefixed ids) — see that file's
+    // own doc.
     //
     // `cjsInteropFallbackPlugin()` is listed before `deno()` so its `transform` hook always runs,
     // regardless of which of the two resolution paths described in its own doc a given file
     // arrives through; `deno({ onLoad })` is the primary integration point for the common path.
     //
-    // All three fix real, confirmed `zanix space dev` blockers — see `ssr-module-evaluator.ts`'s,
-    // `bare-specifier-resolve.ts`'s, and `cjs-interop.ts`'s own docs — none of them touch the
-    // `client` environment or production SSR.
+    // All four fix real, confirmed `zanix space dev` blockers — see `native-runtime-modules.ts`'s,
+    // `ssr-module-evaluator.ts`'s, `bare-specifier-resolve.ts`'s, and `cjs-interop.ts`'s own docs —
+    // none of them touch the `client` environment or production SSR.
     plugins: [
+      nativeRuntimeModulesPlugin(),
       canonicalBareSpecifierResolvePlugin(),
       cjsInteropFallbackPlugin(),
       deno({ onLoad: denoOnLoadCjsInterop(options.root) }),
@@ -346,6 +527,46 @@ export async function createSpaceDevEngine(
 
   const clientEnvironment = server.environments.client
 
+  // Relays Vite's OWN internal `environment.hot.send({ type: 'full-reload' })` calls (the dep
+  // optimizer's own recovery signal for a mid-session re-optimize, among other real Vite-internal
+  // triggers) into `options.onFullReloadNeeded` — see that option's own doc for the full mechanism
+  // and the real incident this closes. `clientEnvironment.hot` is always a real, plain object here
+  // (even with zero real network clients ever connected — this engine never binds a real listener,
+  // `Deno.serve()` is the only one, see this function's own doc), and its `send` is an ordinary
+  // method safe to wrap: confirmed against `vite@8.2.2`'s own source that with no real client
+  // connected, `send` for an `'error'`/`'full-reload'` payload just buffers it and returns — no
+  // I/O, no throw. Wrapping it here, once, catches every one of Vite's own internal call sites
+  // uniformly, without needing a custom `HotChannel` (which this `middlewareMode: true` engine has
+  // no clean way to plug in anyway, given it never constructs a real dev environment factory).
+  const originalHotSend = clientEnvironment.hot.send.bind(clientEnvironment.hot)
+  clientEnvironment.hot.send = (payload: HotPayload) => {
+    if (payload.type === 'full-reload') options.onFullReloadNeeded?.()
+    return originalHotSend(payload)
+  }
+
+  // Waits for the client environment's dep-optimizer to finish its INITIAL discovery scan before
+  // this engine is considered ready — `scanProcessing` (not publicly typed on `DevEnvironment`,
+  // confirmed against `vite@8.2.2`'s own source, `createDepsOptimizer` in
+  // `dist/node/chunks/node.js`) is the promise Vite itself awaits internally at the exact same
+  // point (`optimizedDepsPlugin`'s own `load` hook already correctly awaits a PER-DEPENDENCY
+  // `info.processing` once that dependency is REGISTERED — confirmed via a real 8-second-wait
+  // repro — but a dependency this engine pre-declares via `optimizeDeps.include`
+  // (`preact`/`@prefresh/core`/`@prefresh/utils`, ...) is only actually REGISTERED in the
+  // optimizer's own metadata once this scan itself finishes). Without this, a request landing
+  // DURING the scan for a dependency the scan hasn't registered yet doesn't hit the
+  // correctly-waiting per-dependency path at all — it can instead resolve through a DIFFERENT,
+  // unoptimized fallback (e.g. `/@fs/` absolute path) than what every LATER request for the same
+  // specifier resolves to once the scan completes, silently producing TWO DIFFERENT module
+  // instances of the same package for the same page load. Confirmed live as the real cause of a
+  // Preact-only bug: `@prefresh/core`'s own re-render bookkeeping (a module-level `WeakMap`) is
+  // only correct if every Comet resolves `@prefresh/core` to the exact same instance — a Comet
+  // hydrated during this exact window got a different one, and its FIRST Fast-Refresh update
+  // afterward silently did nothing (`flushUpdates()` ran with zero error, but the edited
+  // component was never found in the OTHER instance's own `WeakMap`). This wait only ever affects
+  // a genuinely fresh dev-server boot's own first moment — already-warm requests never see
+  // `scanProcessing` set at all, so this is a no-op the rest of a dev session.
+  await clientEnvironment.depsOptimizer?.scanProcessing
+
   // Never `server.ssrLoadModule()` — see this function's own doc for why (Vite's own default
   // evaluator can't parse native decorator syntax). `evalDir` holds only this engine's own
   // generated `.ts` files (`RealImportEvaluator`'s own doc), removed on `close()` below.
@@ -353,6 +574,65 @@ export async function createSpaceDevEngine(
   const runner = createServerModuleRunner(server.environments.ssr, {
     evaluator: new RealImportEvaluator(evalDir),
   })
+
+  // Strips a dep-optimizer version query (`?v=<hash>` or `&v=<hash>`) from an otherwise-untouched
+  // url — same pattern Vite's own `DEP_VERSION_RE` (`/[?&](v=[\w.-]+)\b/`,
+  // `dist/node/chunks/node.js`) matches, reimplemented here since that regex isn't exported from
+  // Vite's public API either. See `transformRequestRetryingOptimizeDepsRace`'s own doc for why this
+  // needs to be a QUERY EDIT, not a bare retry.
+  function stripDepVersionQuery(url: string): string {
+    const [path, query] = url.split('?')
+    if (!query) return url
+    const remaining = query.split('&').filter((param) => !param.startsWith('v='))
+    return remaining.length ? `${path}?${remaining.join('&')}` : path
+  }
+
+  // `clientEnvironment.transformRequest(url)`, retried ONCE if it rejects with
+  // `ERR_OUTDATED_OPTIMIZED_DEP`/`ERR_OPTIMIZE_DEPS_PROCESSING_ERROR` — neither exported from
+  // Vite's public API (confirmed against `vite@8.2.2`'s own source, `optimizedDepsPlugin` in
+  // `dist/node/chunks/node.js`, matched here by their known-stable string value, same technique
+  // `transformClientAsset` below already uses for `ERR_LOAD_URL`): both mean a SECOND wave of
+  // dependency discovery invalidated what this request had already resolved against — a real,
+  // confirmed-live scenario for a Comet whose dependency chain is wide enough to trigger it (e.g.
+  // `@zanix/space-ui`'s components pulling in `preact/jsx-runtime` on top of the renderer's own
+  // already-declared `optimizeDeps`). Vite's own real dev server answers this with a 504 and
+  // relies on its own `/@vite/client` WebSocket pushing a `full-reload` event so the browser
+  // re-requests the comet's own importing module, which re-embeds a FRESH `?v=` hash for this
+  // dependency — this engine's hand-written `/@vite/client` replacement (`dev-vite-hot-client.ts`)
+  // never opens that socket at all (see its own doc), so that signal never reaches the browser:
+  // confirmed live as a permanent 500 breaking Comet hydration on first load, fixed only by a
+  // manual reload. A bare retry of the SAME url does NOT recover here — `ERR_OUTDATED_OPTIMIZED_DEP`
+  // means the specific `?v=<hash>` this request asked for is now stale by definition (confirmed
+  // live: retrying unchanged reproduced the identical error every time, forever, since the stale
+  // hash never becomes valid again); the fix instead strips the version query
+  // ({@linkcode stripDepVersionQuery}) before retrying, which skips Vite's own hash-mismatch check
+  // entirely (`optimizedDepsPlugin`'s `load` hook only compares hashes when a `v=` query is
+  // present) and serves whatever the CURRENT pre-bundle contains — the same content a fresh,
+  // never-cached request would get. Recursion, not a loop, so this never trips `no-await-in-loop`
+  // for what is structurally a single bounded retry, not a batch of awaits that should have been
+  // parallelized. Never masks a REAL error: anything else, and a second failure of this same kind,
+  // still propagates unchanged.
+  async function transformRequestRetryingOptimizeDepsRace(
+    unwrappedUrl: string,
+    alreadyRetried = false,
+  ): ReturnType<typeof clientEnvironment.transformRequest> {
+    try {
+      return await clientEnvironment.transformRequest(unwrappedUrl)
+    } catch (error) {
+      const code = (error as { code?: string }).code
+      if (
+        !alreadyRetried &&
+        (code === 'ERR_OUTDATED_OPTIMIZED_DEP' ||
+          code === 'ERR_OPTIMIZE_DEPS_PROCESSING_ERROR')
+      ) {
+        return transformRequestRetryingOptimizeDepsRace(
+          stripDepVersionQuery(unwrappedUrl),
+          true,
+        )
+      }
+      throw error
+    }
+  }
 
   return {
     ssrLoadModule: (id) => runner.import(id),
@@ -368,7 +648,7 @@ export async function createSpaceDevEngine(
         ReturnType<typeof clientEnvironment.transformRequest>
       >
       try {
-        result = await clientEnvironment.transformRequest(unwrappedUrl)
+        result = await transformRequestRetryingOptimizeDepsRace(unwrappedUrl)
       } catch (error) {
         // A missing file doesn't return a falsy result — it REJECTS, with `code: 'ERR_LOAD_URL'`
         // (confirmed against `vite@8.2.1`'s own real error, not assumed from a generic-sounding
@@ -383,6 +663,23 @@ export async function createSpaceDevEngine(
       const mod = await clientEnvironment.moduleGraph.getModuleByUrl(
         unwrappedUrl,
       )
+
+      // Dev-mode counterpart to `cometPlugin`'s own build-time `'server-only'` enforcement — see
+      // `findDevChainToComet`'s own doc for why this can't just reuse that function directly.
+      // Checked AFTER a successful transform (never before): only a URL that actually resolved to
+      // a real file can meaningfully be checked at all, and this must run before the result below
+      // ever reaches a caller — a real, checked `Comet`'s client entry must never be told this
+      // content is servable. `realFilePathOf` (not raw `mod?.file`) is what makes this reach a
+      // real `@zanix/space`-style dependency import too, not just a project-local file — see its
+      // own doc for why `mod.file` alone would silently miss the common case entirely.
+      if (mod) {
+        const modPath = realFilePathOf(mod)
+        if (modPath && await isServerOnlyFile(modPath)) {
+          const chain = await findDevChainToComet(mod)
+          throw new Error(formatServerOnlyViolation(chain))
+        }
+      }
+
       return {
         code: result.code,
         contentType: contentTypeFor(mod?.type),

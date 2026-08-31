@@ -101,7 +101,7 @@ export async function resolvePageChrome<Params>(
   )
   const resolvedTokens = getThemeResolver()?.({
     population: pageCtx.population,
-    lang: (pageCtx.params as Record<string, string>).lang,
+    lang: (pageCtx.params as Record<string, string> | undefined)?.lang,
     request: pageCtx.request,
   })
   return {

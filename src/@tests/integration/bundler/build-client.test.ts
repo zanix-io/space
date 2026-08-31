@@ -1,12 +1,14 @@
 import { assert, assertEquals, assertFalse } from '@std/assert'
-import { join } from '@std/path'
+import { fromFileUrl, join } from '@std/path'
 import sharp from 'sharp'
 import { getTemporaryFolder } from '@zanix/helpers'
 import { buildSpaceClient } from 'modules/bundler/build-client.ts'
+import { CLIENT_ENTRY_VIRTUAL_ID } from 'modules/render/client-entry.ts'
 import { iconFileName } from 'modules/pwa/icon-naming.ts'
 import { SW_FILE_NAME } from 'modules/bundler/pwa-plugin.ts'
 import { addGlobalCssPaths, setGlobalCssPaths } from 'modules/render/css-manifest.ts'
 import { getActiveRenderer, setActiveRenderer } from 'modules/router/active-renderer.ts'
+import { setRoutesDir } from 'modules/router/routes-dir-registry.ts'
 import {
   getOptimizeConfig,
   resetAssetsDirConfig,
@@ -14,6 +16,7 @@ import {
   setAssetsDirConfig,
   setOptimizeConfig,
 } from 'modules/assets/asset-registry.ts'
+import { setSitemapDeclaration } from 'modules/seo/sitemap.ts'
 
 const TMP_ROOT = getTemporaryFolder(import.meta.url)
 
@@ -56,13 +59,22 @@ async function listJsFiles(dir: string): Promise<string[]> {
   return names
 }
 
-/** The single `.js` file directly under `dir` — throws (a real assertion failure via `find`
- * returning `undefined` would be a confusing non-null-assertion instead) if there isn't exactly
- * one, since every test that calls this already expects exactly one chunk. */
+/** Same as {@linkcode listJsFiles}, minus the client entry's own chunk (`client-entry-<hash>.js`)
+ * — every real build now always includes one (see `client-entry-plugin.ts`'s own doc), so a test
+ * asserting "the app's OWN comet/page chunk(s)" needs to filter it out first; it was never part
+ * of what these tests were checking to begin with. */
+async function listAppJsFiles(dir: string): Promise<string[]> {
+  return (await listJsFiles(dir)).filter((name) => !name.startsWith('client-entry-'))
+}
+
+/** The single, app-owned `.js` file directly under `dir` (the client entry's own chunk excluded —
+ * see {@linkcode listAppJsFiles}) — throws (a real assertion failure via `find` returning
+ * `undefined` would be a confusing non-null-assertion instead) if there isn't exactly one, since
+ * every test that calls this already expects exactly one chunk of its OWN. */
 async function theOneJsFile(dir: string): Promise<string> {
-  const files = await listJsFiles(dir)
+  const files = await listAppJsFiles(dir)
   if (files.length !== 1) {
-    throw new Error(`expected exactly one .js file, got: ${files.join(', ')}`)
+    throw new Error(`expected exactly one non-client-entry .js file, got: ${files.join(', ')}`)
   }
   return files[0]
 }
@@ -126,6 +138,108 @@ Deno.test(
 
       const code = await Deno.readTextFile(join(assetsDir, jsFile))
       assert(code.includes('counter'), code)
+    })
+  },
+)
+
+Deno.test(
+  "buildSpaceClient: a route's own error.tsx is built as an auto-comet — no 'use comet' " +
+    'directive needed, real chunk, real comets-manifest.json entry — the same manifest ' +
+    "resolveCometModuleUrl reads back for a segment's own hydrateErrorBoundaries client entry",
+  async () => {
+    await withTempDir(async (root) => {
+      const routesDir = join(root, 'routes')
+      await Deno.mkdir(routesDir, { recursive: true })
+      await Deno.writeTextFile(join(routesDir, 'page.tsx'), 'export default null\n')
+      const errorPath = join(routesDir, 'error.tsx')
+      await Deno.writeTextFile(
+        errorPath,
+        'export default function FixtureError() { return "boom-fallback" }\n',
+      )
+
+      const result = await buildSpaceClient({ root, routesDir, css: { tailwind: false } })
+
+      const assetsDir = join(result.outDir, 'assets')
+      const jsFile = await theOneJsFile(assetsDir)
+
+      const manifest = JSON.parse(
+        await Deno.readTextFile(join(result.outDir, 'comets-manifest.json')),
+      )
+      const realErrorPath = await Deno.realPath(errorPath)
+      assertEquals(manifest[realErrorPath], `/assets/${jsFile}`)
+
+      const code = await Deno.readTextFile(join(assetsDir, jsFile))
+      assert(code.includes('boom-fallback'), code)
+    })
+  },
+)
+
+Deno.test(
+  "buildSpaceClient: the same auto-comet treatment applies under renderer: 'preact' too — not " +
+    "React-only. Even Preact's own hydrateErrorBoundaries needs a real built chunk to `import()` " +
+    "back client-side for its `hydrate()` call, exactly like React's `createRoot` mount does",
+  async () => {
+    await withTempDir(async (root) => {
+      const routesDir = join(root, 'routes')
+      await Deno.mkdir(routesDir, { recursive: true })
+      await Deno.writeTextFile(join(routesDir, 'page.tsx'), 'export default null\n')
+      const errorPath = join(routesDir, 'error.tsx')
+      await Deno.writeTextFile(
+        errorPath,
+        'export default function FixtureError() { return "boom-fallback-preact" }\n',
+      )
+
+      const result = await buildSpaceClient({
+        root,
+        routesDir,
+        renderer: 'preact',
+        css: { tailwind: false },
+      })
+
+      const assetsDir = join(result.outDir, 'assets')
+      const jsFile = await theOneJsFile(assetsDir)
+
+      const manifest = JSON.parse(
+        await Deno.readTextFile(join(result.outDir, 'comets-manifest.json')),
+      )
+      const realErrorPath = await Deno.realPath(errorPath)
+      assertEquals(manifest[realErrorPath], `/assets/${jsFile}`)
+
+      const code = await Deno.readTextFile(join(assetsDir, jsFile))
+      assert(code.includes('boom-fallback-preact'), code)
+    })
+  },
+)
+
+Deno.test(
+  "buildSpaceClient: this package's own built-in DefaultErrorView is bundled as an auto-comet " +
+    'TOO, unconditionally — a route declaring no error.tsx at all still needs a real client chunk ' +
+    'for the render-phase fallback (composeSegments) to recover from, exactly like an app-authored ' +
+    'error.tsx does',
+  async () => {
+    await withTempDir(async (root) => {
+      const routesDir = join(root, 'routes')
+      await Deno.mkdir(routesDir, { recursive: true })
+      await Deno.writeTextFile(join(routesDir, 'page.tsx'), 'export default null\n')
+
+      const result = await buildSpaceClient({ root, routesDir, css: { tailwind: false } })
+
+      const manifest = JSON.parse(
+        await Deno.readTextFile(join(result.outDir, 'comets-manifest.json')),
+      )
+      const defaultErrorViewPath = await Deno.realPath(
+        fromFileUrl(import.meta.resolve('../../../modules/router/default-error-view.tsx')),
+      )
+      const builtUrl = manifest[defaultErrorViewPath]
+      assert(
+        builtUrl,
+        `expected a manifest entry for the built-in DefaultErrorView: ${
+          JSON.stringify(manifest, null, 2)
+        }`,
+      )
+
+      const code = await Deno.readTextFile(join(result.outDir, builtUrl.replace(/^\//, '')))
+      assert(code.includes('Something went wrong'), code)
     })
   },
 )
@@ -305,19 +419,21 @@ Deno.test(
 )
 
 Deno.test(
-  'buildSpaceClient: zero comets and zero global CSS returns cleanly, no build attempted',
+  'buildSpaceClient: zero comets and zero global CSS still runs a real build — the ' +
+    'auto-generated client entry (see client-entry-plugin.ts) means `input` is never actually ' +
+    'empty any more, so the old "skip the build entirely" early return is unreachable in practice',
   async () => {
     await withTempDir(async (root) => {
       const result = await buildSpaceClient({ root, css: { tailwind: false } })
       assertEquals(result.comets, [])
-      // No `dist/client` directory at all — the build was skipped entirely, not run empty.
-      let exists = true
-      try {
-        await Deno.stat(result.outDir)
-      } catch (error) {
-        exists = !(error instanceof Deno.errors.NotFound)
-      }
-      assertEquals(exists, false)
+
+      const manifest = JSON.parse(
+        await Deno.readTextFile(join(result.outDir, 'client-entry-manifest.json')),
+      )
+      const builtUrl = manifest[CLIENT_ENTRY_VIRTUAL_ID]
+      assert(builtUrl, JSON.stringify(manifest))
+      // Confirms a real chunk was actually written, not just a manifest entry pointing at nothing.
+      await Deno.stat(join(result.outDir, builtUrl.replace(/^\//, '')))
     })
   },
 )
@@ -458,7 +574,7 @@ Deno.test(
       assertEquals(result.comets.length, 2)
 
       const assetsDir = join(result.outDir, 'assets')
-      const jsFiles = await listJsFiles(assetsDir)
+      const jsFiles = await listAppJsFiles(assetsDir)
       assertEquals(jsFiles.length, 2, jsFiles.join(', '))
 
       const allCode = (await Promise.all(
@@ -763,6 +879,41 @@ Deno.test(
 // cache — the actual official path an app reaches purely via `defineSpaceApp({ assetsDir,
 // optimize })`, never a hand-wired `vite.config.ts` call to `assetsPlugin` directly.
 // =================================================================================================
+
+Deno.test(
+  'buildSpaceClient: with routesDir omitted, defaults to getRoutesDir() — a project whose ' +
+    "defineSpaceApp({ routesDir }) points somewhere other than './routes' still gets every real " +
+    "page discovered and its sitemap: 'auto' entries derived, with no explicit option threaded " +
+    'through by the CLI itself (the exact gap that let a non-default routesDir silently produce ' +
+    'an empty production sitemap manifest)',
+  async () => {
+    await withTempDir(async (root) => {
+      const routesDir = join(root, 'src', 'space', 'routes')
+      await Deno.mkdir(routesDir, { recursive: true })
+      await Deno.mkdir(join(routesDir, 'login'), { recursive: true })
+      await Deno.writeTextFile(join(routesDir, 'page.tsx'), 'export default null\n')
+      await Deno.writeTextFile(join(routesDir, 'login', 'page.tsx'), 'export default null\n')
+      try {
+        // Stands in for a single defineSpaceApp({ routesDir, sitemap: 'auto' }) call having
+        // already run — exactly what `zanix space build` (via `importSpaceApp`) triggers before
+        // ever calling `buildSpaceClient`, with NO explicit `routesDir` threaded through by the
+        // CLI itself.
+        setRoutesDir(routesDir)
+        setSitemapDeclaration('auto')
+
+        const result = await buildSpaceClient({ root, css: { tailwind: false } })
+
+        assertEquals(
+          result.sitemapEntries,
+          [{ loc: '/' }, { loc: '/login' }],
+        )
+      } finally {
+        setRoutesDir('./routes')
+        setSitemapDeclaration(undefined)
+      }
+    })
+  },
+)
 
 Deno.test(
   "buildSpaceClient: with optimize omitted, defaults to getOptimizeConfig() — a single app's " +

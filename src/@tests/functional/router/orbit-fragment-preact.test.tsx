@@ -1,5 +1,6 @@
-import { assert, assertEquals } from '@std/assert'
+import { assert, assertEquals, assertFalse } from '@std/assert'
 import { createElement } from 'preact'
+import { BUILTIN_CSS } from 'modules/render/builtin-css.ts'
 import { bootstrapServers, webServerManager } from '@zanix/server'
 import { ORBIT_FRAGMENT_HEADER, ORBIT_OUTLET_ATTR } from 'modules/router/orbit-protocol.ts'
 import { Page, SpacePageController } from 'modules/router/mod.ts'
@@ -59,7 +60,10 @@ Deno.test(
       // confirmed empirically against the real response, not assumed from the React test's own
       // assertion shape.
       assert(fullHtml.includes(ORBIT_OUTLET_ATTR), fullHtml)
-      assert(fullHtml.includes('display:contents'), fullHtml)
+      // display:contents comes from the built-in stylesheet rule, never an inline style
+      // attribute (a strict style-src with no unsafe-inline silently drops those).
+      assert(fullHtml.includes(BUILTIN_CSS), fullHtml)
+      assertFalse(fullHtml.includes('style="display:contents"'), fullHtml)
       assert(fullHtml.includes('<p>hello</p>'), fullHtml)
       assertEquals(fullRes.headers.get('vary'), ORBIT_FRAGMENT_HEADER)
 

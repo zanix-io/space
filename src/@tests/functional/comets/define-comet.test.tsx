@@ -2,8 +2,13 @@ import { assert, assertEquals, assertFalse, assertThrows } from '@std/assert'
 import { InternalError } from '@zanix/errors'
 import { renderToResponse } from '../../../../mod-react.ts'
 import { defineComet } from 'modules/comets/define-comet.ts'
-import { setCometManifest } from 'modules/comets/comet-manifest.ts'
+import {
+  hashSourceKey,
+  normalizeSourceKey,
+  setCometManifest,
+} from 'modules/comets/comet-manifest.ts'
 import { parseCometProps } from 'modules/render/serialization-codec.ts'
+import { BUILTIN_CSS } from 'modules/render/builtin-css.ts'
 import { stripHydrationComments } from '../../support/strip-hydration-comments.ts'
 
 console.error = () => {}
@@ -39,6 +44,22 @@ Deno.test(
     } finally {
       setCometManifest(undefined)
     }
+  },
+)
+
+Deno.test(
+  "defineComet: data-comet is a hash of the comet's source path, never the raw path itself — a " +
+    "real disclosure otherwise (the server's local filesystem layout, and on a " +
+    'non-containerized deploy its OS username, embedded in every page this comet renders on)',
+  async () => {
+    const Comet = defineComet(Counter, FIXTURE_SOURCE_URL)
+    const response = await renderToResponse(<Comet initial={1} />)
+    const html = stripHydrationComments(await response.text())
+
+    const expectedHash = hashSourceKey(normalizeSourceKey(FIXTURE_SOURCE_URL))
+    assert(html.includes(`data-comet="${expectedHash}"`), html)
+    assertFalse(html.includes(Deno.cwd()), html)
+    assertFalse(html.includes(FIXTURE_SOURCE_URL), html)
   },
 )
 
@@ -114,6 +135,9 @@ Deno.test('defineComet: comet="none" renders the plain component, no marker at a
   const response = await renderToResponse(<Comet initial={5} comet='none' />)
   const html = stripHydrationComments(await response.text())
 
+  // No built-in stylesheet rule here either — this bare, isolated `renderToResponse()` call
+  // passes no `cssHrefs` at all, the same signal a real fragment omits it with (see
+  // `builtin-css.ts`'s own doc): the element renders as the entire response body, unwrapped.
   assertEquals(html, '<button type="button">5</button>')
   assertFalse(html.includes('data-comet'))
 })
@@ -146,16 +170,23 @@ Deno.test('defineComet: forwards cometMedia as the media marker attribute', asyn
 })
 
 Deno.test(
-  'defineComet: the wrapper defaults to display:contents so it never breaks a parent grid/flex layout',
+  'defineComet: the wrapper gets display:contents from the built-in stylesheet rule (never an ' +
+    'inline style attribute — a strict style-src with no unsafe-inline silently drops those), so ' +
+    'it never breaks a parent grid/flex layout',
   async () => {
     const Comet = defineComet(Counter, FIXTURE_SOURCE_URL)
 
+    // `cssHrefs: []` — simulates a real full-document call (see `render-to-response.tsx`'s own
+    // doc: the built-in stylesheet rule is gated on `cssHrefs !== undefined`, the same signal a
+    // real page's document branch always sets and a fragment/bare call never does).
     const response = await renderToResponse(
       <Comet initial={0} comet='visible' />,
+      { cssHrefs: [] },
     )
     const html = await response.text()
 
-    assert(html.includes('style="display:contents"'), html)
+    assert(html.includes(BUILTIN_CSS), html)
+    assertFalse(html.includes('style="display:contents"'), html)
   },
 )
 

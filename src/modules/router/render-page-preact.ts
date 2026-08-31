@@ -1,19 +1,28 @@
 import { createElement, Fragment } from 'preact'
 import type { ComponentChildren, ComponentType, VNode } from 'preact'
+import { fromFileUrl, resolve } from '@std/path'
 import type { ClassConstructor } from '@zanix/server'
 import type { ErrorBoundaryProps, LayoutProps, PageContext } from 'typings/page.ts'
 import logger from '@zanix/logger'
 import { renderToResponse } from '../render/render-to-response-preact.ts'
 import { resolveCssHrefs, resolvePageCssHrefs } from '../render/css-manifest.ts'
+import { resolveClientEntryUrl } from '../render/client-entry.ts'
 import { resolvePwaHead } from '../pwa/pwa-registry.ts'
 import { isDevClientEnabled } from '../dev/dev-client-registry.ts'
 import { SpaceErrorBoundary } from './error-boundary-preact.ts'
-import { getPageTree } from './page-tree-registry.ts'
+import { findNearestErrorBoundary, getPageTree } from './page-tree-registry.ts'
 import { resolveSegmentData } from './segment-loader.ts'
 import { applyDocumentShell } from './document-shell-preact.ts'
 import { serializeHeadMarkup } from '../render/head-markup.ts'
 import type { DocumentModel } from '../render/document-model.ts'
 import { ORBIT_OUTLET_ATTR } from './orbit-protocol.ts'
+import { resolveCometModuleUrl } from '../comets/comet-manifest.ts'
+import {
+  DEFAULT_ERROR_VIEW_PREACT_SPECIFIER,
+  DEFAULT_ERROR_VIEW_PREACT_URL,
+} from './default-view-specifiers.ts'
+import { loadMessages } from '../i18n/load-messages.ts'
+import { DEFAULT_IMPLICIT_LANG, getMessagesDir } from '../i18n/messages-registry.ts'
 import type { SpacePageController } from './space-page-controller.ts'
 import { resolveHead } from './head-descriptor.ts'
 import type { HeadDescriptor, ResolvedHead } from './head-descriptor.ts'
@@ -84,6 +93,19 @@ async function composeSegments<Params>(
     segments,
     pageCtx as unknown as PageContext,
   )
+  // Same eager, once-per-request resolution as `render-page-react.tsx`'s own `composeSegments` —
+  // see `ErrorBoundaryProps.messages`'s own doc for why this can't be deferred to the point of
+  // failure the way a `loader`'s own throw can.
+  const messages = getMessagesDir() !== undefined
+    ? await loadMessages({
+      // `paramsRecord` itself is `undefined` for a route with no dynamic segments at all (e.g.
+      // the plain `population` template's root `/`, no `[lang]`) — never just missing a `lang`
+      // key on an otherwise-real object, so the optional-chain (not a plain `??`-after-access)
+      // matters here.
+      lang: paramsRecord?.lang ?? DEFAULT_IMPLICIT_LANG,
+      population: (pageCtx as unknown as PageContext).population,
+    })
+    : undefined
 
   // Most-specific-first, same reasoning/order as `render-page-react.tsx`'s own `composeSegments` —
   // the page's own head, then each segment from nearest (leaf) to farthest (root).
@@ -98,6 +120,29 @@ async function composeSegments<Params>(
 
   // deno-lint-ignore no-explicit-any
   let node: VNode<any> = element
+
+  // No segment ANYWHERE in this page's own composition chain declares an `error.tsx` — same real,
+  // reproduced gap `render-page-react.tsx`'s own `composeSegments` doc describes (a render-phase
+  // throw with nothing to catch it produces an empty `500`), and the same fix: fall back to this
+  // package's own built-in `DefaultErrorView`, exactly like `loader-error-handler.ts` already does
+  // on the data-phase side. Unlike React's counterpart this needs no `Suspense`/marker-wrapper
+  // gymnastics — `SpaceErrorBoundary` (Preact) already handles both (real synchronous recovery,
+  // and its own conditional marker emission) once it's simply given a `moduleUrl` to resolve.
+  if (findNearestErrorBoundary(segments) === undefined) {
+    const DefaultErrorView = (await import(DEFAULT_ERROR_VIEW_PREACT_SPECIFIER))
+      .DefaultErrorView as ComponentType<
+        ErrorBoundaryProps
+      >
+    const defaultErrorViewPath = await Deno.realPath(fromFileUrl(DEFAULT_ERROR_VIEW_PREACT_URL))
+    node = createElement(SpaceErrorBoundary, {
+      fallback: DefaultErrorView,
+      params: paramsRecord,
+      messages,
+      moduleUrl: resolveCometModuleUrl(defaultErrorViewPath),
+      children: node,
+    })
+  }
+
   for (let i = segments.length - 1; i >= 0; i--) {
     // Cast here, not in `ResolvedSegment`'s own declared type — `page-tree-registry.ts` stores
     // these as `unknown` on purpose (shared with `render-page-react.tsx`, which casts to React's
@@ -110,8 +155,16 @@ async function composeSegments<Params>(
       | ComponentType<ErrorBoundaryProps>
       | undefined
     if (ErrorFallback) {
+      // `undefined` for a `ResolvedSegment` built by hand with no real file path — same
+      // `resolveCometModuleUrl` call React's own `composeSegments` makes, see either
+      // `ResolvedSegment.errorFilePath`'s or `error-boundary-preact.ts`'s own doc for why this
+      // renderer's `SpaceErrorBoundary` decides, itself, whether to actually use it.
+      const errorFilePath = segments[i].errorFilePath
       node = createElement(SpaceErrorBoundary, {
         fallback: ErrorFallback,
+        params: paramsRecord,
+        messages,
+        moduleUrl: errorFilePath ? resolveCometModuleUrl(errorFilePath) : undefined,
         children: node,
       })
     }
@@ -124,9 +177,13 @@ async function composeSegments<Params>(
     }
   }
 
+  // `display: contents` comes from `builtin-css.ts`'s own stylesheet rule, targeting this same
+  // `ORBIT_OUTLET_ATTR` selector — never an inline `style` prop here, see that module's own doc
+  // (and `render-page-react.tsx`'s identical comment) for why: a strict `style-src` with no
+  // `'unsafe-inline'` silently drops an inline `style` ATTRIBUTE.
   const outlet = createElement(
     'div',
-    { style: { display: 'contents' }, [ORBIT_OUTLET_ATTR]: '' },
+    { [ORBIT_OUTLET_ATTR]: '' },
     node,
   )
   if (fragmentOnly) {
@@ -239,6 +296,11 @@ export async function renderPageResponse<Params>(
   // the SAME resolution helpers React's own `renderPageResponse` calls, so both renderers start
   // from identical inputs and differ only in how they serialize them. Never built for a fragment:
   // a fragment is not a document and has no `<head>` to place anything in.
+  const rawRouteFilePath = getPageTree(Target)?.filePath
+  // Always at least the auto-generated default (`hydrateComets()`/`initOrbit()`) — see
+  // `client-entry.ts`'s own doc. `undefined` only if a production response is served before its
+  // own `loadClientEntryManifest()` call ever ran.
+  const clientEntryUrl = resolveClientEntryUrl()
   const document: DocumentModel | undefined = fragmentOnly ? undefined : {
     head,
     cssHrefs: cssHrefs ?? [],
@@ -246,7 +308,14 @@ export async function renderPageResponse<Params>(
     pwa: pwaHead,
     nonce,
     initialState: data,
-    devClient: isDevClientEnabled() ? { routeFilePath: getPageTree(Target)?.filePath } : undefined,
+    bootstrapModules: clientEntryUrl ? [clientEntryUrl] : undefined,
+    // Resolved to an ABSOLUTE path — see `render-page-react.tsx`'s own identical comment for why:
+    // `handleSsrModuleChanged` (`dev-client-script.ts`) compares this against `affectedRoutes`,
+    // always absolute (Vite's own module graph), so an un-resolved relative path here silently
+    // never matches and `location.reload()` never fires on its own.
+    devClient: isDevClientEnabled()
+      ? { routeFilePath: rawRouteFilePath && resolve(rawRouteFilePath) }
+      : undefined,
   }
 
   // Same reasoning as React's own `renderPageResponse` for why a fragment skips all of this — see
@@ -273,6 +342,7 @@ export async function renderPageResponse<Params>(
         // `head-markup.ts`'s own module doc.
         headMarkup: serializeHeadMarkup(document),
         serviceWorkerHref: document.pwa?.serviceWorkerHref,
+        bootstrapModules: document.bootstrapModules,
       },
     ),
   )

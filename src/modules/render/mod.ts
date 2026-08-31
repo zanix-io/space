@@ -19,3 +19,10 @@ export {
   setGlobalCssPaths,
 } from './css-manifest.ts'
 export type { CssManifest, StylesheetRef } from './css-manifest.ts'
+export {
+  getClientEntry,
+  loadClientEntryManifest,
+  resolveClientEntrySpecifier,
+  resolveClientEntryUrl,
+  setClientEntry,
+} from './client-entry.ts'

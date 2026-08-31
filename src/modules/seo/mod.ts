@@ -14,7 +14,18 @@ export { buildHreflangLinks } from './hreflang.ts'
 export type { BuildHreflangLinksOptions } from './hreflang.ts'
 export { buildCanonicalLink } from './canonical.ts'
 export type { BuildCanonicalLinkOptions } from './canonical.ts'
-export { buildSitemapXml, registerSitemap } from './sitemap.ts'
-export type { SitemapAlternate, SitemapEntry, SitemapSource } from './sitemap.ts'
+export {
+  buildSitemapXml,
+  getSitemapDeclaration,
+  registerSitemap,
+  setSitemapDeclaration,
+} from './sitemap.ts'
+export type {
+  SitemapAlternate,
+  SitemapDeclaration,
+  SitemapEntry,
+  SitemapSource,
+} from './sitemap.ts'
+export { getSitemapManifest, loadSitemapManifest } from './sitemap-manifest.ts'
 export { buildRobotsTxt, registerRobots } from './robots.ts'
 export type { RobotsConfig, RobotsRule, SpaceRobotsConfig } from './robots.ts'

@@ -175,13 +175,15 @@ export async function runRenderProbe(
       // deno-lint-ignore no-await-in-loop
       html = await response.text()
     } catch (error) {
-      // DEFENSIVE, and rarely reached: both serializers document a contract of always resolving, so
-      // a component that throws comes back as an empty 500 rather than as an exception — which the
-      // probe then validates like any other response, producing DOC003. This branch exists for a
-      // failure BELOW that contract (a renderer registry misconfiguration, an unloadable module).
-      // Even here it reports a skip rather than a diagnostic: the probe has no rule for "rendering
-      // threw", and inventing one would put policy in the probe, where it would have no code, no
-      // severity and no basis.
+      // DEFENSIVE, and rarely reached: both serializers document a contract of always resolving —
+      // `composeSegments`'s own default-error-view fallback (see `render-page-react.tsx`'s doc)
+      // means even a component that throws with no `error.tsx` of its own still comes back as a real
+      // document (validated like any other response, typically surfacing ordinary content rules such
+      // as A11Y006/SEO008) rather than as an exception here. This branch exists for a failure BELOW
+      // that contract (a renderer registry misconfiguration, an unloadable module). Even here it
+      // reports a skip rather than a diagnostic: the probe has no rule for "rendering threw", and
+      // inventing one would put policy in the probe, where it would have no code, no severity and no
+      // basis.
       skipped.push(
         `Route '${page.routePath}' threw while rendering: ${
           error instanceof Error ? error.message : String(error)

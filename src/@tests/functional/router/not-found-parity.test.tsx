@@ -73,6 +73,7 @@ async function renderNotFound(
       RootLayout: scenario.withRootLayout
         ? (renderer === 'react' ? ReactRootLayout : PreactRootLayout)
         : undefined,
+      lang: 'default',
       head: scenario.head,
       fragmentOnly: false,
     })
@@ -225,6 +226,7 @@ Deno.test(
         const response = await render({
           NotFound: View,
           RootLayout: undefined,
+          lang: 'default',
           head: undefined,
           fragmentOnly: false,
         })

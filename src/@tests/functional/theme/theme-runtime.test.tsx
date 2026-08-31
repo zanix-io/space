@@ -8,6 +8,7 @@ import { POPULATION_LOCALS_KEY } from 'modules/middleware/population-guard.ts'
 import { setThemeResolver } from 'modules/theme/mod.ts'
 import { resetThemeResolver } from 'modules/theme/theme-registry.ts'
 import { setCssManifest } from 'modules/render/css-manifest.ts'
+import { BUILTIN_CSS } from 'modules/render/builtin-css.ts'
 
 function View() {
   return <p>ok</p>
@@ -110,7 +111,11 @@ Deno.test(
       const response = await new UnthemedPage(ctxFor()).handleGet(ctxFor())
       const html = await response.text()
 
-      assertFalse(html.includes('<style'), html)
+      // The built-in stylesheet rule (see `builtin-css.ts`) is unrelated to theming and always
+      // present on a full document — only a THEME-specific `<style>` (from `:root{...}` tokens)
+      // must be absent here.
+      assert(html.includes(BUILTIN_CSS), html)
+      assertFalse(html.includes(':root'), html)
     } finally {
       resetThemeResolver()
     }
@@ -129,7 +134,11 @@ Deno.test(
     const response = await new NoThemePage(ctxFor()).handleGet(ctxFor())
     const html = await response.text()
 
-    assertFalse(html.includes('<style'), html)
+    // Same reasoning as the "theme.resolve returning undefined" test above — the built-in
+    // stylesheet rule is unrelated to theming and always present; only a theme-specific one
+    // must be absent.
+    assert(html.includes(BUILTIN_CSS), html)
+    assertFalse(html.includes(':root'), html)
   },
 )
 

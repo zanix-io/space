@@ -14,7 +14,12 @@ import { populationGuard } from 'modules/middleware/mod.ts'
 console.error = () => {}
 
 function ProductsView({ messages }: { messages: Messages }) {
-  return <h1>{messages['home/title'] ?? 'missing'}</h1>
+  // This fixture only ever writes a raw (uncompiled) string catalog below, never a
+  // `zanix space build`-compiled `CompiledMessageNode[]` — but `Messages`'s own type covers both
+  // shapes (see `load-messages.ts`'s own doc), so a plain JSX child needs the `typeof` narrow
+  // regardless of what this particular fixture happens to produce at runtime.
+  const title = messages['home/title']
+  return <h1>{typeof title === 'string' ? title : 'missing'}</h1>
 }
 
 @Page({ path: ':lang/i18n-e2e/products', headers: false })

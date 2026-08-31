@@ -2,13 +2,27 @@ import { join } from '@std/path'
 import logger from '@zanix/logger'
 import { InternalError } from '@zanix/errors'
 import { isDevClientEnabled } from 'modules/dev/dev-client-registry.ts'
-import { getMessagesDir } from './messages-registry.ts'
+import { getMessagesBuildDir, getMessagesDir } from './messages-registry.ts'
 
-/** A flat message catalog — namespaced string keys mapping to message strings, e.g.
- * `{ 'products/title': 'Our products' }`. Deliberately NOT nested objects: a shallow merge (base
- * catalog, then population override) is only correct for a flat shape — see {@linkcode loadMessages}'s
- * own doc for why this is a real constraint, not an arbitrary choice. */
-export type Messages = Record<string, string>
+/** Structurally mirrors `@formatjs/icu-messageformat-parser`'s own `MessageFormatElement` node
+ * shape — redeclared, not imported: `@zanix/space` must never reach FormatJS/ICU, even as a type
+ * (enforced by `dependency-boundary.test.ts`, whose own graph check covers types, not just runtime
+ * code) — see {@linkcode Messages}'s own doc for why a catalog value can be this shape at all. */
+export type CompiledMessageNode = { type: number; value?: string; [key: string]: unknown }
+
+/** A flat message catalog — namespaced string keys mapping to either a raw ICU string (the
+ * uncompiled/dev-mode shape, e.g. `{ 'products/title': 'Our products' }`) or, once `zanix space
+ * build` has compiled a catalog to AST (written to `{clientBuildDir}/messages/...`, NEVER back
+ * into `messagesDir` itself — see this function's own doc), an already-parsed
+ * {@linkcode CompiledMessageNode} array for that same key. `loadMessages()` never inspects or
+ * distinguishes the two — it reads whatever is on disk and returns it as-is — so a caller that
+ * renders `messages[key]` directly (e.g. as a JSX child) must handle both, which in practice means
+ * routing through `@zanix/space-ui`'s `IntlProvider`/`useIntl().formatMessage()` rather than
+ * interpolating a catalog value directly: that formatter accepts either shape and always returns a
+ * plain string. Deliberately NOT nested objects, for either shape: a shallow merge (base catalog,
+ * then population override) is only correct for a flat shape — see {@linkcode loadMessages}'s own
+ * doc for why this is a real constraint, not an arbitrary choice. */
+export type Messages = Record<string, string | CompiledMessageNode[]>
 
 /** Options for {@linkcode loadMessages}. */
 export type LoadMessagesOptions = {
@@ -93,7 +107,18 @@ async function resolve(lang: string, population: string | undefined): Promise<Me
     )
     return {}
   }
-  const dirs = Array.isArray(configured) ? configured : [configured]
+  const roots = Array.isArray(configured) ? configured : [configured]
+
+  // `zanix space build` compiles this app's catalogs to `{clientBuildDir}/messages/{index}/...`
+  // — mirroring `roots`' own array order/index, NEVER `messagesDir` itself (see
+  // `writeCompiledMessagesTree`'s own doc in `@zanix/cli`). Read from there in production when
+  // configured; `zanix space dev` never compiles anything, so it always reads `messagesDir` live,
+  // same `!isDevClientEnabled()` gate `clientBuildDir`'s own consumption
+  // (`define-space-app.ts`) already uses — a stale build dir on disk during dev must never win.
+  const buildDir = getMessagesBuildDir()
+  const dirs = buildDir !== undefined && !isDevClientEnabled()
+    ? roots.map((_, index) => `${buildDir}/messages/${index}`)
+    : roots
 
   const [base, override] = await Promise.all([
     resolveFirstMatch(dirs, `${lang}/index.json`),
@@ -120,6 +145,13 @@ async function resolve(lang: string, population: string | undefined): Promise<Me
  * from the base need to be present), then shallow-merges them: `{ ...base, ...override }`. This is
  * only correct because catalogs are flat, namespaced-string-key objects, never nested — a nested
  * shape would need a real deep merge instead, silently losing sibling keys otherwise.
+ *
+ * **In production, with `clientBuildDir` configured, reads from `{clientBuildDir}/messages/...`
+ * instead** — where `zanix space build` compiles this app's ICU catalogs to AST, mirroring
+ * `clientBuildDir`'s own "compiled output lives in its own directory, source is never touched"
+ * contract (see `SpaceAppConfig.clientBuildDir`'s own doc). `messagesDir` itself is NEVER
+ * overwritten. `zanix space dev` always reads `messagesDir` live — same dev/prod split
+ * `clientBuildDir`'s own consumption already uses.
  *
  * A missing override file is normal (not every population overrides every language) and resolves
  * silently to the base catalog. A missing BASE file logs a warning and resolves to `{}` (or the
@@ -151,10 +183,26 @@ async function resolve(lang: string, population: string | undefined): Promise<Me
  *
  * @example
  * ```tsx
+ * import { IntlProvider, useIntl } from '@zanix/space-ui'
+ *
  * loader = async (ctx: { params: { lang: string }; population?: string }) => ({
+ *   lang: ctx.params.lang,
  *   messages: await loadMessages({ lang: ctx.params.lang, population: ctx.population }),
  * })
- * component = ({ messages }: { messages: Messages }) => <h1>{messages['home/title']}</h1>
+ *
+ * // NEVER interpolate `messages[key]` directly — once `zanix space build` compiles this app's
+ * // `messagesDir`, a catalog value is a `CompiledMessageNode[]`, not a `string` (see
+ * // {@linkcode Messages}'s own doc), and rendering that array as a JSX child crashes at runtime.
+ * // Always format through `@zanix/space-ui`'s `IntlProvider`/`useIntl`, which accepts either shape.
+ * component = ({ lang, messages }) => (
+ *   <IntlProvider locale={lang} messages={messages}>
+ *     <Content />
+ *   </IntlProvider>
+ * )
+ * function Content() {
+ *   const { formatMessage } = useIntl()
+ *   return <h1>{formatMessage('home/title')}</h1>
+ * }
  * ```
  */
 export function loadMessages(options: LoadMessagesOptions): Promise<Messages> {

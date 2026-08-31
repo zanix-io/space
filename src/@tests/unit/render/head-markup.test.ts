@@ -1,6 +1,12 @@
 import { assert, assertEquals, assertFalse, assertStringIncludes } from '@std/assert'
 import { placeHeadMarkup, serializeHeadMarkup } from 'modules/render/head-markup.ts'
 import type { DocumentModel } from 'modules/render/document-model.ts'
+import { BUILTIN_CSS } from 'modules/render/builtin-css.ts'
+
+/** The built-in stylesheet `<style>` tag every `serializeHeadMarkup()` call now always emits (see
+ * `builtin-css.ts`'s own doc) — with no `nonce` in these tests, since none of the models below set
+ * one. Prefixed/interspersed into every exact-equality assertion that predates this rule existing. */
+const BUILTIN_STYLE_TAG = `<style>${BUILTIN_CSS}</style>`
 
 function model(overrides: Partial<DocumentModel> = {}): DocumentModel {
   return {
@@ -14,13 +20,17 @@ function model(overrides: Partial<DocumentModel> = {}): DocumentModel {
 // serializeHeadMarkup
 // ---------------------------------------------------------------------------------------------
 
-Deno.test('serializeHeadMarkup: an empty model contributes nothing at all', () => {
-  assertEquals(serializeHeadMarkup(model()), '')
-})
+Deno.test(
+  'serializeHeadMarkup: an empty model still contributes the built-in stylesheet rule — never ' +
+    'truly empty any more',
+  () => {
+    assertEquals(serializeHeadMarkup(model()), BUILTIN_STYLE_TAG)
+  },
+)
 
 Deno.test('serializeHeadMarkup: renders a real <title> element', () => {
   const markup = serializeHeadMarkup(model({ head: { title: 'Widget', meta: [], link: [] } }))
-  assertEquals(markup, '<title>Widget</title>')
+  assertEquals(markup, `<title>Widget</title>${BUILTIN_STYLE_TAG}`)
 })
 
 Deno.test(
@@ -39,7 +49,7 @@ Deno.test('serializeHeadMarkup: httpEquiv is emitted as the real http-equiv attr
   const markup = serializeHeadMarkup(
     model({ head: { meta: [{ httpEquiv: 'refresh', content: '5' }], link: [] } }),
   )
-  assertEquals(markup, '<meta http-equiv="refresh" content="5">')
+  assertEquals(markup, `<meta http-equiv="refresh" content="5">${BUILTIN_STYLE_TAG}`)
 })
 
 Deno.test(
@@ -53,7 +63,10 @@ Deno.test(
         head: { meta: [{ name: 'description', content: 'a " onload="x' }], link: [] },
       }),
     )
-    assertEquals(markup, '<meta name="description" content="a &quot; onload=&quot;x">')
+    assertEquals(
+      markup,
+      `<meta name="description" content="a &quot; onload=&quot;x">${BUILTIN_STYLE_TAG}`,
+    )
   },
 )
 
@@ -71,7 +84,7 @@ Deno.test(
       }),
     )
     assertFalse(markup.includes('onload'), markup)
-    assertEquals(markup, '<link rel="canonical" href="/p">')
+    assertEquals(markup, `<link rel="canonical" href="/p">${BUILTIN_STYLE_TAG}`)
   },
 )
 
@@ -86,7 +99,10 @@ Deno.test(
         },
       }),
     )
-    assertEquals(markup, '<link rel="alternate" href="https://example.com/es/p" hreflang="es">')
+    assertEquals(
+      markup,
+      `<link rel="alternate" href="https://example.com/es/p" hreflang="es">${BUILTIN_STYLE_TAG}`,
+    )
   },
 )
 
@@ -117,7 +133,11 @@ Deno.test('serializeHeadMarkup: stylesheet refs render as links, media preserved
   )
   assertEquals(
     markup,
-    '<link rel="stylesheet" href="/a.css">' +
+    // The built-in stylesheet rule renders BEFORE `cssHrefs` (see `head-markup.ts`'s own doc:
+    // it's unconditional, placed ahead of everything else so an app's own global stylesheet can
+    // still override it via normal cascade order).
+    BUILTIN_STYLE_TAG +
+      '<link rel="stylesheet" href="/a.css">' +
       '<link rel="stylesheet" href="/b.css" media="(max-width: 599px)">',
   )
 })
@@ -129,8 +149,12 @@ Deno.test(
     const markup = serializeHeadMarkup(
       model({ cssHrefs: ['/a.css'], themeStyle: ':root{--c:red}', nonce: 'n1' }),
     )
-    assert(markup.indexOf('/a.css') < markup.indexOf('<style'), markup)
-    assertStringIncludes(markup, '<style nonce="n1">:root{--c:red}</style>')
+    // Searches for the THEME style tag specifically, not just the first `<style` — the built-in
+    // stylesheet rule (see `builtin-css.ts`) is its OWN, separate `<style>` tag, rendered even
+    // earlier, ahead of `cssHrefs`.
+    const themeStyleTag = '<style nonce="n1">:root{--c:red}</style>'
+    assert(markup.indexOf('/a.css') < markup.indexOf(themeStyleTag), markup)
+    assertStringIncludes(markup, themeStyleTag)
   },
 )
 

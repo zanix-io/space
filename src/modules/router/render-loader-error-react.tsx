@@ -27,15 +27,25 @@ import type { LoaderErrorRenderContext } from './loader-error-renderer-registry.
 export function renderLoaderErrorResponse(
   context: LoaderErrorRenderContext,
 ): Promise<Response> {
-  const { ErrorFallback, RootLayout, error, fragmentOnly } = context
+  const { ErrorFallback, RootLayout, error, formattedError, fragmentOnly, params, messages } =
+    context
 
   const Fallback = ErrorFallback as ComponentType<ErrorBoundaryProps>
   // `reset` is a no-op here, deliberately: this response is a fresh server render, not a client-side
   // retry — the same `ErrorBoundaryProps` contract `SpaceErrorBoundary` already uses, just with
   // nothing (yet) for `reset` to meaningfully clear on the server.
   const outlet = (
-    <div style={{ display: 'contents' }} {...{ [ORBIT_OUTLET_ATTR]: '' }}>
-      <Fallback error={error} reset={() => {}} />
+    // `display: contents` comes from `builtin-css.ts`'s own stylesheet rule, targeting this same
+    // `ORBIT_OUTLET_ATTR` selector — never an inline `style` prop here (a strict `style-src` with
+    // no `'unsafe-inline'` silently drops those).
+    <div {...{ [ORBIT_OUTLET_ATTR]: '' }}>
+      <Fallback
+        error={error}
+        formattedError={formattedError}
+        reset={() => {}}
+        params={params}
+        messages={messages}
+      />
     </div>
   )
 

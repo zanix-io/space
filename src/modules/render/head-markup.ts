@@ -22,6 +22,7 @@
 import type { DocumentModel } from './document-model.ts'
 import type { HeadLinkTag, HeadMetaTag } from '../router/head-descriptor.ts'
 import type { StylesheetRef } from './css-manifest.ts'
+import { BUILTIN_CSS } from './builtin-css.ts'
 
 /** Escapes a value for use inside a double-quoted HTML attribute. */
 function escapeAttribute(value: string): string {
@@ -85,8 +86,9 @@ function renderStylesheetLink(ref: StylesheetRef): string {
  * `<body>`, not in `<head>`, and `render-to-response-preact.ts` already has a placement step for
  * exactly that position.
  *
- * @returns The markup, or an empty string when the model contributes nothing at all to the head —
- * so a caller can skip the placement step entirely rather than doing a no-op string scan.
+ * @returns The markup — never empty: the built-in `display: contents` stylesheet rule (see
+ * `builtin-css.ts`'s own doc) is unconditional, so a caller can no longer skip the placement step
+ * as a no-op-string optimization the way it once could when a model contributed nothing else.
  */
 export function serializeHeadMarkup(model: DocumentModel): string {
   const { head, cssHrefs, themeStyle, pwa, nonce } = model
@@ -95,6 +97,9 @@ export function serializeHeadMarkup(model: DocumentModel): string {
   if (head.title !== undefined) parts.push(`<title>${escapeText(head.title)}</title>`)
   for (const tag of head.meta) parts.push(renderMetaTag(tag))
   for (const tag of head.link) parts.push(renderLinkTag(tag))
+  // Unconditional, always first — see `builtin-css.ts`'s own doc for why this must be a real
+  // stylesheet rule, never an inline `style` attribute on the boundary/outlet elements themselves.
+  parts.push(`<style${renderAttributes({ nonce })}>${BUILTIN_CSS}</style>`)
   for (const ref of cssHrefs) parts.push(renderStylesheetLink(ref))
 
   // After `cssHrefs`, deliberately — CSS cascade order for equal-specificity `:root` rules is

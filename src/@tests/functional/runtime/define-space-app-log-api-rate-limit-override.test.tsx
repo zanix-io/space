@@ -52,9 +52,13 @@ Deno.test(
     try {
       const info = webServerManager.info(serverId)
       assert(info.addr, 'the started server should be listening')
+      // `/log`, not `/api/log` — this server is ANCHORED (explicit `id` above), which skips
+      // `@zanix/server`'s own default `/api` globalPrefix entirely, and `createLogApiController`'s
+      // own `prefix` now defaults to empty (see `log.controller.ts`'s own doc) — an UNANCHORED
+      // rest server (the real, common case) is what actually lands on `/api/log`.
       const baseUrl = `http://${info.addr.hostname}:${info.addr.port}/${serverId}`
       const post = () =>
-        fetch(`${baseUrl}/api/log`, {
+        fetch(`${baseUrl}/log`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ level: 'info', message: 'hello' }),
@@ -93,9 +97,10 @@ Deno.test(
     try {
       const info = webServerManager.info(serverId)
       assert(info.addr, 'the started server should be listening')
+      // `/log`, not `/api/log` — same anchored-server reasoning as this file's own first test.
       const baseUrl = `http://${info.addr.hostname}:${info.addr.port}/${serverId}`
 
-      const res = await fetch(`${baseUrl}/api/log`, {
+      const res = await fetch(`${baseUrl}/log`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ level: 'info', message: 'hello' }),

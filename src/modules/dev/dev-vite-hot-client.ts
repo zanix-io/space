@@ -71,10 +71,23 @@ export function looksLikeViteHotClientRequest(pathname: string): boolean {
  * already relies on for `<link>` hrefs) and hands the fresh module namespace to whichever `accept()`
  * callback was registered for that exact url — React's own callback then runs
  * `RefreshRuntime.validateRefreshBoundaryAndEnqueueUpdate`/Preact's own runs `flushUpdates()`
- * internally; this function has no renderer-specific logic of its own. A silent no-op if nothing was
- * ever registered for that url (e.g. a module that doesn't use `import.meta.hot` at all).
+ * internally; this function has no renderer-specific logic of its own.
  *
- * This hand-written client guards against two specific failure modes, without changing its shape,
+ * Falls back to a real reload — same as the `catch` branch below — when NO `accept()` was ever
+ * registered for that url, rather than silently doing nothing. A missing callback isn't only "a
+ * module that never used `import.meta.hot`" (every Comet gets one automatically via either
+ * renderer's own Fast-Refresh/Prefresh transform, so that case doesn't really arise here in
+ * practice): it's also what a Comet whose OWN static import chain failed on its very first load
+ * looks like — a rejected static import aborts that module's evaluation before its own
+ * `import.meta.hot.accept(...)` call ever runs (e.g. the exact shape a `'server-only'` violation,
+ * `dev-engine.ts`'s own `transformClientAsset` check, leaves behind), permanently leaving `cb`
+ * unset for that url. Without this fallback, every LATER edit to that same file (even a genuine
+ * fix) kept silently doing nothing forever — confirmed as a real, reproduced dev session getting
+ * stuck exactly this way, needing a manual full refresh to recover, contradicting this whole
+ * file's own "never silently stuck on stale code" philosophy just as much as the two failure
+ * modes documented below already do.
+ *
+ * This hand-written client guards against three specific failure modes, without changing its shape,
  * message contract, or public API:
  * - The cache-busting token must be `t=<EXACTLY 13 digits>` — nothing appended, nothing else in the
  *   query. Vite's own source (`vite@8.2.1`, `dist/node/chunks/node.js`) shows why:
@@ -105,6 +118,9 @@ export function looksLikeViteHotClientRequest(pathname: string): boolean {
  *   unhandled promise rejection and apply nothing. Falling back to a real reload here follows the
  *   same philosophy `invalidate()` above already uses: a dev-only best-effort update failing to
  *   apply must still end up correct, never silently stuck on stale code.
+ * - A missing `cb` ALSO falls back to a reload now, not a silent return — see this function's own
+ *   doc above for the real, reproduced failure mode this closes (a Comet whose own first load
+ *   failed before it ever reached its own `accept()` registration).
  */
 export function buildViteHotClientScript(): string {
   return `
@@ -133,7 +149,11 @@ export function createHotContext(id) {
 export function injectQuery(url) { return url; }
 window.__spaceApplyClientUpdate = async function (url) {
   var cb = window.__spaceHotAccept[url];
-  if (!cb) return;
+  if (!cb) {
+    console.warn('[space] no hot-accept registered, reloading:', url);
+    location.reload();
+    return;
+  }
   try {
     // EXACTLY 13 digits, always -- Vite's own transformRequest() only strips a "?t=<digits>" query
     // (regex /\bt=\d{13}&?\b/, matched BEFORE any plugin sees the id) when it's exactly 13 digits;

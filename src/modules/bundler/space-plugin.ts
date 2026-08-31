@@ -119,7 +119,50 @@ export function spacePlugin(options: SpacePluginOptions = {}): PluginOption[] {
       config() {
         return {
           environments: {
-            client: {},
+            // Pre-declared so Vite pre-bundles the active renderer's own client hydration entry
+            // at server START, rather than discovering it from the FIRST real browser request.
+            // `react-dom/client`'s own internal `react-dom` import is the CONFIRMED case: a
+            // request landing while that first-request discovery scan is still running can catch
+            // it before its pre-bundled chunk exists — a real `Failed to load url /react-dom`
+            // dev-server error, breaking Comet hydration on that one load (a page reload
+            // afterward always works, since the scan has finished by then). `hydrate-comets-
+            // preact.ts` imports only bare `preact` (no equivalent subpath-needs-its-own-base-
+            // package split the way `react-dom/client` has) — but `preact/hooks` is now its own
+            // second, CONFIRMED instance of the same class of import: `@zanix/cli`'s own
+            // `--theme astronaut` Comet demo imports `useState` from it directly under this
+            // renderer (`getHooksEntry`, that package's `lib/renderer.ts`), the exact "a Comet
+            // imports a real npm subpath directly" shape this whole mitigation exists for. The
+            // general "first request can race the discovery scan" hazard is Vite's, not any one
+            // renderer's, and applies to any lazily-discovered dependency; `preact`/`preact/hooks`
+            // are included here too so the mitigation is genuinely renderer-agnostic rather than
+            // leaving Preact exposed to the same class of race until it produces its own confirmed
+            // incident — which, for `preact/hooks`, it now has.
+            //
+            // `@prefresh/core`/`@prefresh/utils` are here for a DIFFERENT reason than the four
+            // above — not the discovery-scan race, but a real, confirmed module-IDENTITY bug:
+            // `@prefresh/core`'s own re-render bookkeeping (`vnodesForComponent`, a module-level
+            // `WeakMap` populated by Preact's process-wide `options` hooks — see that package's own
+            // `runtime/vnode.js`) is only ever correct if EVERY Comet's own module graph resolves
+            // `@prefresh/core`/`@prefresh/utils` to the exact same instance the one that patched
+            // `options` during that Comet's own `hydrate()` call. `hydrate-comets-preact.ts` loads
+            // each Comet via a raw, un-analyzed `await import(/* @vite-ignore */ moduleUrl)` —
+            // confirmed (via a live repro: edit a Comet's own JSX text, `import.meta.hot.accept`'s
+            // registered callback runs `flushUpdates()` with zero error, yet the DOM never updates)
+            // to risk resolving these two to a SEPARATE instance than whatever the Comet's own
+            // `hydrate()` call used, silently splitting `vnodesForComponent`'s tracking across two
+            // objects — `@prefresh/core`'s own `replaceComponent` then finds nothing for the edited
+            // component (`vnodesForComponent.get(OldType)` → `undefined` → a bare, unlogged early
+            // return) and the whole flush is a silent no-op. `@preact/preset-vite` itself already
+            // forces `preact`/`preact/jsx-runtime`/`preact/jsx-dev-runtime` into this same list for
+            // the identical single-instance reason (its own `dist/cjs/index.js`) — `@prefresh/core`/
+            // `@prefresh/utils` were simply never added alongside them.
+            client: {
+              optimizeDeps: {
+                include: renderer === 'react'
+                  ? ['react', 'react-dom', 'react-dom/client']
+                  : ['preact', 'preact/hooks', '@prefresh/core', '@prefresh/utils'],
+              },
+            },
             ssr: { consumer: 'server' },
           },
         }

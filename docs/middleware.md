@@ -224,15 +224,41 @@ page's own `static headers`) only ever run AFTER a route has already matched, to
 redirect keyed on the URL not matching a language-prefixed route at all:
 
 ```ts
-import { bootstrapServers } from '@zanix/server'
-import { langPreHandler } from '@zanix/space'
+// space.app.ts (or any module it imports — NOT mod.ts alone, see below)
+import { definePreHandler, langPreHandler } from '@zanix/space'
 
-await bootstrapServers({
-  ssr: {
-    preHandler: langPreHandler({ availableLangs: ['en', 'es'], defaultLang: 'en' }),
+definePreHandler(langPreHandler({ availableLangs: ['en', 'es'], defaultLang: 'en' }))
+```
+
+```ts
+// mod.ts
+import { getBootstrapSpaceAppConfig, getUserPreHandler } from '@zanix/space'
+
+const bootstrapConfig = getBootstrapSpaceAppConfig()
+await bootstrapRemoteApp(spaceApp, {
+  ...bootstrapConfig,
+  server: {
+    ...bootstrapConfig.server,
+    ssr: { ...bootstrapConfig.server?.ssr, preHandler: getUserPreHandler() },
   },
 })
 ```
+
+**Register via `definePreHandler`, never as a literal `preHandler:` passed only to `mod.ts`'s own
+bootstrap call.** `zanix space dev` never imports `mod.ts` at all — only `space.app.ts` — and boots
+its own SSR server with a hardcoded, dev-only `preHandler` (Vite hot-client/asset handling),
+composing a registered `getUserPreHandler()` result AFTER that. A `preHandler` declared only in
+`mod.ts` is invisible under `zanix space dev`: an unprefixed URL (`GET /`) 404s instead of
+redirecting, while working fine in production — a real, confirmed gap this timing rule closes. Call
+`definePreHandler` from something `space.app.ts` imports (directly or transitively), same as
+`defineMiddleware`'s own guards below, never from `mod.ts`-only.
+
+`getBootstrapSpaceAppConfig()` (not just a bare `{ server: { ssr: {} } }` literal) is what keeps
+`POST /api/log` reachable — see [`docs/logging.md`](./logging.md)'s own "Making sure it's actually
+reachable" section for why a hand-written `server` object silently drops it. Both mechanisms read a
+registration made anywhere `space.app.ts` reaches, so a real project combining `langPreHandler` with
+i18n/population needs BOTH composed into `mod.ts` exactly as above — omitting either one breaks
+under `zanix space dev`, production, or both, depending on which is missing.
 
 Every page is expected to live under a `routes/[lang]/...` folder — `Space`'s own `[param]` folder
 convention already maps that to a `:lang` route segment, nothing new there. A request whose first
@@ -240,8 +266,9 @@ path segment is already one of `availableLangs` falls through unchanged; otherwi
 language — a persisted `X-Znx-Lang` cookie, then `Accept-Language`, then `defaultLang` — and
 301-redirects to that same path with it prepended (`/products` → `/en/products`, `/` → `/en`),
 setting the cookie on that same response. Never redirects a framework-internal route (`/health`,
-`/ready`, `/assets/`, `/icons/`, `/manifest.webmanifest`, `/sw.js`) — `ignorePrefixes` extends that
-list for an app's own non-i18n routes, never replaces it.
+`/ready`, `/assets/`, `/icons/`, `/manifest.webmanifest`, `/sw.js`, `/sitemap.xml`, `/robots.txt`) —
+a crawler-facing route needs one canonical, unprefixed URL, never a per-language duplicate —
+`ignorePrefixes` extends that list for an app's own non-i18n routes, never replaces it.
 
 The `PreHandler` alone only ever updates the cookie on an actual redirect — it can only return a
 full `Response` or `null`, so an already-correctly-prefixed request (the common case: someone
@@ -308,9 +335,40 @@ This guard only resolves _which_ population a request belongs to — the actual 
 _content_ (message/override files, merge precedence, caching) is `loadMessages`'s own job, see
 [`docs/i18n.md`](./i18n.md).
 
+### Cookie consent — suggested classification
+
+None of this package's own cookies (`X-Znx-Csrf`, `X-Znx-Lang`, `X-Znx-Population`) can be disabled
+or gated behind a consent choice — `csrfGuard`/`langGuard`/`langPreHandler`/`populationGuard` all
+set theirs unconditionally, with no option to skip it. A consuming app that adds its own
+cookie-consent banner should treat all three as **"strictly necessary" / "functional"**, the
+category most cookie-law frameworks (GDPR/ePrivacy, CCPA, ...) exempt from requiring prior opt-in —
+not a legal conclusion this package makes on an app's behalf, but the closest fit given what each
+one actually does:
+
+- **`X-Znx-Csrf`** — security, not personalization: it protects a form/action submission, not a
+  content choice a visitor could reasonably "opt out" of without breaking the app.
+- **`X-Znx-Lang`/`X-Znx-Population`** — both persist a choice the URL/query string/route param can
+  ALSO carry on every request; the cookie is a convenience, not the only way the app receives it. A
+  visitor who never gets the cookie (consent banner rejected it, browser blocks third-party cookies,
+  etc.) still gets a fully working app — language/population just stop persisting across visits that
+  don't otherwise carry the value, they don't break.
+
+If an app genuinely needs to gate one of these behind an explicit accept (rather than relying on the
+"strictly necessary" exemption), that requires a custom guard wrapping the built-in one to check a
+consent state before letting its `Set-Cookie` through — not something `@zanix/space` supports as a
+config option today.
+
+A real example of that pattern already exists elsewhere in the ecosystem, for a cookie that
+genuinely ISN'T strictly necessary: `@zanix/auth`'s session refresh-token cookie (`X-Znx-App-Token`)
+is gated behind an explicit `X-Znx-Cookies-Accepted` check before it's ever set — see that package's
+own
+[`docs/configuration.md#cookie-consent-classification`](https://github.com/zanix-io/auth/blob/main/docs/configuration.md#cookie-consent-classification).
+
 ## See also
 
 - [`README.md`](../README.md#middleware-guards-default-csp-and-security-headers) — the "Middleware"
   section this guide is the full reference for.
 - [`docs/i18n.md`](./i18n.md) — content resolution for the `(lang, population)` pair these guards
   resolve.
+- [`docs/logging.md`](./logging.md) — `getBootstrapSpaceAppConfig`/`defineBootstrapSpaceAppConfig`,
+  the sibling registration mechanism a real `mod.ts` combines with `definePreHandler` above.

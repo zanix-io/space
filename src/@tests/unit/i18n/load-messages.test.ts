@@ -5,7 +5,12 @@ import { getTemporaryFolder } from '@zanix/helpers'
 import { InternalError } from '@zanix/errors'
 import { setDevClientEnabled } from 'modules/dev/dev-client-registry.ts'
 import { loadMessages, resetMessagesCache } from 'modules/i18n/load-messages.ts'
-import { resetMessagesDir, setMessagesDir } from 'modules/i18n/messages-registry.ts'
+import {
+  resetMessagesBuildDir,
+  resetMessagesDir,
+  setMessagesBuildDir,
+  setMessagesDir,
+} from 'modules/i18n/messages-registry.ts'
 
 const TMP_ROOT = getTemporaryFolder(import.meta.url)
 
@@ -28,6 +33,7 @@ async function cleanup(...dirs: string[]): Promise<void> {
 
 function reset() {
   resetMessagesDir()
+  resetMessagesBuildDir()
   resetMessagesCache()
 }
 
@@ -343,16 +349,16 @@ Deno.test(
 )
 
 Deno.test(
-  'loadMessages: a catalog mixing plain strings and non-string (e.g. precompiled AST) values ' +
-    'round-trips untouched — this function never inspects or transforms a value',
+  'loadMessages: a catalog mixing plain strings and CompiledMessageNode[] values round-trips ' +
+    'untouched — this function never inspects or transforms a value',
   async () => {
     reset()
     const dir = await withTempDir(async (dir) => {
-      // `home/compiled` stands in for a precompiled AST value — an array, the shape
-      // `@zanix/cli`'s own ICU→AST compiler produces. `loadMessages()` has no idea what this is
-      // and must not care: it only ever reads/merges the flat JSON object, never each value's own
-      // shape (see this module's own doc for why `Messages` stays `Record<string, string>` as a
-      // convenience type, not an enforced runtime contract).
+      // `home/compiled` stands in for a precompiled AST value — the exact shape `@zanix/cli`'s own
+      // ICU→AST compiler produces, and a real, first-class `Messages` value (`Record<string, string
+      // | CompiledMessageNode[]>` — see this module's own doc for why both shapes are legitimate,
+      // not just tolerated). `loadMessages()` still never inspects or transforms either shape: it
+      // only ever reads/merges the flat JSON object, never a value's own internal structure.
       await writeJson(join(dir, 'en', 'index.json'), {
         'home/title': 'Welcome',
         'home/compiled': [{ type: 0, value: 'Precompiled' }],
@@ -363,8 +369,7 @@ Deno.test(
       const messages = await loadMessages({ lang: 'en' })
       assertEquals(messages, {
         'home/title': 'Welcome',
-        // deno-lint-ignore no-explicit-any -- deliberately not a `Messages`-shaped value; see above.
-        'home/compiled': [{ type: 0, value: 'Precompiled' }] as any,
+        'home/compiled': [{ type: 0, value: 'Precompiled' }],
       })
     } finally {
       await cleanup(dir)
@@ -449,6 +454,95 @@ Deno.test(
       assertEquals(second, { 'home/title': 'Welcome' })
     } finally {
       await cleanup(dir)
+    }
+  },
+)
+
+Deno.test(
+  'loadMessages: outside dev mode, with a build dir configured, reads compiled output from ' +
+    '{buildDir}/messages/{rootIndex}/... — NEVER the live messagesDir source, mirroring ' +
+    "clientBuildDir's own contract",
+  async () => {
+    reset()
+    const messagesDir = await withTempDir(async (dir) => {
+      // Live source — must be ignored entirely once a build dir is configured, in production.
+      await writeJson(join(dir, 'en', 'index.json'), { 'home/title': 'Live source (unused)' })
+    })
+    const buildDir = await withTempDir(async (dir) => {
+      await writeJson(join(dir, 'messages', '0', 'en', 'index.json'), {
+        'home/title': 'Compiled output',
+      })
+    })
+    try {
+      setMessagesDir(messagesDir)
+      setMessagesBuildDir(buildDir)
+      const messages = await loadMessages({ lang: 'en' })
+      assertEquals(messages, { 'home/title': 'Compiled output' })
+    } finally {
+      await cleanup(messagesDir, buildDir)
+    }
+  },
+)
+
+Deno.test(
+  'loadMessages: under dev mode, a configured build dir is IGNORED — messagesDir is always read ' +
+    'live, same as when no build dir is configured at all',
+  async () => {
+    reset()
+    const messagesDir = await withTempDir(async (dir) => {
+      await writeJson(join(dir, 'en', 'index.json'), { 'home/title': 'Live source' })
+    })
+    const buildDir = await withTempDir(async (dir) => {
+      // A stale build sitting on disk — must never win under dev, same reasoning `clientBuildDir`
+      // itself already documents for its own manifests.
+      await writeJson(join(dir, 'messages', '0', 'en', 'index.json'), {
+        'home/title': 'Stale compiled output',
+      })
+    })
+    try {
+      setMessagesDir(messagesDir)
+      setMessagesBuildDir(buildDir)
+      setDevClientEnabled(true)
+      try {
+        const messages = await loadMessages({ lang: 'en' })
+        assertEquals(messages, { 'home/title': 'Live source' })
+      } finally {
+        setDevClientEnabled(false)
+      }
+    } finally {
+      await cleanup(messagesDir, buildDir)
+    }
+  },
+)
+
+Deno.test(
+  'loadMessages: a multi-root messagesDir[] resolves its compiled counterpart by ARRAY INDEX, ' +
+    'preserving first-match-wins precedence exactly as the live-source array does',
+  async () => {
+    reset()
+    const overrideDir = await Deno.makeTempDir({ dir: TMP_ROOT })
+    const baseDir = await Deno.makeTempDir({ dir: TMP_ROOT })
+    const buildDir = await withTempDir(async (dir) => {
+      // Index 0 -> overrideDir, index 1 -> baseDir — same order `setMessagesDir([override, base])`
+      // declares below.
+      await writeJson(join(dir, 'messages', '0', 'en', 'populations', 'zanix.json'), {
+        'home/title': 'Compiled override',
+      })
+      await writeJson(join(dir, 'messages', '1', 'en', 'index.json'), {
+        'home/title': 'Compiled base',
+        'home/subtitle': 'Compiled subtitle',
+      })
+    })
+    try {
+      setMessagesDir([overrideDir, baseDir])
+      setMessagesBuildDir(buildDir)
+      const messages = await loadMessages({ lang: 'en', population: 'zanix' })
+      assertEquals(messages, {
+        'home/title': 'Compiled override',
+        'home/subtitle': 'Compiled subtitle',
+      })
+    } finally {
+      await cleanup(overrideDir, baseDir, buildDir)
     }
   },
 )

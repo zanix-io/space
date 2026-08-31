@@ -6,6 +6,8 @@
  * @module
  */
 import type { SpaceChildren } from './renderable.ts'
+import type { serializeError } from '@zanix/errors'
+import type { Messages } from '../modules/i18n/load-messages.ts'
 
 /**
  * **There is deliberately no `kind` / `PageKind` on a page, and this note exists so the question is
@@ -258,8 +260,89 @@ export type LayoutProps<TChildren = SpaceChildren, TData = unknown> = {
  * client-side.
  */
 export type ErrorBoundaryProps = {
-  /** The error that was thrown. */
+  /** The error that was thrown — always the raw, original value (never assumed to be an `Error`
+   * instance; a `loader`/component can throw anything). This package never decides on an app's
+   * behalf what's "safe" to do with it — see {@linkcode ErrorBoundaryProps.formattedError} for the
+   * one thing it DOES pre-compute, additively, without ever replacing this field. */
   error: unknown
-  /** Clears the error and re-renders the segment's children — usually wired to a "try again" button. */
+  /**
+   * Wired to a "try again" button. By the time this is callable (after `hydrateErrorBoundaries`
+   * mounts the Fallback client-side — see that function's own doc for both renderers), this is
+   * always `retryOutlet` (`modules/client/orbit.ts`): a real re-fetch/swap of the current page, not
+   * a local, in-place re-render of the segment's original children. That's deliberate, not a
+   * shortcut — this Fallback was mounted fresh, with no live reference to whatever originally threw,
+   * so there is nothing of its own left to retry in-place; only a real round-trip to the server can
+   * actually recover.
+   */
   reset: () => void
+  /** This segment's own resolved route params (e.g. `{ lang: 'en' }`) — the SAME object `Layout`
+   * already receives; an `error.tsx` under a `[lang]/...` segment reads `params.lang` from here. */
+  params: Record<string, string>
+  /**
+   * This request's own resolved message catalog (`loadMessages({ lang: params.lang, population })`),
+   * already awaited — read `messages['some/key']` directly, no `await` needed inside `error.tsx`
+   * itself. `undefined` when this app never declared `messagesDir` in `defineSpaceApp()` at all
+   * (`getMessagesDir()` returns nothing to resolve against) — an app with no i18n never pays for
+   * this resolution.
+   *
+   * Resolved and threaded EAGERLY, for every segment that has an `error.tsx`, whether or not that
+   * segment actually fails — the same reason `params` above already is: `composeSegments`
+   * (`render-page-react.tsx`/`render-page-preact.ts`) writes this segment's postponed-recovery
+   * marker BEFORE React/Preact attempts to render it, so by the time a failure is known, it's
+   * already too late to resolve anything more for the client-side recovery path
+   * (`hydrate-error-boundaries.ts`) to read back. In practice this costs little: `loadMessages`
+   * caches per `lang:population` key, so every call after the first for a given combination is a
+   * plain in-memory lookup, not a re-read from disk. The one path that IS genuinely lazy is a
+   * data-phase (`loader`) failure (`loader-error-handler.ts`) — resolved only inside its own catch,
+   * with zero cost for a request whose `loader` never throws.
+   */
+  messages?: Messages
+  /**
+   * `error`, run through `@zanix/errors`' own `serializeError` — the EXACT same structured,
+   * redacted shape (`name`/`message`/`stack`/`cause`/any own enumerable field like `code`/`meta`)
+   * `logger.error(...)` itself logs an error with, and the same one `@zanix/server`'s own HTTP
+   * error responses are built from. A convenience, never a replacement for `error` above: an
+   * `error.tsx` that wants the exact raw value (a custom `instanceof` check, a non-`Error` payload
+   * some app code threw on purpose) still has it; one that just wants something safe and
+   * presentable — sensitive fields (tokens, passwords, cookies, `X-Znx-*` headers, ...) already
+   * redacted the same way everywhere else in this ecosystem — reads this instead.
+   *
+   * Completeness varies by WHICH recovery path produced this render, not by renderer:
+   * - A data-phase (`loader`) failure, or a Preact render-phase one: the real, original error was
+   *   available at render time, so this carries everything `serializeError` can find on it
+   *   (`cause` chain, `meta`, `code`, ...).
+   * - A React render-phase failure recovered via the client (`hydrateErrorBoundaries` —see
+   *   `error-boundary.tsx`'s own doc for why React never renders this Fallback with the real error
+   *   in hand): only `name`/`message`/`stack` are ever present, reconstructed from what React's own
+   *   postponed-recovery protocol exposes (nothing at all outside a development build — see
+   *   `hydrate-error-boundaries.ts`'s own doc) — never a fabricated `cause`/`meta` this package
+   *   never actually had.
+   */
+  formattedError: ReturnType<typeof serializeError>
+}
+
+/**
+ * Props passed to a `not-found.tsx` file's default export. Unlike `error.tsx`, a 404 has no
+ * matched route to draw a `:lang` param from — `lang` is resolved instead via `resolveRequestLang`
+ * (cookie → `Accept-Language` → `defaultLang`, the same priority `langPreHandler` itself applies)
+ * when this app calls `langPreHandler(...)`; `undefined` when it doesn't. A `not-found.tsx` that
+ * doesn't declare this prop at all keeps working unchanged — it's optional, never required.
+ */
+export type NotFoundProps = {
+  /** This request's resolved language, or `undefined` when this app has no `langPreHandler(...)`
+   * registered at all. */
+  lang?: string
+  /**
+   * This request's own resolved message catalog (`loadMessages({ lang })`), already awaited — read
+   * `messages['some/key']` directly, no `await` needed inside `not-found.tsx` itself. `undefined`
+   * when this app never declared `messagesDir` in `defineSpaceApp()` at all.
+   *
+   * Unlike {@linkcode ErrorBoundaryProps.messages}, this one IS genuinely lazy — a 404 has no
+   * Suspense/streaming-recovery mechanism to work around (it always renders synchronously, in the
+   * same response, never postponed to the client), so `not-found-handler.ts` only ever resolves
+   * this once it already knows a 404 is actually happening, with zero cost otherwise. Resolved
+   * from `lang` alone, never `population` — a genuinely unmatched route has no route param/guard
+   * result to read one from the way a matched page's own `ctx.population` does.
+   */
+  messages?: Messages
 }

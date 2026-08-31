@@ -1,5 +1,6 @@
 import { assert, assertEquals, assertThrows } from '@std/assert'
-import { langPreHandler } from 'modules/middleware/lang-pre-handler.ts'
+import { langPreHandler, resolveRequestLang } from 'modules/middleware/lang-pre-handler.ts'
+import { getLangRegistration, setLangRegistration } from 'modules/middleware/lang-registry.ts'
 
 const info = {} as Deno.ServeHandlerInfo<Deno.NetAddr>
 
@@ -105,6 +106,8 @@ Deno.test(
       '/icons/icon-192.png',
       '/sw.js',
       '/manifest.webmanifest',
+      '/sitemap.xml',
+      '/robots.txt',
     ]
 
     const results = await Promise.all(
@@ -225,4 +228,92 @@ Deno.test('langPreHandler: a cookieName missing the X-Znx- prefix throws at cons
     langPreHandler({ availableLangs: ['en'], defaultLang: 'en', cookieName: 'lang' })
   ) as { code?: string }
   assertEquals(error.code, 'UTILS_COOKIES_INVALID_PREFIX')
+})
+
+Deno.test(
+  'langPreHandler: eagerly registers availableLangs, readable via getLangRegistration ' +
+    "before any request is ever handled — the same 'lang' paramName this whole mechanism " +
+    'already enforces via the routes/[lang]/... folder convention',
+  () => {
+    setLangRegistration(undefined)
+    try {
+      langPreHandler({ availableLangs: ['en', 'es', 'fr'], defaultLang: 'en' })
+      assertEquals(getLangRegistration(), {
+        availableLangs: ['en', 'es', 'fr'],
+        paramName: 'lang',
+        defaultLang: 'en',
+        cookieName: 'X-Znx-Lang',
+      })
+    } finally {
+      setLangRegistration(undefined)
+    }
+  },
+)
+
+// ================================================================================================
+// resolveRequestLang — the counterpart `createNotFoundHandler`/`loader-error-handler.ts` reach for
+// when there is NO matched route to read a `:lang` param from (a genuine 404). Same cookie →
+// Accept-Language → defaultLang priority `langPreHandler` itself already applies.
+// ================================================================================================
+
+Deno.test('resolveRequestLang: undefined when no langPreHandler was ever registered', () => {
+  setLangRegistration(undefined)
+  const result = resolveRequestLang(new Request('http://localhost/nope'))
+  assertEquals(result, undefined)
+})
+
+Deno.test('resolveRequestLang: an existing valid cookie wins over everything else', () => {
+  langPreHandler({ availableLangs: ['en', 'es'], defaultLang: 'en' })
+  try {
+    const result = resolveRequestLang(
+      new Request('http://localhost/nope', {
+        headers: { cookie: 'X-Znx-Lang=es', 'accept-language': 'en' },
+      }),
+    )
+    assertEquals(result, 'es')
+  } finally {
+    setLangRegistration(undefined)
+  }
+})
+
+Deno.test(
+  'resolveRequestLang: an invalid cookie value is ignored, falling through to Accept-Language',
+  () => {
+    langPreHandler({ availableLangs: ['en', 'es'], defaultLang: 'en' })
+    try {
+      const result = resolveRequestLang(
+        new Request('http://localhost/nope', {
+          headers: { cookie: 'X-Znx-Lang=fr', 'accept-language': 'es' },
+        }),
+      )
+      assertEquals(result, 'es')
+    } finally {
+      setLangRegistration(undefined)
+    }
+  },
+)
+
+Deno.test(
+  'resolveRequestLang: no cookie, no Accept-Language match — falls back to defaultLang',
+  () => {
+    langPreHandler({ availableLangs: ['en', 'es'], defaultLang: 'en' })
+    try {
+      const result = resolveRequestLang(new Request('http://localhost/nope'))
+      assertEquals(result, 'en')
+    } finally {
+      setLangRegistration(undefined)
+    }
+  },
+)
+
+Deno.test('resolveRequestLang: a custom cookieName is respected', () => {
+  langPreHandler({ availableLangs: ['en', 'es'], defaultLang: 'en', cookieName: 'X-Znx-Locale' })
+  try {
+    const result = resolveRequestLang(
+      new Request('http://localhost/nope', { headers: { cookie: 'X-Znx-Locale=es' } }),
+    )
+    assertEquals(result, 'es')
+  } finally {
+    setLangRegistration(undefined)
+  }
 })

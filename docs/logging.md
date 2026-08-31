@@ -8,12 +8,12 @@ bundle.
 
 ### Why a separate logger for client code
 
-Importing the regular `@zanix/logger` from a file that ends up in a client bundle used to pull in
-its file-based storage backend transitively — invisible at runtime (no thrown error, no console
-warning; a Comet still hydrated and worked), but real dead weight shipped to every visitor's
-browser. `@zanix/utils@3.1.0` fixed this at the source with a genuinely browser-safe entry point,
-`@zanix/utils/logger/client` (`createClientLogger`), and this package now uses it everywhere a
-module is reachable from `@zanix/space/client`/`@zanix/space/client/preact`.
+Importing the regular `@zanix/logger` from a file that ends up in a client bundle pulls in its
+file-based storage backend transitively — invisible at runtime (no thrown error, no console warning;
+a Comet still hydrates and works fine), but real dead weight shipped to every visitor's browser.
+`@zanix/utils/logger/client` (`createClientLogger`) is a genuinely browser-safe entry point instead,
+and this package uses it everywhere a module is reachable from
+`@zanix/space/client`/`@zanix/space/client/preact`.
 
 ### The shared client logger
 
@@ -57,12 +57,11 @@ state, and can't accidentally overwrite one another:
 - **Different runtimes.** Even setting the module graph aside, a browser tab's `globalThis` and the
   server process's `globalThis` are never the same object — a client-side `Logger` instance
   physically cannot reach the server's own global logger.
-- **`createClientLogger` never claims a global anyway.** As of `@zanix/utils@3.1.1`,
-  `createClientLogger` always builds with `disableGlobalAssign: true` by default — it never assigns
-  itself as `globalThis.logger` in the browser in the first place. This package depends on
-  `@zanix/utils@^3.1.2` (`deno.lock` resolves `@zanix/logger/client`'s alias to `3.1.2`), so this is
-  already true today — a third, independent layer on top of the two above, not the only thing
-  keeping this isolated.
+- **`createClientLogger` never claims a global anyway.** `createClientLogger` always builds with
+  `disableGlobalAssign: true` by default — it never assigns itself as `globalThis.logger` in the
+  browser in the first place. This package depends on `@zanix/utils@^4.0.0` (`deno.lock` resolves
+  `@zanix/logger/client`'s alias to `4.1.0`), so this is already true today — a third, independent
+  layer on top of the two above, not the only thing keeping this isolated.
 
 The server's own SSR/backend code keeps using `import logger from '@zanix/logger'` exactly as before
 — nothing about this feature changes that.
@@ -73,6 +72,49 @@ Every `@zanix/space` app automatically registers `POST /api/log` as part of `def
 `setup()` — this is core observability plumbing, not an opt-in `SpaceAppConfig` field the way
 `assetsApi` is: there's no infrastructure to compose (the handler only ever calls the
 already-configured `@zanix/logger` default instance), so there's no meaningful "off" state to offer.
+
+#### Making sure it's actually reachable — `getBootstrapSpaceAppConfig`
+
+Registering the route is necessary but not sufficient on its own. `@zanix/server`'s own
+`bootstrapServers` only SERVES a request type (`rest`/`socket`/`graphql`/`ssr`) if it's either
+explicitly named, or no type at all is named — the moment a caller names even one type (every real
+`mod.ts` does, since it needs `ssr` at minimum), every OTHER type is excluded from being served
+regardless of how many routes it has. A hand-written
+
+```ts
+await bootstrapRemoteApp(spaceApp, { server: { ssr: {} } })
+```
+
+confirmed live to 404 on `POST /api/log` — `rest` was never named, so it never got a listener, even
+though the route itself was registered correctly. Use `getBootstrapSpaceAppConfig()` instead:
+
+```ts
+// mod.ts
+import { getBootstrapSpaceAppConfig } from '@zanix/space'
+
+await bootstrapRemoteApp(spaceApp, getBootstrapSpaceAppConfig())
+```
+
+With nothing else registered, this already defaults to `{ server: { ssr: {}, rest: {} } }` — the
+same minimal `mod.ts` a plain `zanix new space` scaffold generates, now correct by default with no
+extra wiring. An app needing more than that (a custom `rest` config, `remoteInstances` to announce
+to the Control Plane, `uses`/`resources` bindings) registers it via `defineBootstrapSpaceAppConfig`
+from `space.app.ts` (or anything it imports) instead of hand-editing `mod.ts` — same timing rule
+[`docs/middleware.md`](./middleware.md)'s own `definePreHandler` already establishes, and the same
+reason: `zanix space dev` reads this registration too, so a consumer's own bootstrap options behave
+identically under both:
+
+```ts
+// space.app.ts (or any module it imports)
+import { defineBootstrapSpaceAppConfig } from '@zanix/space'
+
+defineBootstrapSpaceAppConfig({
+  remoteInstances: { endpoint: 'http://my-space:8000' },
+})
+```
+
+A registered `server.ssr`/`server.rest` always wins over the bare defaults above — this mechanism
+only ever fills a gap, never overrides an explicit choice.
 
 **No full auth (`@AuthTokenValidation`/session requirement) on this route — but it's not
 unprotected.** This is the same genuinely-public posture `sitemap.xml`/`robots.txt` already use in
@@ -197,11 +239,11 @@ also skips the console print step every other log method runs — the browser or
 the entry through its own console, so printing it again here would misrepresent a relayed remote
 event as a genuine local one.
 
-This package depends on `@zanix/utils@^3.1.2` (`deno.lock` resolves `@zanix/logger`'s alias to
-`3.1.2`), the first published release with `Logger#ingest`'s `origin` parameter — verified against
-the real installed package, not just the type signature: a relayed entry's `message` lands correctly
-(never corrupted by `origin`), `origin` lands as a genuine top-level field, and nothing prints twice
-to the server console.
+This package depends on `@zanix/utils@^4.0.0` (`deno.lock` resolves `@zanix/logger`'s alias to
+`4.1.0`), which carries `Logger#ingest`'s `origin` parameter — verified against the real installed
+package, not just the type signature: a relayed entry's `message` lands correctly (never corrupted
+by `origin`), `origin` lands as a genuine top-level field, and nothing prints twice to the server
+console.
 
 ### See also
 
@@ -210,3 +252,6 @@ to the server console.
   (the opposite posture from this endpoint's, for the reasons explained above).
 - [`docs/seo.md`](./seo.md) — `sitemap.xml`/`robots.txt`, the other genuinely public, unguarded
   routes this package registers.
+- [`docs/middleware.md`](./middleware.md) — `definePreHandler`/`getUserPreHandler`
+  (`langPreHandler`), the sibling registration mechanism a real `mod.ts` combines with
+  `getBootstrapSpaceAppConfig` above.

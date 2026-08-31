@@ -2,16 +2,19 @@
 // test that renders must import the entry point it is testing against.
 import '../../../../mod-react.ts'
 import { assert, assertFalse } from '@std/assert'
-import { join } from '@std/path'
+import { join, resolve } from '@std/path'
 import { bootstrapServers, webServerManager } from '@zanix/server'
 import { loadRoutes } from 'modules/router/mod.ts'
 import { setDevClientEnabled, SPACE_DEV_SOCKET_ROUTE } from 'modules/dev/mod.ts'
 import { setGlobalCssPaths } from 'modules/render/css-manifest.ts'
 
 const FIXTURE_DIR = 'src/@tests/support/fixtures/inferred-routes'
-// Matches `scanPageFiles`'s own `join(dir, entry.name)` — relative to `FIXTURE_DIR`, never
-// resolved to an absolute path.
-const FIXTURE_PAGE_PATH = join(FIXTURE_DIR, 'inferred', 'page.tsx')
+// Resolved to an ABSOLUTE path — the injected `routeFilePath` must match `SsrModuleChangedEvent.
+// affectedRoutes`' own format (always absolute, from Vite's module graph), which
+// `handleSsrModuleChanged` (`dev-client-script.ts`) compares it against directly. A relative path
+// here was a real, confirmed bug: the comparison silently never matched, so `location.reload()`
+// never fired on the page's own SSR change — see `render-page-react.tsx`'s own identical comment.
+const FIXTURE_PAGE_PATH = resolve(join(FIXTURE_DIR, 'inferred', 'page.tsx'))
 
 Deno.test(
   "renderToResponse: injects the dev client script, with this page's own routeFilePath, when enabled",

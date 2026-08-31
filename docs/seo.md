@@ -174,7 +174,8 @@ with what `sitemap` already needs to support: a static array costs nothing extra
 function source genuinely needs per-request evaluation to stay correct for a live product catalog —
 freezing that case at build time would go stale between deploys.
 
-`sitemap` accepts a static array or a function, with two distinct, precisely-guaranteed behaviors:
+`sitemap` accepts a static array, a function, or `'auto'`, with three distinct, precisely-guaranteed
+behaviors:
 
 - **A plain array is never recomputed, ever.** The exact same reference is kept for the process
   lifetime — mutating it after `defineSpaceApp()` returns is reflected on the very next request. The
@@ -188,11 +189,42 @@ freezing that case at build time would go stale between deploys.
   editing whatever backs the function is reflected on the next request, no restart needed. In
   production, a function source's result is only as fresh as the last process start — a data change
   isn't reflected until the next restart/redeploy, not the next request.
+- **`'auto'` derives entries from this app's own static route tree** — no per-page declaration
+  beyond what routing already captures. A page qualifies when its route carries no dynamic segment,
+  declares no unconditional `redirect`, and its resolved head carries no `noindex`. A dynamic
+  segment backed by real data (`products/:id`) has no fixed, enumerable set of URLs this can derive
+  — an app with dynamic routes it wants indexed still supplies its own array or function instead.
+  **One exception**: a route whose ONLY dynamic segment is `langPreHandler`'s own registered `:lang`
+  param (`routes/[lang]/...`) still qualifies, when `langPreHandler({ availableLangs })` is
+  registered in the same process — `:lang` has a small, statically known enumeration, unlike `:id`,
+  so it expands into one entry per language instead of being excluded, each cross-referencing every
+  other language's own URL as an `alternates` entry (self included). A route mixing `:lang` with any
+  OTHER dynamic segment (`[lang]/regions/[region]/page.tsx`) still excludes entirely — see
+  `deriveAutoSitemapEntries`'s own doc (`modules/bundler/auto-sitemap.ts`) for the exact rule. An
+  app with no `langPreHandler` registered sees no change: every dynamic segment excludes, same as
+  before this expansion existed. `zanix space build` derives entries once, from the same static
+  discovery pass document validation already runs, and writes them into
+  `{outDir}/sitemap-manifest.json`. **Production only reads that back when
+  `defineSpaceApp({ clientBuildDir })` is set** — `setup()` calls `loadSitemapManifest`
+  automatically from there, same as every other build manifest (Comets, client entry, CSS, assets,
+  PWA); without `clientBuildDir`, call `loadSitemapManifest('<outDir>/sitemap-manifest.json')`
+  yourself from `main.ts`, before `activateApps()`, same convention `loadCometManifest`/
+  `loadCssManifest` already establish — omitting both means `sitemap: 'auto'` never registers
+  `GET /sitemap.xml` in production at all, even though a real build already derived the entries.
+  `znx space dev` derives entries live instead, from the real route tree on disk, on every request —
+  no manifest, no `clientBuildDir` requirement.
 
 `buildSitemapXml(entries, origin)` is the pure function behind the route: standards-compliant
 `urlset` XML (the `sitemaps.org` schema, plus the `xhtml` namespace for hreflang alternates), with
 every `loc`/`href` XML-escaped. `registerSitemap(source)` is what `defineSpaceApp` calls internally
-when `sitemap` is configured; calling it directly is only needed outside that flow.
+when `sitemap` resolves to a real array or function; calling it directly is only needed outside that
+flow.
+
+**`sitemap.xml`/`robots.txt` are never lang-prefixed, even in an app using `langPreHandler`.** Both
+are framework-internal routes `langPreHandler` skips by default (see `docs/middleware.md`'s own
+`FRAMEWORK_PREFIXES` list) — a crawler-facing route needs one canonical, unprefixed URL
+(`/sitemap.xml`, never `/en/sitemap.xml`), not a per-language duplicate. An app combining i18n with
+either route needs no special configuration for this: it's the default, not an opt-in.
 
 #### `SitemapEntry`
 
@@ -216,8 +248,10 @@ self-inclusion, so each `<url>` block only ever lists exactly what its own `alte
 
 #### `SitemapSource`
 
-`SitemapEntry[] | (() => SitemapEntry[] | Promise<SitemapEntry[]>)` —
+`SitemapEntry[] | (() => SitemapEntry[] | Promise<SitemapEntry[]>)` — the array/function half of
 `defineSpaceApp({ sitemap })`'s own accepted shape; see the array-vs-function behavior above.
+`defineSpaceApp({ sitemap })` itself additionally accepts the literal `'auto'`, not part of this
+type — see the `'auto'` behavior above.
 
 ## See also
 

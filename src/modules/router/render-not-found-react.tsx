@@ -1,5 +1,5 @@
 import type { ComponentType, ReactNode } from 'react'
-import type { LayoutProps } from 'typings/page.ts'
+import type { LayoutProps, NotFoundProps } from 'typings/page.ts'
 import { renderToResponse } from '../render/render-to-response.tsx'
 import { resolveCssHrefs } from '../render/css-manifest.ts'
 import { resolvePwaHead } from '../pwa/pwa-registry.ts'
@@ -26,12 +26,15 @@ import type { NotFoundRenderContext } from './not-found-renderer-registry.ts'
 export function renderNotFoundResponse(
   context: NotFoundRenderContext,
 ): Promise<Response> {
-  const { NotFound, RootLayout, head, fragmentOnly } = context
+  const { NotFound, RootLayout, head, fragmentOnly, lang, messages } = context
 
-  const View = NotFound as ComponentType
+  const View = NotFound as ComponentType<NotFoundProps>
   const outlet = (
-    <div style={{ display: 'contents' }} {...{ [ORBIT_OUTLET_ATTR]: '' }}>
-      <View />
+    // `display: contents` comes from `builtin-css.ts`'s own stylesheet rule, targeting this same
+    // `ORBIT_OUTLET_ATTR` selector — never an inline `style` prop here (a strict `style-src` with
+    // no `'unsafe-inline'` silently drops those).
+    <div {...{ [ORBIT_OUTLET_ATTR]: '' }}>
+      <View lang={lang} messages={messages} />
     </div>
   )
 

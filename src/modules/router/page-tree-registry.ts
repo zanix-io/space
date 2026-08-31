@@ -24,6 +24,21 @@ export type ResolvedSegment = {
   layout?: unknown
   loading?: unknown
   error?: unknown
+  /**
+   * This segment's own `error.tsx`, real (symlink-resolved) filesystem path — set by
+   * `load-routes.ts` alongside `error` itself, `undefined` whenever `error` is. Never the raw,
+   * `scanPageFiles`-reported path: this is fed straight into `resolveCometModuleUrl`
+   * (`modules/comets/comet-manifest.ts`), which keys its production manifest lookup by the SAME
+   * realpath `buildSpaceClient` computes for the identical file at build time — an un-realpath'd
+   * path here would silently never match on a filesystem where the project root is itself a
+   * symlink (see that function's own doc, and `comet-manifest.ts`'s `normalizeSourceKey`).
+   *
+   * Read by both renderers' own `composeSegments` to resolve this segment's `error.tsx` client
+   * module URL — see `error-boundary-marker.ts`'s own module doc for why an `error.tsx` boundary
+   * needs one at all (client-side hydration recovery), and why it isn't just treated as a plain
+   * Comet.
+   */
+  errorFilePath?: string
   head?: HeadDescriptor | ((params: Record<string, string>) => HeadDescriptor)
   loader?: (ctx: PageContext) => unknown | Promise<unknown>
 }

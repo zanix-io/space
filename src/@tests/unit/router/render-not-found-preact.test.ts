@@ -26,6 +26,7 @@ Deno.test(
       NotFound,
       RootLayout: undefined,
       head: { title: 'Not found' },
+      lang: 'default',
       fragmentOnly: true,
     }
 
@@ -47,6 +48,7 @@ Deno.test(
       NotFound,
       RootLayout: undefined,
       head: undefined,
+      lang: 'default',
       fragmentOnly: true,
     }
 
@@ -68,6 +70,7 @@ Deno.test(
         NotFound,
         RootLayout: undefined,
         head: { title: 'Not found' },
+        lang: 'default',
         fragmentOnly: false,
       })
       const html = await response.text()

@@ -57,7 +57,14 @@ export { ZanixSsrController }
 function toPageContext<Params>(ctx: HandlerContext): PageContext<Params> {
   return {
     request: ctx.req,
-    params: ctx.payload.params as Params,
+    // `ctx.payload.params` itself is `undefined` (never `{}`) for a route with no dynamic segments
+    // at all (e.g. a page under no `[lang]`/`[id]` segment) — defaulted here, the one place this
+    // context is built, so nothing downstream (this package's own `composeSegments`/
+    // `resolvePageChrome`/`renderLoaderErrorPage`, or an app's own `error.tsx`/`not-found.tsx`
+    // reading `params.lang`) has to guard against `undefined` itself. A real, confirmed regression
+    // once reached exactly this unguarded property access from three different call sites before
+    // being fixed at the source instead.
+    params: (ctx.payload.params ?? {}) as Params,
     url: ctx.url,
     csrfToken: ctx.locals[CSRF_TOKEN_LOCALS_KEY] as string | undefined,
     population: ctx.locals[POPULATION_LOCALS_KEY] as string | undefined,

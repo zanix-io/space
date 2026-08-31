@@ -5,6 +5,348 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-08-30
+
+### Added
+
+- **`definePreHandler()`/`getUserPreHandler()`** (`modules/middleware`) — the sibling registration
+  mechanism `preHandler` was missing: a consumer's own `preHandler` (e.g. `langPreHandler`),
+  declared via `definePreHandler()` from anything `space.app.ts` imports, is now visible to BOTH
+  `zanix space dev` and a production boot, the same dev/prod parity `defineMiddleware`'s guards
+  already had. Before this, a `preHandler` passed only to `mod.ts`'s own
+  `bootstrapRemoteApp({
+  server: { ssr: { preHandler } } })` was invisible under `zanix space dev`
+  — that command never imports `mod.ts`, only `space.app.ts` — so `GET /` (an unprefixed
+  `routes/[lang]/...` URL) 404'd under `dev` instead of redirecting, while working correctly in
+  production. Not a `SpaceAppConfig` field, deliberately — see `definePreHandler`'s own doc for why.
+- **`CompiledMessageNode`** (`modules/i18n`) — the exported node shape `Messages` now allows
+  per-key, structurally mirroring `@formatjs/icu-messageformat-parser`'s own `MessageFormatElement`
+  without actually depending on it (enforced by `dependency-boundary.test.ts`).
+- **`loadMessages()` now reads compiled catalogs from `{clientBuildDir}/messages/...` in
+  production**, mirroring `clientBuildDir`'s own contract for the client bundle's manifests
+  (comets/CSS/assets/PWA). `messagesDir` itself — the developer's own hand-authored ICU source — is
+  never read from in production once a build has run; only under `zanix space dev` (which never
+  compiles anything) does `loadMessages()` still read `messagesDir` live. See `@zanix/cli`'s own
+  CHANGELOG for the matching `writeCompiledMessagesTree` fix this pairs with.
+
+- **`SpaceAppConfig.clientEntry`, and a zero-config, auto-generated default client entry.** Every
+  full-document response's own bootstrap script now wires `hydrateComets()`/`initOrbit()` in
+  automatically, correctly `nonce`'d for a strict `script-src` CSP, with no file to write — the same
+  "no manual step" reasoning `'use comet'` already gives Comet registration. `buildSpaceClient()`
+  always includes this generated entry as a real `rollupOptions.input`, and `clientEntryPlugin`
+  (`modules/bundler/client-entry-plugin.ts`) resolves/serves it in both `zanix space dev` and
+  production. Set `clientEntry` to a real source file of your own (e.g. `'./src/main.client.ts'`)
+  only when a project genuinely needs extra client-side code beyond the default pair — that file
+  then REPLACES the generated entry and is fully responsible for calling
+  `hydrateComets()`/`initOrbit()` itself. A production boot loads this entry's own build manifest
+  via the new `loadClientEntryManifest('./.dist/client/client-entry-manifest.json')`, the same
+  convention `loadCometManifest`/`loadCssManifest` already follow.
+
+- **`SpaceAppConfig.clientBuildDir`** — set to the client build's own output directory (e.g.
+  `'./.dist/client'`) and this app's `setup()` automatically loads every production manifest a real
+  `zanix space build` wrote there: `loadCometManifest`, `loadClientEntryManifest`,
+  `loadCssManifest`, `loadAssetsManifest`, `loadAssetsBuildOutput`, `loadPwaBuildOutput`, and
+  `loadSitemapManifest` (this last one only relevant for `sitemap: 'auto'`, in that fixed order —
+  PWA before sitemap, since `registerPwa` reads its own build output back immediately afterward). A
+  production `main.ts` no longer has to call any of the seven manifest loaders by hand. Omitted
+  entirely by default (no file read, zero cost), same convention as `assetsDir`/`pwa`/`sitemap`, and
+  skipped entirely under `zanix space dev` — loading a stale manifest left over from a previous
+  build into a live dev session resolves Comets to that OLD build's own hashed chunk names instead
+  of the current source Vite is serving. A new warning now also fires if any of these manifests
+  loaded but `assetsDir` isn't configured — that build output would otherwise have no route to serve
+  it and 404 unexplained.
+- **`SpaceAppConfig.sitemap: 'auto'`** — derives `sitemap.xml` entries from this app's own static
+  route tree instead of a hand-written source: every discovered page with no dynamic segment (except
+  a `:lang` param backed by a registered `langPreHandler`, which expands into one entry per
+  `availableLangs`), no unconditional `redirect`, and no `noindex` in its resolved head.
+  `zanix
+  space build` precomputes these (`deriveAutoSitemapEntries`,
+  `modules/bundler/auto-sitemap.ts`, the same static discovery pass document validation already
+  runs) and writes them to `{outDir}/sitemap-manifest.json`; production only reads that back
+  automatically when `clientBuildDir` is also set (otherwise call `loadSitemapManifest` directly
+  from `main.ts`). Under `zanix space dev`, entries are recomputed on every request instead, so they
+  always reflect current source. New supporting exports:
+  `getSitemapDeclaration`/`setSitemapDeclaration`, `SitemapDeclaration`,
+  `getSitemapManifest`/`loadSitemapManifest`.
+- **`getBootstrapSpaceAppConfig()`/`defineBootstrapSpaceAppConfig()`** (`modules/runtime`) — the
+  bootstrap-options counterpart to `definePreHandler`, with the same dev/prod parity problem and
+  fix: an app's `bootstrapRemoteApp`/`bootstrapServers` options (a custom `rest` config,
+  `remoteInstances`, `uses`/`resources` bindings, a non-default `ssr`/`socket` port) declared only
+  in `mod.ts`'s own call were invisible to `zanix space dev`, which never imports `mod.ts`.
+  `defineBootstrapSpaceAppConfig`, called from `space.app.ts` (or anything it imports), registers
+  them once for both; `getBootstrapSpaceAppConfig()` reads them back, always defaulting
+  `server.ssr`/`server.rest` to `{}` when unset. Purely additive — most apps never need this.
+- **`GET /assets/:path*`'s hashed build-output serving now supports conditional requests**
+  (`If-None-Match`) — a matching `ETag` now returns a real `304 Not Modified` with no body, checked
+  before the file is even read from disk, instead of always re-sending the full asset on every
+  request regardless of whether the browser's cached copy is already current.
+- **`.js`/`.mjs`/`.css` added to `content-type.ts`'s content-type table** — this same `/assets/...`
+  route also serves the client build's own hashed JS/CSS once `loadAssetsBuildOutput` is loaded, and
+  a browser refuses to execute a `<script type="module">` served as `application/octet-stream` at
+  all (a strict MIME check, not just content-sniffing). `.js`/`.mjs` resolve to the modern,
+  IANA-registered `text/javascript`.
+- **`langPreHandler`'s `FRAMEWORK_PREFIXES` now includes `/sitemap.xml` and `/robots.txt`** — a
+  crawler-facing route needs one canonical, unprefixed URL, never a per-language redirect/duplicate.
+- **`'server-only'` module violations are now caught under `zanix space dev` too, not just at build
+  time.** `dev-engine.ts`'s own `transformClientAsset` runs the same check `cometPlugin` already
+  enforces at `buildEnd` (sharing its violation-message formatter, `formatServerOnlyViolation`, now
+  exported from `server-only-directive.ts`), reported per-request instead, since dev never runs a
+  real Rollup build to walk.
+- **`SsrModuleChangedEvent.isComet` and `SpaceDevEngineOptions.onFullReloadNeeded`/
+  `broadcastFullReloadNeeded`** (`modules/dev/space-dev-socket.ts`) — `isComet` lets a caller tell
+  "only a Comet changed" (already handled via its own `client-module-changed` update) apart from "a
+  route's own file or a server-only dependency changed" (needs a real reload), without discarding
+  client-only state on the Comet-only path. `onFullReloadNeeded`/`broadcastFullReloadNeeded` bridge
+  Vite's own internal `full-reload` signal (fired when its dependency optimizer re-runs mid-session
+  and discovers a new dependency) to connected browsers — this engine never bound that channel to
+  anything real before, so the signal previously went nowhere; confirmed as a real incident for
+  `@prefresh/core`, where a stale version-hash reference silently loaded a second, duplicate module
+  instance and broke Preact Fast-Refresh with no error.
+
+- **`hydrateErrorBoundaries()`** (`@zanix/space/client`, `@zanix/space/client/preact`;
+  `modules/client/hydrate-error-boundaries.ts`/`-preact.ts`, `modules/client/reconstruct-error.ts`,
+  `modules/router/error-boundary-marker.ts`) — the client-side half of `error.tsx` recovery, wired
+  into every auto-generated client entry (`client-entry-plugin.ts`) right alongside
+  `hydrateComets()`/`initOrbit()`. On React, mounts the real `error.tsx` Fallback fresh once it
+  finds React's own postponed streaming-SSR recovery marker (`<!--$!-->` + `<template>`) — the
+  client-side counterpart `error-boundary.tsx`'s own doc previously described as "not implemented
+  yet." On Preact, attaches real interactivity (a working `reset` button) to a Fallback whose SSR
+  pass already rendered correctly, since Preact core's own renderer never gives up on a boundary the
+  way React's does. Re-invoked after every Orbit outlet swap (`hydrator-registry.ts`'s new
+  `getErrorBoundaryHydrator`/`setErrorBoundaryHydrator`) so a retried, still-failing segment
+  recovers again — not just once, at initial page load.
+- **`ErrorBoundaryProps.params`/`.messages`/`.formattedError`, and `reset` is now a real retry** —
+  an `error.tsx` now receives this segment's own resolved route params, its resolved i18n message
+  catalog (`messages`, `undefined` when the app has no `messagesDir`; falls back to the new
+  `DEFAULT_IMPLICIT_LANG` catalog folder for a segment with no real `lang` param), and
+  `formattedError` (`serializeError(error)` from `@zanix/errors`, the same redacted shape
+  `logger.error`/`@zanix/server`'s own HTTP error responses already use), alongside the raw `error`.
+  Once client-hydrated, `reset` is `retryOutlet` (`modules/client/orbit.ts`) — a real Orbit
+  re-fetch/swap of the current page, not a local in-place re-render: a freshly mounted Fallback has
+  no live reference to whatever originally threw, so only a real round-trip to the server can
+  actually recover.
+- **`NotFoundProps` (new type)** — `not-found.tsx` can now declare `{ lang, messages }` in its own
+  default export's props, resolved via the new `resolveRequestLang()`
+  (`modules/middleware/lang-pre-handler.ts`, cookie → `Accept-Language` → `defaultLang`, the same
+  priority `langPreHandler` itself already applies) for a 404, which has no matched route to draw a
+  `:lang` param from. Optional — an existing `not-found.tsx` declaring neither keeps working
+  unchanged.
+- **A page with NO `error.tsx` anywhere in its own composition chain no longer crashes with a raw,
+  empty `500` on a render-phase failure.** `composeSegments` (`render-page-react.tsx`/
+  `render-page-preact.ts`) now wraps the whole page in a fallback `SpaceErrorBoundary` using this
+  package's own `DefaultErrorView`, exactly as `loader-error-handler.ts` already did on the
+  data-phase (`loader`) side — auto-bundled as a real client entry (`build-client.ts`, gated on at
+  least one page actually needing it) the same way an author's own `error.tsx` already is.
+  `cometPlugin`'s own `CometPluginOptions.knownEntryPaths` now also seeds `comets-manifest.json`
+  entries directly (not just skips duplicate-chunk forcing), which is what makes an auto-discovered
+  `error.tsx`/`DefaultErrorView` — never author-marked `'use comet'` — resolvable client-side at
+  all.
+- **`SpaceAppConfig.errorResponse: 'view' | 'json'`**
+  (`modules/router/error-response-format-registry.ts`) — for an app built on `@zanix/space` purely
+  for its routing, with no document shell of its own: when a route declares no
+  `error.tsx`/`not-found.tsx`, the built-in fallback can now return a plain JSON body
+  (`httpErrorResponse(error)`/`httpErrorResponse(new HttpError('NOT_FOUND'))`, `@zanix/server`)
+  instead of a rendered HTML document. Checked only in `loader-error-handler.ts`/
+  `not-found-handler.ts` — never overrides an app's own `error.tsx`/`not-found.tsx`, and never
+  applies to the render-phase "no error.tsx anywhere" fallback above, which by the time it's reached
+  has typically already started streaming `text/html`, with no way to retroactively become JSON.
+- **`createReloader()`/`ReloadDescriptor`** (`@zanix/space/comet`, `modules/comets/reloader.ts`) —
+  replays a `RestClient`/`GraphQLClient` call a Comet received a `reload: true` descriptor for, as a
+  plain prop, the same way it already receives its initial data. Renderer-neutral, always rejects on
+  failure rather than swallowing it — no `onError` option of its own. New `docs/data-fetching.md`
+  documents the full round trip, including `@zanix/server`'s own `reloadDescriptor`/
+  `reloadableHeaders`/`schemaApplication` contract on the other side of the wire (that half ships
+  from `@zanix/server`'s own release, not this package's).
+
+### Changed
+
+- **`defineComet`, `loadCometManifest`, and `resolveCometModuleUrl` moved from `@zanix/space` (`.`)
+  to `@zanix/space/comet`.** Breaking for any Comet still importing `defineComet` from
+  `'@zanix/space'` directly — update it to `'@zanix/space/comet'`. This closes a real, confirmed
+  browser-build failure: `.` also carries genuinely server/dev-only code in the same barrel
+  (`defineSpaceApp`, and `SpaceDevSocket`, a real TC39-decorated class a normal browser-side
+  transform can't even parse) — a plain ES module barrel resolves every one of its own export
+  statements' source files the moment anything is imported from it, so a Comet's own
+  `import { defineComet } from '@zanix/space'` forced that entire server-side graph into the client
+  bundle too. Type-only exports (`CometComponent`, `CometBoundaryComponent`, ...) are unaffected —
+  erased at build time, still available from `.`.
+
+### Fixed
+
+- **`Messages` (`loadMessages()`'s own return type) no longer lies once `zanix space build` has
+  compiled `messagesDir`.** It was `Record<string, string>`, but the build compiles every catalog
+  value to ICU AST in place — so in production a value is actually a `CompiledMessageNode[]`, not a
+  `string`, with no type error at any call site that interpolated `messages[key]` directly as a JSX
+  child. That pattern rendered fine under `zanix space dev` (which never compiles) and crashed in
+  production ("Objects are not valid as a React child"). `Messages` is now
+  `Record<string, string |
+  CompiledMessageNode[]>`, and this package's own
+  README/`docs/i18n.md`/JSDoc examples now show the safe pattern (`@zanix/space-ui`'s
+  `IntlProvider`/`useIntl().formatMessage()`, which already accepted either shape) as the primary
+  usage, not direct interpolation.
+
+- **`zanix space dev` silently registered zero real routes for every `@Page(...)`-decorated page —
+  every request 404s, with no error anywhere.** `createSpaceDevEngine`'s own `ssrLoadModule`
+  resolved a route file's `import { Page, SpacePageController } from '@zanix/space'` (and,
+  transitively, `@zanix/server`) like any other project dependency, transforming and evaluating
+  `@zanix/space`/`@zanix/server`'s own source as a SECOND, Vite-transformed copy — structurally
+  identical to, but reference-DIFFERENT from, the copy the native `zanix space dev` process itself
+  already used to run `defineSpaceApp`/`loadRoutes`/`bootstrapServers()`. `@Page()`'s decorator ran
+  correctly, but registered into that second copy's own registries (`page-decorator.ts`'s
+  `pendingPages`, `@zanix/server`'s `ProgramModule`) — never the native side's, the only one
+  `Deno.serve()` actually dispatches requests through. Fixed by resolving `@zanix/space`,
+  `@zanix/server`, `react`, and `react-dom` to a synthetic externalized id
+  (`nativeRuntimeModulesPlugin`, `modules/bundler/native-runtime-modules.ts`) that the SSR module
+  runner's evaluator (`ssr-module-evaluator.ts`) decodes back to a plain native `import()` of the
+  ORIGINAL specifier — resolved by Deno against the exact same import map the native process already
+  used, returning the identical, already-loaded module instance instead of a duplicate. `react`/
+  `react-dom` needed the identical fix for the same reason: a hookless component rendered fine
+  either way, but any component actually calling `useState()` (or any other hook) threw
+  `Invalid
+  hook call`, unconditionally, because `react-dom/server`'s renderer installs its hooks
+  dispatcher on a DIFFERENT `react` module instance than the one the duplicated component's own
+  `useState` read from.
+
+- **A Comet or Orbit outlet boundary silently lost its own `display: contents` rule under this
+  framework's own default, strict CSP (`style-src 'self' 'nonce-...'`, no `'unsafe-inline'`) —
+  reverting to a real, unstyled `<div>` that could break a parent `display: grid`/`flex` layout.** A
+  `nonce` never covers an inline `style` ATTRIBUTE (only a `<style>` element or
+  `<link
+  rel="stylesheet">`), so a real browser silently dropped the previous
+  `style={{ display: 'contents'
+  }}` prop under that policy. Fixed by emitting the rule once,
+  unconditionally, as a real nonce'd `<style>` tag in every full-document response
+  (`builtin-css.ts`) instead of an inline attribute on each boundary/outlet element.
+
+- **The root entry point (`.`) also materialized `@vitejs/plugin-react`, `@preact/preset-vite`, and
+  `@rolldown/plugin-babel` — build-tooling for BOTH renderers, regardless of which one an app
+  installs — merely by re-exporting `SpaceDevSocket`.** `modules/dev/mod.ts` (the `./dev` subpath's
+  own entry) is a single barrel co-locating `SpaceDevSocket`/`broadcastSsrModuleChanged` (what `.`
+  actually re-exports) with `createSpaceDevEngine`/`spacePlugin` (`../bundler/dev-engine.ts`/
+  `../bundler/space-plugin.ts`, never re-exported from `.` itself) — a plain ES module barrel
+  resolves every export statement's source file the moment anything is imported from it, so `.`
+  reaching for `SpaceDevSocket` alone forced `spacePlugin`'s own unconditional
+  `@vitejs/plugin-react`/ `@preact/preset-vite` import along with it. Fixed by extracting the narrow
+  slice `.` actually needs into the new `modules/dev/socket-exports.ts` —
+  `SpaceDevSocket`/`broadcastSsrModuleChanged`/
+  `SPACE_DEV_SOCKET_ROUTE`/`ZanixWebSocket`/`SocketPrototype`/`SsrModuleChangedEvent`, nothing from
+  `../bundler/` — and repointing `.`'s own re-exports at it instead of the full barrel. `./dev`
+  (`modules/dev/mod.ts` itself) is unchanged, still exporting everything `zanix space dev` needs.
+  `vite`/`@deno/vite-plugin` remain reachable from `.` regardless — `SsrModuleChangedEvent` is
+  `broadcastSsrModuleChanged`'s own parameter type, defined in `dev-engine.ts`, whose real value
+  imports resolve the moment its type is referenced, the same `import type` reachability rule as
+  everywhere else in this package. Confirmed via `deno info --json --min-dep-age=0`: `.` drops from
+  7 `npm:` specifiers to 4 (`vite`, `@deno/vite-plugin`, and their own `/resolver`/`/module-runner`
+  subpaths); `./dev` stays at 7, unchanged.
+
+- **`zanix space dev` crashed with `ENOENT: no such file or directory, open 'https://jsr.io/...'`
+  whenever a Comet imported a JSR-hosted package directly (including `@zanix/space` itself).**
+  `denoOptimizeDepsAliasPlugin` (`modules/bundler/deno-optimize-deps-alias.ts`) walks every Comet's
+  own import graph and adds each bare specifier it finds to `optimizeDeps.include` plus a
+  `resolve.alias` entry pointing at whatever `resolveDeno` resolves it to. For a package genuinely
+  served from JSR — never vendored into a local `node_modules`-style store — that resolution is the
+  package's own canonical `https://jsr.io/...` specifier, not a local file path; feeding that
+  straight into Vite's `optimizeDeps` back-compat resolver as an alias replacement handed its own
+  dependency scanner (`extractExportsData`) a URL string to `fs.readFileSync`, which always fails.
+  Fixed by skipping any specifier whose resolution starts with `http://`/`https://` — both for the
+  alias and for `optimizeDeps.include` membership, since a real ESM module served remotely already
+  works through `@deno/vite-plugin`'s own transform path and never needed the CJS-interop this
+  plugin exists for in the first place. Covered by a new regression test asserting a Comet-imported
+  JSR package (`@std/uuid`) transforms correctly with no alias/include entry ever created for it.
+
+- **`zanix space dev` threw `Route path "..." is already defined` on every reload of a page using an
+  EXPLICIT `@Page(path)`, permanently stuck re-serving stale content.** Root cause: a pathless
+  `@Page()` defers registration until after import, letting `loadRoutes()` compare identities and
+  deregister a stale class first — but an explicit `@Page(path)` registers synchronously, DURING
+  import itself, before `loadRoutes()` ever gets a chance to do that comparison, so a genuine file
+  change re-registers at the same path while the previous, now-stale registration is still live.
+  Because the collision throws mid class-definition, the fresh class binding is never even created —
+  there is nothing left to retry with once that happens. Fixed by evicting the stale registration
+  BEFORE the collision can occur instead: `loadRoutes()` now wraps each page's own `importModule()`
+  call in an `AsyncLocalStorage`-scoped context (`withPendingReplacement`, `page-decorator.ts`)
+  carrying that file's previous target class; `registerPage` reads it back and deregisters that
+  exact class first if it's still live, never anyone else's — a genuine collision between two
+  unrelated pages that happen to declare the same path still throws exactly as before. Covered by
+  two new tests: one confirming the recovery serves the fresh content with the stale registration
+  gone, one confirming a genuine cross-page collision still throws.
+- **`zanix space dev` could corrupt its own route registration under rapid, repeated saves of the
+  same page file** (several `Ctrl+S` in quick succession) — two overlapping `loadRoutes()` calls for
+  the same page each independently reimported it and raced to register the same route path;
+  whichever finished first won, the second collided and threw, but the LOSING call had already
+  overwritten the page's own bookkeeping entry with a class that was never actually registered —
+  every later reload (for any file, since a call always reprocesses every page) then hit the same
+  collision forever, until the process restarted. `loadRoutes()` now serializes calls onto a shared
+  queue (a call arriving while a previous one is still running waits for it to finish first), making
+  that corrupted state structurally impossible — a call always starts from whatever consistent state
+  the previous one left behind. Adds no latency to the common single-call case.
+- **A renamed or deleted page file kept serving its previous route forever under
+  `zanix space
+  dev`**, since `loadRoutes()`'s own bookkeeping only ever grew and nothing revisited
+  a file that had disappeared. Fixed by deregistering any previously-registered page whose file no
+  longer exists under `routesDir` on every reload.
+- **`zanix space dev` crashed with an opaque `TypeError: Invalid value used as weak map key` for a
+  `page.tsx` still being scaffolded** (folder and empty file created, component and `@Page()` not
+  written yet) — `loadRoutes()` now recognizes a page with no valid default export, logs an
+  actionable warning instead, and skips registering it, without failing every other page's own
+  reload in the same batch.
+- **A page's routes were not restored after `@zanix/app`'s `uninstallApp`/`installApp` hot-reinstall
+  when the page's file hadn't changed on disk.** A plain `import()` (no dev engine) hits Deno's own
+  module cache and returns the identical, already-evaluated class, so `@Page()`'s decorator never
+  reruns and never re-registers it. `resolvePendingPage` now checks whether the class's routes are
+  actually still live (`ProgramModule.routes.hasRoutesForTarget`) rather than only trusting "already
+  resolved once, so it must still be fine," and re-registers using the same options the class was
+  originally decorated with (now kept for the class's lifetime instead of discarded after first
+  use).
+- **`zanix space dev` never auto-reloaded a connected browser tab on a plain SSR change** (an edited
+  `layout.tsx`/`loader`/the route file itself) — `devClient.routeFilePath`, sent on every
+  full-document response, was left relative to `routesDir` while the dev socket's own
+  `handleSsrModuleChanged` compares it against `SsrModuleChangedEvent.affectedRoutes` (always an
+  absolute path, from Vite's own module graph); the comparison silently never matched, in every
+  project regardless of renderer. Fixed by resolving `routeFilePath` to an absolute path before it's
+  sent.
+- **The dev client could get permanently stuck silently applying nothing on a real edit**, needing a
+  manual full refresh to recover, in two related races: (1) this dev socket's own WebSocket
+  connection could finish — and start relaying an edit — before a Comet's own concurrently-requested
+  dynamic `import()` of `/@vite/client` had resolved, leaving `__spaceApplyClientUpdate` undefined
+  when the message arrived; (2) a Comet whose own first load failed on a static import (e.g. a
+  `'server-only'` violation) never reached its own `import.meta.hot.accept(...)` call, permanently
+  leaving no callback registered for that url — so even a later, genuinely fixed edit kept doing
+  nothing. Both cases now fall back to a real `location.reload()` instead of a silent no-op,
+  matching this client's existing "never silently stuck on stale code" handling of its other two
+  failure modes.
+- **`assets-manifest.ts` failed a Comet's build with an opaque, unhelpful bundler resolution error**
+  instead of `cometPlugin`'s own clear, named violation message, whenever a `'use comet'` file
+  transitively imported `resolveAssetHref` (e.g. through a wrapper component) — this module holds
+  genuinely server-only state (`Deno.readTextFile`, a module-scoped manifest) but was missing the
+  `'server-only'` directive that makes that failure mode actionable rather than a bare "module not
+  found." Now marked `'server-only'`, consistent with every other server-only module in this
+  package.
+
+- **A route with no dynamic segments at all (e.g. the plain `population` template's root `/`, no
+  `[lang]`) could crash `resolvePageChrome`/`renderLoaderErrorPage`/an app's own `error.tsx`/
+  `not-found.tsx` on an unguarded `params.lang` read.** `ctx.payload.params` is `undefined`, never
+  `{}`, for that case — `toPageContext` (`space-page-controller.ts`) now defaults it once, at the
+  source, instead of three independent call sites each guarding (or forgetting to guard) against it
+  themselves.
+- **`zanix space dev` 404'd on this package's own built-in `default-error-view.tsx`/`-preact.ts`,
+  and on any file a Deno workspace member resolves OUTSIDE the dev server's own project root** (a
+  sibling `@zanix/space`/`@zanix/space-ui` checkout linked via `deno.json`'s `workspace`, for
+  instance) — `resolveCometModuleUrl` (`comet-manifest.ts`) now emits Vite's own
+  `/@fs/<absolute-path>` convention for exactly that case instead of an un-prefixed absolute path no
+  dev route ever answers, and `createSpaceDevEngine` now sets `server.fs.strict: false` — Vite's
+  default `fs.allow` walk stops at the first `.git`/lockfile boundary it finds, which a Deno
+  workspace member's own `.git` (every project `zanix new` scaffolds has one) never lets it cross to
+  reach the shared workspace root.
+- **Resolving `DEFAULT_ERROR_VIEW_REACT_URL`/`DEFAULT_ERROR_VIEW_PREACT_URL`
+  (`default-view-specifiers.ts`) via `import.meta.resolve` broke every page render under
+  `zanix space dev`** — its own Vite-based SSR module runner intercepts `import.meta.resolve` but
+  leaves the plain `import.meta.url` property untouched, so calling it threw
+  `TypeError
+  [ERR_UNSUPPORTED_ESM_URL_SCHEME]` the moment
+  `render-page-react.tsx`/`render-page-preact.ts` loaded through that runner (which they always do,
+  in dev). Fixed by resolving via plain `new URL(specifier, import.meta.url)` algebra instead — pure
+  string computation, never touches Vite's patched function.
+
 ## [0.2.0] - 2026-08-26
 
 ### Added
@@ -138,6 +480,43 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
   - Confirmed via `deno info --json --min-dep-age=0 mod.ts`: `react` and `preact` are both fully
     absent from `.`'s reachable `npm:` specifiers — the doc's own "importing it never evaluates
     `react`, `react-dom/server` or `preact`" claim is now checked, not just asserted.
+- **Partial fix for `zanix space build` failing on a plain, default `zanix new space` React scaffold
+  with `[UNLOADABLE_DEPENDENCY]`/`[PARSE_ERROR]`/`[UNRESOLVED_ENTRY]` errors inside a nested Vite
+  worker sub-build (`zanix-io/space#4`).** Root cause: `@zanix/utils`'s own `WorkerManager`
+  (`workers/processor.ts`) does a real `new Worker(new URL(...))` — a pattern Vite's own
+  `worker-import-meta-url` plugin statically detects and tries to bundle as a nested sub-build the
+  moment the file is merely REACHABLE, regardless of whether the app ever configures anything that
+  needs it; that nested build then fails for reasons still outside this package's own control (see
+  below). Two real, `@zanix/space`-controlled reachability paths into it, both fixed:
+  - `build-client.ts` (`zanix space build`'s own Vite orchestration) statically imported
+    `assetsPlugin`/`mediaPlugin` at its own top level, even though the SAME file already gates
+    actually calling either behind `assetsDir` being configured — the classic "gated the call, not
+    the import" gap this package has already fixed elsewhere (see `svgo`/renderer-view-specifier
+    entries above). Both real value imports reach `@zanix/utils`'s `WorkerManager` (via
+    `@zanix/logger`), so a plain app with no `assetsDir` configured — the exact repro — still paid
+    for it. Fixed the same way: lazy, non-literal specifiers (new
+    `bundler/build-plugin-specifiers.ts`), resolved only when `assetsDir` is actually set; typed via
+    the existing `assets-plugin-types.ts`/`media-plugin-types.ts` siblings instead.
+  - `typings/manifest.ts`'s `SpaceAppConfig.logApi` field `import type`-ed `LogApiControllerOptions`
+    from the real `log.controller.ts` — which value-imports `@zanix/logger` directly — and
+    `modules/runtime/define-space-app.ts` additionally, unconditionally, statically imported and
+    called `createLogApiController` as part of every app's own `setup()`. Since `SpaceAppConfig` is
+    reachable from the root `.` entry point (the SAME barrel every Comet imports, for
+    `defineComet`), this meant `log.controller.ts` — and `@zanix/logger` — were reachable from every
+    `@zanix/space` app's CLIENT bundle, not just its server side. Fixed by extracting
+    `LogApiControllerOptions`/`LogApiRateLimitOptions` into the new
+    `log-api/controllers/log-controller-types.ts` (for the type reference) and resolving
+    `createLogApiController` itself via a lazy, non-literal specifier at its own call site (already
+    inside an `async` scope) — `defineSpaceApp` stays fully synchronous for every existing caller.
+  - **Not yet fully closed**: even with both fixes above, `@zanix/server`'s own `ProgramModule` —
+    unconditionally needed by `defineSpaceApp` itself, and by every `SpacePageController`/`Page` a
+    Comet's own sibling routes use — has its own internal path into `@zanix/utils`'s
+    `helpers/mod.ts` → `utils/cron.ts` → `@zanix/logger` → the same `WorkerManager` pattern. This is
+    outside this package's own control: `@zanix/logger`'s root `mod.ts` unconditionally imports a
+    `WorkerManager`-backed default log-storage implementation (`defaults/storage/default.ts`),
+    regardless of whether `useWorker` is ever actually set at runtime — the identical "gated the
+    call, not the import" gap, one level up, in `@zanix/utils` itself. A real fix needs that import
+    made lazy there; `zanix-io/space#4` stays open pending it.
 
 ## [0.1.0] - 2026-08-24
 

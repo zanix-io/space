@@ -1,5 +1,9 @@
 import { assert, assertEquals } from '@std/assert'
-import { buildSitemapXml } from 'modules/seo/sitemap.ts'
+import {
+  buildSitemapXml,
+  getSitemapDeclaration,
+  setSitemapDeclaration,
+} from 'modules/seo/sitemap.ts'
 
 Deno.test('buildSitemapXml: a minimal entry renders loc only', () => {
   const xml = buildSitemapXml([{ loc: '/products' }], 'https://example.com')
@@ -108,4 +112,28 @@ Deno.test('buildSitemapXml: an empty entries array still produces a valid, empty
   assert(xml.includes('<urlset'), xml)
   assert(xml.includes('</urlset>'), xml)
   assertEquals((xml.match(/<url>/g) ?? []).length, 0)
+})
+
+Deno.test('getSitemapDeclaration: undefined until defineSpaceApp captures one', () => {
+  setSitemapDeclaration(undefined)
+  assertEquals(getSitemapDeclaration(), undefined)
+})
+
+Deno.test("getSitemapDeclaration: 'auto' round-trips exactly", () => {
+  setSitemapDeclaration('auto')
+  try {
+    assertEquals(getSitemapDeclaration(), 'auto')
+  } finally {
+    setSitemapDeclaration(undefined)
+  }
+})
+
+Deno.test('getSitemapDeclaration: a literal array round-trips exactly, same reference', () => {
+  const entries = [{ loc: '/about' }]
+  setSitemapDeclaration(entries)
+  try {
+    assertEquals(getSitemapDeclaration(), entries)
+  } finally {
+    setSitemapDeclaration(undefined)
+  }
 })

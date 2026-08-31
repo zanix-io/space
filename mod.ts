@@ -26,6 +26,8 @@
  */
 export { defineSpaceApp, ZANIX_APP_DEFINITION_BRAND } from 'modules/runtime/mod.ts'
 export type { ZanixAppDefinition } from 'modules/runtime/mod.ts'
+export { defineBootstrapSpaceAppConfig, getBootstrapSpaceAppConfig } from 'modules/runtime/mod.ts'
+export type { BootstrapRemoteAppOptions } from 'modules/runtime/mod.ts'
 export type {
   AppSetupContext,
   ConfigAccessor,
@@ -44,12 +46,15 @@ export type { PwaConfig, PwaShortcut } from 'typings/pwa.ts'
 export type { AssetsControllerOptions } from 'modules/assets-api/controllers/assets-controller-types.ts'
 export type { AssetService, CreateAssetCommand } from 'modules/assets-api/asset-service-types.ts'
 // Same "every type reachable from a public export must itself be public" rule, for
-// `SpaceAppConfig.logApi` — type-only, no code edge into `modules/log-api/` (this module never
-// imports `@zanix/auth`/`@zanix/logger` itself, so this adds none either).
+// `SpaceAppConfig.logApi` — sourced from the narrow `log-controller-types.ts` sibling, never the
+// real controller file (which value-imports `@zanix/server` decorators, `@zanix/logger`, and
+// `./rtos/log.rto.ts`), so this entry point's own reachable graph never touches them. `defineComet`
+// (this same barrel) is what every Comet imports, so `.` is unavoidably part of every client
+// bundle's own graph — the real controller file has no business being part of it too.
 export type {
   LogApiControllerOptions,
   LogApiRateLimitOptions,
-} from 'modules/log-api/controllers/log.controller.ts'
+} from 'modules/log-api/controllers/log-controller-types.ts'
 // Same "every type reachable from a public export must itself be public" rule, for
 // `SpaceAppConfig.optimize`/`SpaceAppConfig.media` below — sourced from each plugin's own narrow
 // `-types.ts` sibling (not the real plugin file, which value-imports `sharp`/`vite`) so this entry
@@ -84,6 +89,13 @@ export {
   setGlobalCssPaths,
 } from 'modules/render/mod.ts'
 export type { CssManifest, StylesheetRef } from 'modules/render/mod.ts'
+export {
+  getClientEntry,
+  loadClientEntryManifest,
+  resolveClientEntrySpecifier,
+  resolveClientEntryUrl,
+  setClientEntry,
+} from 'modules/render/mod.ts'
 
 export {
   formatDiagnostic,
@@ -130,6 +142,7 @@ export {
   getActionFieldValue,
   getActiveRenderer,
   getDefaultPageHeaders,
+  getRoutesDir,
   loadRoutes,
   Page,
   scanPageFiles,
@@ -167,6 +180,7 @@ export type { RtoTypes } from '@zanix/types'
 export type {
   ErrorBoundaryProps,
   LayoutProps,
+  NotFoundProps,
   PageActionContext,
   PageContext,
   PageFieldErrors,
@@ -178,7 +192,16 @@ export type {
 // `typings/renderable.ts`'s own module doc.
 export type { SpaceChildren, SpaceComponent, SpaceElement } from 'typings/renderable.ts'
 
-export { defineComet, loadCometManifest, resolveCometModuleUrl } from 'modules/comets/mod.ts'
+// `defineComet`/`loadCometManifest`/`resolveCometModuleUrl` are deliberately NOT re-exported here
+// — see `./comet`'s own export block in `deno.jsonc` and `modules/comets/mod.ts`'s own module doc.
+// This barrel is what a real browser's own dependency graph reaches when pre-bundling `.` for a
+// Comet's `import { defineComet } from '@zanix/space'` (the OLD import path) — and `.` ALSO
+// exports genuinely server/dev-only code elsewhere in this same file (`defineSpaceApp`,
+// `SpaceDevSocket` — the latter using real TC39 decorators Vite's normal transform can't parse at
+// all). A bundler resolving `.` as a whole has no way to know a Comet only ever needed
+// `defineComet`'s own narrow slice — confirmed empirically as a real, hard build failure, not a
+// theoretical one. Type-only exports stay here regardless (erased at build time, zero resolution
+// cost either way) — only the three FUNCTIONS moved.
 export type {
   CometBoundaryComponent,
   CometComponent,
@@ -205,6 +228,8 @@ export {
   CSRF_TOKEN_LOCALS_KEY,
   csrfGuard,
   defineMiddleware,
+  definePreHandler,
+  getUserPreHandler,
   langGuard,
   langPreHandler,
   POPULATION_LOCALS_KEY,
@@ -225,33 +250,45 @@ export type {
   SecurityHeadersOptions,
 } from 'modules/middleware/mod.ts'
 
+// Sourced from `modules/dev/socket-exports.ts`, not `modules/dev/mod.ts`'s own full barrel — that
+// barrel also co-locates `spacePlugin` (`@vitejs/plugin-react`/`@preact/preset-vite`, both
+// renderers' Fast Refresh tooling, regardless of which one an app installs), which this entry point
+// must never resolve merely by re-exporting `SpaceDevSocket`.
 export {
   broadcastSsrModuleChanged,
   SPACE_DEV_SOCKET_ROUTE,
   SpaceDevSocket,
   ZanixWebSocket,
-} from 'modules/dev/mod.ts'
-export type { SocketPrototype } from 'modules/dev/mod.ts'
+} from 'modules/dev/socket-exports.ts'
+export type { SocketPrototype } from 'modules/dev/socket-exports.ts'
 // `broadcastSsrModuleChanged`'s own parameter type — same "every type reachable from a public
 // export must itself be public" rule as `AssetsOptimizeOptions`/`MediaOptimizeOptions` above.
-export type { SsrModuleChangedEvent } from 'modules/dev/mod.ts'
+export type { SsrModuleChangedEvent } from 'modules/dev/socket-exports.ts'
 
 export { loadMessages } from 'modules/i18n/load-messages.ts'
-export type { LoadMessagesOptions, Messages } from 'modules/i18n/load-messages.ts'
+export type {
+  CompiledMessageNode,
+  LoadMessagesOptions,
+  Messages,
+} from 'modules/i18n/load-messages.ts'
 // Read-back of `defineSpaceApp({ messagesDir })`'s own eager `setup()` write — same
 // `getGlobalCssPaths`/`getPwaConfig` precedent, so `zanix space build`/`dev` can locate the
 // configured directory without this package knowing anything about what a build step does with
 // it (compiling ICU, or not, is entirely `@zanix/cli`'s own concern — see that package's own
 // `compile-messages.ts`).
-export { getMessagesDir } from 'modules/i18n/messages-registry.ts'
+export { DEFAULT_IMPLICIT_LANG, getMessagesDir } from 'modules/i18n/messages-registry.ts'
 
 export {
   buildCanonicalLink,
   buildHreflangLinks,
   buildRobotsTxt,
   buildSitemapXml,
+  getSitemapDeclaration,
+  getSitemapManifest,
+  loadSitemapManifest,
   registerRobots,
   registerSitemap,
+  setSitemapDeclaration,
 } from 'modules/seo/mod.ts'
 export type {
   BuildCanonicalLinkOptions,
@@ -259,6 +296,7 @@ export type {
   RobotsConfig,
   RobotsRule,
   SitemapAlternate,
+  SitemapDeclaration,
   SitemapEntry,
   SitemapSource,
   SpaceRobotsConfig,

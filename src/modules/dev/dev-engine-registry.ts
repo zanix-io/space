@@ -4,7 +4,7 @@ import type { ImportedModule } from 'modules/router/load-routes.ts'
 export type DevImportModule = (filePath: string) => Promise<ImportedModule>
 
 let importModule: DevImportModule | undefined
-let routesReloader: (() => Promise<void>) | undefined
+let routesReloader: ((onlyFilePaths?: readonly string[]) => Promise<void>) | undefined
 
 /**
  * Set once by a dev-server orchestrator (`zanix space dev`) before `activateApps()` runs — never by
@@ -42,15 +42,23 @@ export function getDevImportModule(): DevImportModule | undefined {
  * This is what lets a dev-server orchestrator (`zanix space dev`) react to a file change with a
  * single, generic `await getDevRoutesReloader()?.()` — it never needs to know this app's own name
  * or `routesDir` itself; both stay entirely inside `defineSpaceApp`'s own closure.
+ *
+ * @param value - Takes an optional `onlyFilePaths` parameter, forwarded verbatim to `loadRoutes`'s
+ * own `LoadRoutesOptions.onlyFilePaths` (see its own doc) — a dev-server orchestrator passes
+ * `event.affectedRoutes` here for a Comet-only edit (no route added/removed/renamed, only an
+ * already-registered page's own dependency changed), omitting it (a full, unscoped reload) for
+ * every other kind of SSR-affecting change.
  */
 export function setDevRoutesReloader(
-  value: (() => Promise<void>) | undefined,
+  value: ((onlyFilePaths?: readonly string[]) => Promise<void>) | undefined,
 ): void {
   routesReloader = value
 }
 
 /** Read by a dev-server orchestrator (`zanix space dev`) on every file change it decides is
  * SSR-relevant — `undefined` outside dev mode (nothing was ever registered). */
-export function getDevRoutesReloader(): (() => Promise<void>) | undefined {
+export function getDevRoutesReloader():
+  | ((onlyFilePaths?: readonly string[]) => Promise<void>)
+  | undefined {
   return routesReloader
 }

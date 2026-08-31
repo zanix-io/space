@@ -262,10 +262,11 @@ Deno.test(
 )
 
 Deno.test(
-  'render probe: a component that THROWS still yields DOCUMENT diagnostics, not an invented probe ' +
-    "error. The renderer's own contract is that it always resolves — a thrown component becomes an " +
-    'empty 500 — so what the probe sees is a response that is not a document, and it says exactly ' +
-    'that through DOC003 rather than through a failure mode of its own',
+  'render probe: a component that THROWS still yields ordinary DOCUMENT diagnostics, not an ' +
+    "invented probe error. The route's own default-error-view fallback (composeSegments, no " +
+    'error.tsx on this page) keeps the response a real document — so what the probe sees is a ' +
+    'document with no real content, and it says exactly that through the ordinary content rules ' +
+    '(A11Y006, SEO008) rather than through a failure mode of its own',
   async () => {
     const { getPageRenderer } = await import('modules/router/page-renderer-registry.ts')
     const result = await runRenderProbe({
@@ -280,7 +281,7 @@ Deno.test(
       renderPage: getPageRenderer(),
     })
     assertEquals(result.probed, ['widget'])
-    assertEquals(result.diagnostics.map((d) => d.code), ['DOC003'])
+    assertEquals(result.diagnostics.map((d) => d.code), ['A11Y006', 'SEO008'])
     assertEquals(result.skipped, [])
   },
 )

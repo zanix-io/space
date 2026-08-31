@@ -5,8 +5,14 @@ import type { SpaceAppConfig } from 'typings/manifest.ts'
 import { loadRoutes, setDefaultPageHeaders } from 'modules/router/mod.ts'
 import { setThemeResolver } from 'modules/theme/mod.ts'
 import { setExtendedSerialization } from 'modules/render/serialization-registry.ts'
-import { registerPwa, setPwaConfig } from 'modules/pwa/mod.ts'
-import { addGlobalCssPaths } from 'modules/render/css-manifest.ts'
+import { loadPwaBuildOutput, registerPwa, setPwaConfig } from 'modules/pwa/mod.ts'
+import { addGlobalCssPaths, getCssManifest, loadCssManifest } from 'modules/render/css-manifest.ts'
+import {
+  getClientEntryManifest,
+  loadClientEntryManifest,
+  setClientEntry,
+} from 'modules/render/client-entry.ts'
+import { getCometManifest, loadCometManifest } from 'modules/comets/comet-manifest.ts'
 import { scanAssets } from 'modules/assets/scan-assets.ts'
 import {
   setAssetsDirConfig,
@@ -15,16 +21,32 @@ import {
   setResolvedAssets,
 } from 'modules/assets/asset-registry.ts'
 import { registerAssets } from 'modules/assets/register-assets.ts'
+import { loadAssetsBuildOutput, loadAssetsManifest } from 'modules/assets/assets-manifest.ts'
 import { createAssetsController } from 'modules/assets-api/controllers/assets.controller.ts'
-import { createLogApiController } from 'modules/log-api/controllers/log.controller.ts'
-import { setMessagesDir } from 'modules/i18n/messages-registry.ts'
-import { registerSitemap } from 'modules/seo/sitemap.ts'
+import { setMessagesBuildDir, setMessagesDir } from 'modules/i18n/messages-registry.ts'
+import { registerSitemap, setSitemapDeclaration } from 'modules/seo/sitemap.ts'
+import { getSitemapManifest, loadSitemapManifest } from 'modules/seo/sitemap-manifest.ts'
 import { registerRobots } from 'modules/seo/robots.ts'
 import { getDevImportModule, setDevRoutesReloader } from 'modules/dev/dev-engine-registry.ts'
+import { isDevClientEnabled } from 'modules/dev/dev-client-registry.ts'
 import { setActiveRenderer } from 'modules/router/active-renderer.ts'
+import { setErrorResponseFormat } from 'modules/router/error-response-format-registry.ts'
+import { getRoutesDir, setRoutesDir } from 'modules/router/routes-dir-registry.ts'
 import { getInstalledRenderer } from 'modules/router/renderer-runtime.ts'
 import { InternalError } from '@zanix/errors'
 import { setValidationConfig } from 'modules/validation/config-registry.ts'
+
+/** Deliberately non-literal, kept OUTSIDE a normal top-level `import` — `log.controller.ts` value-
+ * imports `@zanix/logger` (and, transitively, `@zanix/utils`'s own `WorkerManager`), whose real
+ * `new Worker(new URL(...))` pattern Vite's own `worker-import-meta-url` plugin statically detects
+ * and tries to bundle as a nested sub-build the moment the file is merely reachable — a real,
+ * confirmed source of build failures. `defineComet` (`.`'s OWN barrel) is what every Comet
+ * imports, so `.` is unavoidably part of every client bundle's own graph;
+ * `createLogApiController` itself only ever actually RUNS server-side, inside the `async setup`
+ * callback below, so resolving it there — via this non-literal specifier, not a top-level import —
+ * keeps `log.controller.ts` out of that graph entirely. Single consumer (this file) — stays inline,
+ * not promoted to a shared specifiers file, per this package's own established convention. */
+const LOG_CONTROLLER_SPECIFIER = 'modules/log-api/controllers/log.controller.ts'
 
 // Re-exported (not just imported) because `defineSpaceApp` below returns it — see
 // `typings/manifest.ts`'s own doc comment for why referenced public types must themselves be
@@ -84,14 +106,17 @@ export function defineSpaceApp(config: SpaceAppConfig): ZanixAppDefinition {
     dependencies,
     routesDir,
     assetsDir,
+    clientBuildDir,
     messagesDir,
     globalCss,
+    clientEntry,
     headers,
     theme,
     pwa,
     sitemap,
     robots,
     renderer,
+    errorResponse,
     serialization,
     validation,
     optimize,
@@ -111,7 +136,13 @@ export function defineSpaceApp(config: SpaceAppConfig): ZanixAppDefinition {
   // nothing — see `SpaceAppConfig.serialization`'s own doc for what enabling it changes.
   setExtendedSerialization(serialization?.extendedTypes)
   if (pwa !== undefined) setPwaConfig(pwa === false ? undefined : pwa)
+  // Same eager timing as `theme`/`headers` above — `setErrorResponseFormat` just sets a
+  // module-level registry value, read at request time by `loader-error-handler.ts`/
+  // `not-found-handler.ts`, never at build/dev-orchestration time, so there is no
+  // `zanix space build`-needs-this-early concern the way `renderer`/`routesDir` below have.
+  setErrorResponseFormat(errorResponse)
   if (globalCss !== undefined) addGlobalCssPaths(globalCss)
+  if (clientEntry !== undefined) setClientEntry(clientEntry)
   // Eager, same point as `headers`/`pwa`/`globalCss` above — unlike those, this doesn't drive any
   // side effect of its own here (the actual page-renderer swap still only happens inside `setup()`
   // below, right before `loadRoutes()`, unchanged). This call exists purely so an external
@@ -121,6 +152,13 @@ export function defineSpaceApp(config: SpaceAppConfig): ZanixAppDefinition {
   // at all, so without this, it would have no way to ever learn `renderer` was set to `'preact'`.
   const declaredRenderer = renderer ?? 'react'
   setActiveRenderer(declaredRenderer)
+  // Eager, same reasoning/timing as `renderer` immediately above — `zanix space build`/
+  // `zanix space dev` both need to know where this project's pages actually live BEFORE
+  // discovering any of them (document validation, sitemap derivation), and neither call
+  // `activateApps()` (`zanix space build` never does; `zanix space dev` needs the value before
+  // `setup()` runs too) — see `getRoutesDir()`'s own doc for why a value only readable from inside
+  // `setup()` isn't good enough here.
+  setRoutesDir(routesDir ?? './routes')
   // Eager too, same reasoning/timing as `renderer` above — `assetsPlugin` (`@zanix/space/vite`,
   // wired through `buildSpaceClient`) needs to know WHICH directories to hash during
   // `zanix space build`, which never calls `activateApps()` (so never runs the `setup()` block
@@ -146,6 +184,22 @@ export function defineSpaceApp(config: SpaceAppConfig): ZanixAppDefinition {
   // actual resolution stays exactly as lazy as before — per `(lang, population)` key, on first
   // access — nothing here changes when or how a catalog file is actually read.
   if (messagesDir !== undefined) setMessagesDir(messagesDir)
+  // Eager, same reasoning/precedent as `validation`/`messagesDir` above — `zanix space build`/
+  // `zanix space dev` both need to know whether `sitemap` resolves to `'auto'` or a literal array
+  // BEFORE `setup()` ever runs, to derive `StaticAppInput.sitemapLocations` for the SEO004/SEO006
+  // cross-checks. A function source is never captured here (only `'auto'`/an array pass the
+  // `typeof sitemap !== 'function'` guard) — `getSitemapDeclaration()`'s own doc explains why that
+  // case has to stay unreadable this early, unchanged from before `'auto'` existed.
+  if (sitemap !== undefined && typeof sitemap !== 'function') setSitemapDeclaration(sitemap)
+  // Eager, additive copy of `clientBuildDir` (below) into `messages-registry.ts`'s own value —
+  // deliberately NOT a change to `clientBuildDir`'s own existing consumption inside `setup()`
+  // further down (that block stays exactly as it was). `loadMessages()`'s own `resolve()` reads
+  // this back via `getMessagesBuildDir()` to know where `zanix space build` compiled this app's
+  // catalogs to (`{clientBuildDir}/messages/...`, never `messagesDir` itself — see
+  // `writeCompiledMessagesTree`'s own doc in `@zanix/cli` for why compiling in place was a real
+  // bug, not a feature). A project that sets `clientBuildDir` without `messagesDir` gets an inert
+  // value here — `getMessagesBuildDir()` is only ever consulted when `messagesDir` is ALSO set.
+  if (clientBuildDir !== undefined) setMessagesBuildDir(clientBuildDir)
 
   return defineZanixApp({
     name,
@@ -176,22 +230,53 @@ export function defineSpaceApp(config: SpaceAppConfig): ZanixAppDefinition {
         )
       }
 
-      const resolvedRoutesDir = routesDir ?? './routes'
+      const resolvedRoutesDir = getRoutesDir()
+
       await loadRoutes(resolvedRoutesDir, {
         importModule: getDevImportModule(),
       })
+
       // Only registered in dev mode (see `setDevRoutesReloader`'s own doc) — a plain production
       // boot never sets an import override, so nothing would ever read this reloader back anyway.
       if (getDevImportModule()) {
-        setDevRoutesReloader(() =>
+        setDevRoutesReloader((onlyFilePaths) =>
           ProgramModule.defineApplication(
             name,
             () =>
               loadRoutes(resolvedRoutesDir, {
                 importModule: getDevImportModule(),
+                onlyFilePaths,
               }),
           )
         )
+      }
+      // `SpaceAppConfig.clientBuildDir`'s own doc: replaces a production `main.ts`'s own six
+      // manual `loadXManifest`/`loadXBuildOutput` calls. Must run BEFORE `registerPwa(pwa)`
+      // immediately below — `loadPwaBuildOutput` is what `registerPwa` reads its own build output
+      // directory back from, at route-registration time, the exact ordering constraint that
+      // already applied when a `main.ts` called these by hand (see `loadPwaBuildOutput`'s own doc
+      // in `@zanix/space`).
+      //
+      // Gated on `!isDevClientEnabled()`, same dev/prod split `resolveCssHrefs`/
+      // `resolveClientEntryUrl` already use — NOT because a missing manifest file would be an
+      // error (each of the six already tolerates that fine), but because a stale one very much
+      // isn't: `znx space dev` and a real `zanix space build` commonly point at the SAME
+      // `clientBuildDir` on the SAME machine, and an earlier build's real output sitting on disk
+      // is the common case during local development, not a rare one. Loading it under `dev` would
+      // make every Comet resolve to that OLD build's own hashed chunk names instead of the current
+      // source Vite is actually serving — confirmed as a real failure, not hypothetical: a stale
+      // React-Compiler-transformed chunk from a previous build, loaded into a fresh dev session's
+      // own React instance, threw `Cannot read properties of null (reading 'useMemoCache')` on
+      // hydration, and separately, the browser 404's/fails outright trying to dynamically import
+      // that old chunk's exact hashed filename, which dev's own module graph never serves.
+      if (clientBuildDir !== undefined && !isDevClientEnabled()) {
+        await loadCometManifest(`${clientBuildDir}/comets-manifest.json`)
+        await loadClientEntryManifest(`${clientBuildDir}/client-entry-manifest.json`)
+        await loadCssManifest(`${clientBuildDir}/css-manifest.json`)
+        await loadAssetsManifest(`${clientBuildDir}/assets-manifest.json`)
+        loadAssetsBuildOutput(clientBuildDir)
+        loadPwaBuildOutput(clientBuildDir)
+        await loadSitemapManifest(`${clientBuildDir}/sitemap-manifest.json`)
       }
       // Route registration (like `loadRoutes()` above) only works inside this composition scope —
       // never called eagerly from `defineSpaceApp` itself, same reasoning `registerPwa`'s own doc
@@ -203,6 +288,31 @@ export function defineSpaceApp(config: SpaceAppConfig): ZanixAppDefinition {
       if (assetsDir !== undefined) {
         setResolvedAssets(await scanAssets(assetsDir))
         registerAssets()
+      } else if (
+        getCometManifest() !== undefined || getCssManifest() !== undefined ||
+        getClientEntryManifest() !== undefined
+      ) {
+        // At least one production manifest was loaded (`loadCometManifest`/`loadCssManifest`/
+        // `loadClientEntryManifest` — dev never calls any of these), meaning a real `zanix space
+        // build` ran and produced real, hashed JS/CSS this app needs to serve. But `assetsDir` is
+        // what registers the ONLY route (`/assets/:path*`, above) capable of serving that build
+        // output — omitted, every one of those built files 404s at its own hashed URL, even
+        // though every manifest above loaded without error. A confirmed, real failure mode this
+        // warning exists specifically to catch before it reaches production silently. Not a
+        // blocking error: a reverse proxy/CDN placed in front of this server that already serves
+        // `/assets/*` itself (intercepting the request before it ever reaches this app) is an
+        // equally valid setup this package has no way to detect — genuinely nothing to fix in
+        // that case.
+        const { default: logger } = await import('@zanix/logger')
+        logger.warn(
+          'This app loaded a production build manifest (comet/CSS/client-entry), but ' +
+            '`assetsDir` is not configured in `defineSpaceApp({ ... })` — the built JS/CSS this ' +
+            'app needs to serve has no route to answer through, and every request for it will ' +
+            '404. Fix: set `assetsDir` to any real directory (it can be empty; it only needs to ' +
+            'exist) so the `/assets/:path*` route gets registered. If a reverse proxy or CDN in ' +
+            'front of this server already serves `/assets/*` on its own, this does not apply to ' +
+            'you — those requests never reach this app at all.',
+        )
       }
       // `messagesDir` itself is now stored eagerly, above (same precedent as `assetsDir`'s own
       // path) — nothing left to do for it here. `loadMessages()` still resolves lazily, per
@@ -210,8 +320,34 @@ export function defineSpaceApp(config: SpaceAppConfig): ZanixAppDefinition {
       // changed, not how or when a catalog file is actually read.
       // Same "route registration only works inside this composition scope" reasoning as `pwa`/
       // `assetsDir` above. `robots` is registered with whether `sitemap` was ALSO declared, so its
-      // own `Sitemap:` auto-append (`buildRobotsTxt`'s own doc) reflects this app's real state.
-      if (sitemap !== undefined) registerSitemap(sitemap)
+      // own `Sitemap:` auto-append (`buildRobotsTxt`'s own doc) reflects this app's real state —
+      // `'auto'` counts as declared here exactly like an array/function would, since it still
+      // resolves to a real `/sitemap.xml` route below (or the same nothing-registered outcome, in
+      // production, before this app's first real build — see the `'auto'` branch's own doc).
+      if (sitemap === 'auto') {
+        if (isDevClientEnabled()) {
+          // Dynamic import, dev-only cost — `@zanix/space/vite`'s own dependency graph (Vite,
+          // `discoverPages`'s real filesystem scan) has no business loading in production, where
+          // this branch never runs at all. Recomputed on every request (never cached), same
+          // "trust nothing on disk, always reflect current source" rule `clientBuildDir`'s own
+          // manifest-loading above already follows for dev.
+          registerSitemap(async () => {
+            const { deriveAutoSitemapEntries, discoverPages } = await import('@zanix/space/vite')
+            return deriveAutoSitemapEntries(await discoverPages(resolvedRoutesDir))
+          })
+        } else {
+          // Production: `zanix space build` already derived these from the SAME static discovery
+          // pass its own document validation runs, and `loadSitemapManifest` above already read
+          // them back, if a real build ever ran. Registered as a plain array — the exact same
+          // zero-per-request-cost path a hand-written literal `sitemap` already takes, never a
+          // second caching mechanism. Nothing registered at all before a project's first real
+          // build, same degradation every other `clientBuildDir`-fed manifest already has.
+          const manifestEntries = getSitemapManifest()
+          if (manifestEntries !== undefined) registerSitemap(manifestEntries)
+        }
+      } else if (sitemap !== undefined) {
+        registerSitemap(sitemap)
+      }
       if (robots !== undefined) registerRobots(robots, sitemap !== undefined)
       // Same "route registration only works inside this composition scope" reasoning as
       // `pwa`/`assetsDir`/`sitemap`/`robots` above. `createAssetsController` itself IS the
@@ -239,6 +375,7 @@ export function defineSpaceApp(config: SpaceAppConfig): ZanixAppDefinition {
       // A test that needs to call `setup()` more than once gives each call its own
       // `ProgramModule.defineApplication(...)` scope (see `define-space-app.test.tsx`) instead of
       // relying on this line to tolerate a shared one.
+      const { createLogApiController } = await import(LOG_CONTROLLER_SPECIFIER)
       createLogApiController(logApi)
       await setup?.(ctx)
     },

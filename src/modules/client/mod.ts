@@ -10,6 +10,7 @@
  */
 export { readInitialState } from '../render/read-initial-state.ts'
 export { hydrateComets } from './hydrate-comets.ts'
+export { hydrateErrorBoundaries } from './hydrate-error-boundaries.ts'
 export { scheduleCometHydration } from './schedule-comet-hydration.ts'
 export type { CometSchedulingDeps } from './schedule-comet-hydration.ts'
 export { extractFragmentTitle, initOrbit, shouldInterceptNavigation } from './orbit.ts'

@@ -44,18 +44,25 @@ nothing else is stubbed ahead of time:
   during `defineSpaceApp()`'s own `setup(ctx)`; `@Page('products/:id')` is an escape hatch for a
   route outside the file-location convention.
 - ✅ **Layouts, loading and error segments** — a `layout.tsx`/`loading.tsx`/`error.tsx` next to (or
-  above) a `page.tsx` wraps it automatically, nested per directory level. See
-  [`docs/routing.md`](./docs/routing.md#layouts-loading-and-error-segments) for `error.tsx`'s real
-  current limits during server rendering.
+  above) a `page.tsx` wraps it automatically, nested per directory level, recovering client-side via
+  `hydrateErrorBoundaries()` on both renderers. See
+  [`docs/routing.md`](./docs/routing.md#layouts-loading-and-error-segments) for the full recovery
+  contract, including `error.tsx`'s own `reset` behavior.
 - ✅ **Document shell** — a root `routes/layout.tsx` renders `<html>`/`<body>` itself (same contract
   as Next.js's App Router); with none at all, a default spec-valid document wraps the page instead.
   See [`docs/routing.md`](./docs/routing.md#document-shell) for the full contract.
 - ✅ **Not-found page** — `routesDir`'s own `not-found.tsx` renders for any unmatched route, via
   `createNotFoundHandler()`. See [`docs/routing.md`](./docs/routing.md#not-found-page) for the
   opt-in Orbit-fragment behavior.
+- ✅ **`defineSpaceApp({ errorResponse: 'json' })`** — an app that never wants to serve a rendered
+  HTML page for its own built-in not-found/error fallback, for a pure API/backend built on
+  `@zanix/space` purely for its routing. See
+  [`docs/routing.md`](./docs/routing.md#serving-json-instead-of-a-document--definespaceapp-errorresponse-json-)
+  for the full contract.
 - ✅ **Static `redirect`/`cacheControl`** on `SpacePageController` — `redirect` runs before
   `loader`/`component`; `cacheControl` computes an automatic `ETag` from the loader's own data
-  (never buffers the stream), with `If-None-Match` support.
+  (never buffers the stream), with `If-None-Match` support. See
+  [`docs/routing.md`](./docs/routing.md#redirecting-a-page) for the full `redirect` contract.
 - ✅ **Selective hydration ("Comets")** — a `'use comet'`-marked file gets its own build output
   chunk (`cometPlugin`), hydratable at the point of use (`<Counter comet="visible" />`). See
   [`docs/comets.md`](./docs/comets.md) for the full flow.
@@ -103,6 +110,10 @@ nothing else is stubbed ahead of time:
   instead of scattering multiple ad hoc globals.
 - **Composes into the same Zanix App model as the backend**: embedded or remote, with no separate
   activation mechanism of its own — `@zanix/server` is the only thing that calls `Deno.serve()`.
+  Running several Zanix Apps behind one origin (only one can own the whole domain — see
+  `@zanix/app`'s own
+  [Gateway](https://github.com/zanix-io/app/blob/master/docs/distributed-runtime.md#gateway-runtime))
+  is that same package's concern, not a separate mechanism this one adds.
 
 ## Installation
 
@@ -193,7 +204,7 @@ directive, a named export, and its own `import.meta.url`:
 ```tsx
 // comets/counter.tsx
 'use comet'
-import { defineComet } from '@zanix/space'
+import { defineComet } from '@zanix/space/comet'
 
 export function Counter({ initial }: { initial: number }) {
   const [count, setCount] = useState(initial)
@@ -215,8 +226,11 @@ cross-navigation state persistence (`persist`), and the build-time `'server-only
 
 ### Client-side navigation ("Orbit")
 
+Already on by default — every app's auto-generated client entry calls `initOrbit()` alongside
+`hydrateComets()`, no configuration needed:
+
 ```ts
-// client entry — call once, alongside hydrateComets()
+// your own client entry, only if you set SpaceAppConfig.clientEntry
 import { initOrbit } from '@zanix/space/client'
 
 initOrbit()
@@ -268,11 +282,25 @@ export default defineSpaceApp({ name: 'storefront', messagesDir: './messages' })
 
 ```tsx
 import { loadMessages } from '@zanix/space'
+import { IntlProvider, useIntl } from '@zanix/space-ui'
 
 loader = async (ctx: { params: { lang: string }; population?: string }) => ({
+  lang: ctx.params.lang,
   messages: await loadMessages({ lang: ctx.params.lang, population: ctx.population }),
 })
-component = ({ messages }) => <h1>{messages['home/title']}</h1>
+// NEVER interpolate `messages[key]` directly — once `zanix space build` compiles this app's
+// `messagesDir`, a catalog value is precompiled AST, not a plain string, and rendering it as a
+// JSX child crashes at runtime. Always format through `IntlProvider`/`useIntl` (below), which
+// accepts either shape.
+component = ({ lang, messages }) => (
+  <IntlProvider locale={lang} messages={messages}>
+    <PageContent />
+  </IntlProvider>
+)
+function PageContent() {
+  const { formatMessage } = useIntl()
+  return <h1>{formatMessage('home/title')}</h1>
+}
 ```
 
 Reads `{messagesDir}/{lang}/index.json` (a base catalog) and, when `population` is given, an
@@ -482,6 +510,8 @@ mandatory default `rateLimitGuard` bounds anonymous write volume. See
 - [`docs/seo.md`](./docs/seo.md) — canonical links, hreflang alternates, `robots.txt`/`sitemap.xml`.
 - [`docs/validation.md`](./docs/validation.md) — build-time document validation and its three
   independent axes (severity, opt-in, strict).
+- [`docs/data-fetching.md`](./docs/data-fetching.md) — REST/GraphQL clients server-side from a
+  `loader`, plain `fetch()` client-side from a Comet, and the CSP `connect-src` grant either needs.
 
 ## Contributing
 

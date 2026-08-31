@@ -28,15 +28,19 @@ import type { LoaderErrorRenderContext } from './loader-error-renderer-registry.
 export function renderLoaderErrorResponse(
   context: LoaderErrorRenderContext,
 ): Promise<Response> {
-  const { ErrorFallback, RootLayout, error, fragmentOnly } = context
+  const { ErrorFallback, RootLayout, error, formattedError, fragmentOnly, params, messages } =
+    context
 
   const Fallback = ErrorFallback as ComponentType<ErrorBoundaryProps>
   // Same no-op `reset` reasoning as React's own counterpart — a fresh server render, not a
   // client-side retry.
+  // `display: contents` comes from `builtin-css.ts`'s own stylesheet rule, targeting this same
+  // `ORBIT_OUTLET_ATTR` selector — never an inline `style` prop here (a strict `style-src` with
+  // no `'unsafe-inline'` silently drops those).
   const outlet = createElement(
     'div',
-    { style: { display: 'contents' }, [ORBIT_OUTLET_ATTR]: '' },
-    createElement(Fallback, { error, reset: () => {} }),
+    { [ORBIT_OUTLET_ATTR]: '' },
+    createElement(Fallback, { error, formattedError, reset: () => {}, params, messages }),
   )
 
   if (fragmentOnly) {

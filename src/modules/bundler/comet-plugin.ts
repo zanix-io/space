@@ -1,8 +1,7 @@
 import type { Plugin } from 'vite'
-import { basename } from '@std/path'
 import type { CometManifest } from '../comets/comet-manifest.ts'
 import { USE_COMET_DIRECTIVE } from './comet-directive.ts'
-import { SERVER_ONLY_DIRECTIVE } from './server-only-directive.ts'
+import { formatServerOnlyViolation, SERVER_ONLY_DIRECTIVE } from './server-only-directive.ts'
 
 // `Plugin` is not re-exported here — same accepted `deno doc --lint` finding, for the same reason,
 // as `spacePlugin`'s own (see that file's own comment): it's a deeply recursive Vite/Rolldown
@@ -12,14 +11,25 @@ import { SERVER_ONLY_DIRECTIVE } from './server-only-directive.ts'
 /** Options for {@linkcode cometPlugin}. */
 export interface CometPluginOptions {
   /**
-   * Absolute paths of comets the caller ALREADY passed as real `rollupOptions.input` entries
-   * (`buildSpaceClient` does this, via `discoverComets`) — this plugin skips its own
-   * `emitFile({ type: 'chunk' })` forcing for exactly these, since a real entry already gets its
-   * own chunk from Rollup with no forcing needed. Confirmed empirically before this option
-   * existed: forcing a chunk for a file that's ALSO a real entry produces a second, duplicate
-   * chunk for the same source — dead weight in the output, never referenced by the manifest
-   * (which only ever points at one of the two). Omit entirely for the common case (a comet only
-   * ever reached transitively, through a page's own static import) — unaffected either way.
+   * Absolute (realpath'd) paths of files the caller ALREADY passed as real `rollupOptions.input`
+   * entries, treated as auto-comets for every purpose this plugin owns — both:
+   *
+   * - Skips this plugin's own `emitFile({ type: 'chunk' })` forcing for exactly these, since a real
+   *   entry already gets its own chunk from Rollup with no forcing needed. Confirmed empirically
+   *   before this option existed: forcing a chunk for a file that's ALSO a real entry produces a
+   *   second, duplicate chunk for the same source — dead weight in the output, never referenced by
+   *   the manifest (which only ever points at one of the two).
+   * - Included in `comets-manifest.json` exactly like a real `'use comet'` file (`generateBundle`
+   *   below writes an entry for every id in `cometSourceIds`, seeded from this option) — the same
+   *   manifest `resolveCometModuleUrl` reads back, generically, for ANY source path, not only ones
+   *   `defineComet` itself wrapped. `buildSpaceClient` passes BOTH `'use comet'`-discovered files
+   *   (`discoverComets`) AND every route's own `error.tsx` here (React only — see that function's
+   *   own doc) precisely to get this for free: an `error.tsx` is never author-marked `'use comet'`
+   *   (it's auto-discovered by the router itself, see `error-boundary-marker.ts`'s own doc), so
+   *   without this it would never enter `cometSourceIds` at all.
+   *
+   * Omit entirely for the common case (every comet only ever reached transitively, through a
+   * page's own static import, and no `error.tsx` in this app) — unaffected either way.
    */
   knownEntryPaths?: Iterable<string>
 }
@@ -116,17 +126,6 @@ async function findChainToComet(
   return null
 }
 
-/** Renders the violation exactly as a developer needs to fix it — the offending Comet first, the
- * `'server-only'` module last, everything in between the real reason it got pulled in. Uses each
- * file's own basename (never the full, often temp-dir-cluttered absolute path) — a chain is only
- * ever a handful of modules deep in practice, so the basenames alone are enough to locate the fix. */
-function formatServerOnlyViolation(chain: string[]): string {
-  const names = chain.map((id) => basename(id))
-  const [head, ...rest] = names
-  const lines = [head, ...rest.map((name, i) => `${'  '.repeat(i + 1)}→ ${name}`)]
-  return `Server-only module imported into client Comet:\n\n${lines.join('\n')}`
-}
-
 /**
  * Finds every file marked `'use comet'` and forces it into its own build output chunk, then writes
  * a manifest (`comets-manifest.json`, in the client build's output directory) correlating each
@@ -169,9 +168,12 @@ function formatServerOnlyViolation(chain: string[]): string {
  * ```
  */
 export function cometPlugin(options: CometPluginOptions = {}): Plugin {
-  const cometSourceIds = new Set<string>()
-  const serverOnlySourceIds = new Set<string>()
   const knownEntryPaths = new Set(options.knownEntryPaths ?? [])
+  // Seeded from `knownEntryPaths` itself — see that option's own doc for why every known entry
+  // (whether a real `'use comet'` file or an auto-comet like `error.tsx`) belongs in the manifest
+  // this plugin writes, not only the ones `transform` below discovers via the directive.
+  const cometSourceIds = new Set<string>(knownEntryPaths)
+  const serverOnlySourceIds = new Set<string>()
 
   return {
     name: 'zanix-space-comets',

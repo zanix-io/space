@@ -6,9 +6,12 @@
  * @module
  */
 
-/** Identifies this Comet's own type — its own source `import.meta.url`, shared by every instance
- * of the same `defineComet`-wrapped component (not a per-render-instance id; hydration never
- * depends on it being unique). */
+/** Identifies this Comet's own type — a hash of its own source `import.meta.url`
+ * (`comet-manifest.ts`'s own `hashSourceKey`/`normalizeSourceKey`, never the raw path itself, which
+ * would leak the server's local filesystem layout into public HTML), shared by every instance of
+ * the same `defineComet`-wrapped component (not a per-render-instance id; hydration never depends
+ * on it being unique — nothing in this package's own client runtime reads this attribute's VALUE
+ * at all today, only its presence, as a boundary selector). */
 export const COMET_ID_ATTR = 'data-comet'
 /** The `CometStrategy` this instance hydrates with. */
 export const COMET_STRATEGY_ATTR = 'data-comet-strategy'

@@ -15,6 +15,7 @@ import {
 import { getThemeResolver, resetThemeResolver } from 'modules/theme/theme-registry.ts'
 import { getPwaConfig, setPwaConfig } from 'modules/pwa/mod.ts'
 import { getActiveRenderer, setActiveRenderer } from 'modules/router/active-renderer.ts'
+import { getRoutesDir, setRoutesDir } from 'modules/router/routes-dir-registry.ts'
 import { getGlobalCssPaths, setGlobalCssPaths } from 'modules/render/css-manifest.ts'
 import {
   getAssetsDirConfig,
@@ -165,6 +166,27 @@ Deno.test('defineSpaceApp: omitting renderer eagerly defaults the active rendere
   setActiveRenderer('preact')
   defineSpaceApp({ name: 'storefront' })
   assertEquals(getActiveRenderer(), 'react')
+})
+
+Deno.test(
+  'defineSpaceApp: forwards routesDir into setRoutesDir, eagerly (not deferred to ' +
+    'setup/activateApps) — an external orchestrator that only imports the manifest (e.g. ' +
+    '`zanix space build`, which never calls activateApps()) must see the real value right after ' +
+    'this call returns',
+  () => {
+    try {
+      defineSpaceApp({ name: 'storefront', routesDir: './src/space/routes' })
+      assertEquals(getRoutesDir(), './src/space/routes')
+    } finally {
+      setRoutesDir('./routes')
+    }
+  },
+)
+
+Deno.test('defineSpaceApp: omitting routesDir eagerly defaults it to ./routes', () => {
+  setRoutesDir('./src/space/routes')
+  defineSpaceApp({ name: 'storefront' })
+  assertEquals(getRoutesDir(), './routes')
 })
 
 Deno.test(

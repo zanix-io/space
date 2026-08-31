@@ -7,8 +7,12 @@ This is the full reference the README's
 
 ### Turning it on
 
+Already on by default — the auto-generated client entry every app gets (see
+[`docs/comets.md`](./comets.md)) calls `initOrbit()` alongside `hydrateComets()`, with no
+configuration needed. Only relevant if you've set `SpaceAppConfig.clientEntry` to your own file:
+
 ```ts
-// client entry — call once, alongside hydrateComets()
+// your own client entry, if you configured one — call once, alongside hydrateComets()
 import { initOrbit } from '@zanix/space/client'
 
 initOrbit()

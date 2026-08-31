@@ -40,3 +40,46 @@ export function resetMessagesDir(): void {
 export function getMessagesDir(): string | string[] | undefined {
   return messagesDir
 }
+
+/**
+ * The catalog folder name (`{messagesDir}/{lang}/...`) an app with `messagesDir` but no real
+ * language routing at all should use for its ONE implicit locale — never a real language code like
+ * `'en'`, which would falsely imply the catalog is specifically English rather than "whatever this
+ * app's only content variant happens to be." `loadMessages` itself never reads this constant (it
+ * has no opinion on what `lang` means — any string is a valid catalog folder name to it); it exists
+ * purely so every CALLER resolving a single-locale app's implicit catalog — `@zanix/cli`'s own
+ * `--template population` (no `[lang]` routing) and this package's own `error.tsx`/`not-found.tsx`
+ * fallback (`composeSegments`/`not-found-handler.ts`, when a segment/request has no real `lang` to
+ * read) — agrees on the same folder name, instead of each independently hardcoding `'en'` and
+ * silently drifting apart the moment one of them changes.
+ */
+export const DEFAULT_IMPLICIT_LANG = 'default'
+
+/** Mirrors `SpaceAppConfig.clientBuildDir`'s own value — set eagerly, alongside `messagesDir`
+ * itself, by `defineSpaceApp()` (see `define-space-app.ts`'s own comment at that call site for why
+ * this is a plain copy rather than a shared registry: `clientBuildDir`'s own consumption inside
+ * `setup()` is a separate, established code path this deliberately doesn't touch). A SEPARATE
+ * module-level value from `clientBuildDir` itself, not a re-export of it — kept local to this
+ * module so `loadMessages()`'s own resolution logic (`load-messages.ts`) never needs to import
+ * anything client-build-specific. */
+let messagesBuildDir: string | undefined
+
+/** Set once, eagerly, by `defineSpaceApp()` itself — never called directly by application code. */
+export function setMessagesBuildDir(dir: string): void {
+  messagesBuildDir = dir
+}
+
+/** Test-only escape hatch — mirrors `resetMessagesDir`'s own reasoning. Not exported from this
+ * package's public entry points. */
+export function resetMessagesBuildDir(): void {
+  messagesBuildDir = undefined
+}
+
+/** Where `zanix space build` compiled this app's `messagesDir` catalogs to (mirrors
+ * `clientBuildDir`), or `undefined` if this app never declared `clientBuildDir`. Read by
+ * `loadMessages()`'s own `resolve()` to decide whether to read compiled output instead of live
+ * source — see that function's own doc for the exact `!isDevClientEnabled()` gating, identical to
+ * `clientBuildDir`'s own dev-skip condition. */
+export function getMessagesBuildDir(): string | undefined {
+  return messagesBuildDir
+}

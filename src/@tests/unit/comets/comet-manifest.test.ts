@@ -1,11 +1,36 @@
-import { assertEquals, assertRejects } from '@std/assert'
+import { assert, assertEquals, assertFalse, assertRejects } from '@std/assert'
 import { InternalError } from '@zanix/errors'
 import {
+  hashSourceKey,
   loadCometManifest,
   normalizeSourceKey,
   resolveCometModuleUrl,
   setCometManifest,
 } from 'modules/comets/comet-manifest.ts'
+
+Deno.test('hashSourceKey: deterministic — the same input always hashes the same', () => {
+  const key = '/Users/someone/project/comets/counter.tsx'
+  assertEquals(hashSourceKey(key), hashSourceKey(key))
+})
+
+Deno.test('hashSourceKey: a different input hashes differently', () => {
+  const a = hashSourceKey('/Users/someone/project/comets/counter.tsx')
+  const b = hashSourceKey('/Users/someone/project/comets/widget.tsx')
+  assert(a !== b)
+})
+
+Deno.test('hashSourceKey: never contains the original path — the entire point of hashing it', () => {
+  const key = '/Users/someone/project/comets/counter.tsx'
+  const hash = hashSourceKey(key)
+  assertFalse(hash.includes('someone'))
+  assertFalse(hash.includes('counter'))
+})
+
+Deno.test('hashSourceKey: always an 8-character lowercase hex string', () => {
+  const hash = hashSourceKey('/Users/someone/project/comets/counter.tsx')
+  assertEquals(hash.length, 8)
+  assert(/^[0-9a-f]{8}$/.test(hash), hash)
+})
 
 Deno.test('normalizeSourceKey: a path that is not a file:// url passes through unchanged', () => {
   assertEquals(normalizeSourceKey('/already/plain/path.tsx'), '/already/plain/path.tsx')
@@ -23,7 +48,9 @@ Deno.test('resolveCometModuleUrl: with no manifest, strips the project root pref
 })
 
 Deno.test(
-  'resolveCometModuleUrl: with no manifest, falls back to the raw url if it is outside the root',
+  "resolveCometModuleUrl: with no manifest, a source OUTSIDE the root resolves via Vite's own " +
+    '/@fs/ convention — confirmed as a real, reproduced 404 before this branch existed (this ' +
+    "package's own built-in DefaultErrorView, which lives outside an app's own devRoot)",
   () => {
     setCometManifest(undefined)
 
@@ -32,7 +59,7 @@ Deno.test(
       '/project',
     )
 
-    assertEquals(url, 'file:///elsewhere/counter.tsx')
+    assertEquals(url, '/@fs/elsewhere/counter.tsx')
   },
 )
 

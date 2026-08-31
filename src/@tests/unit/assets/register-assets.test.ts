@@ -120,6 +120,51 @@ Deno.test(
 )
 
 /**
+ * Regression coverage for the build-output lookup's own conditional-request support: the hash IS
+ * the filename, so a matching `If-None-Match` means the exact same bytes the browser already has,
+ * no exception — confirmed with the SAME convention `space-page-controller.ts`'s own
+ * `if-none-match` check already establishes (a plain string-equality match against the literal
+ * `etag` header value). Checked BEFORE `Deno.readFile` in the real route, so a cache hit skips the
+ * disk read too — proven here by pointing `path` at a file that was never even created: a 304
+ * response never touches the filesystem at all, so a missing file changes nothing about it.
+ */
+Deno.test(
+  'registerAssets: serve() answers a matching If-None-Match with 304 (never touching disk), and ' +
+    'a non-matching one with the normal 200 + body',
+  async () => {
+    const buildOutputDir = await Deno.makeTempDir({ dir: TMP_ROOT })
+    try {
+      loadAssetsBuildOutput(buildOutputDir)
+      const etag = '"never-created.svg"'
+
+      const hitCtx = mockHandlerContext({
+        req: new Request('http://localhost/', { headers: { 'if-none-match': etag } }),
+        payload: { params: { path: 'never-created.svg' }, search: {}, body: undefined },
+      })
+      const hitRes = await new AssetsRoute(hitCtx).serve(hitCtx)
+      assertEquals(hitRes.status, 304)
+      assertEquals(hitRes.headers.get('etag'), etag)
+      assertEquals(hitRes.headers.get('cache-control'), 'public, max-age=31536000, immutable')
+      assertEquals(await hitRes.text(), '')
+
+      await touch(join(buildOutputDir, 'assets', 'real.svg'), '<svg>real</svg>')
+      const missCtx = mockHandlerContext({
+        req: new Request('http://localhost/', { headers: { 'if-none-match': '"stale-value"' } }),
+        payload: { params: { path: 'real.svg' }, search: {}, body: undefined },
+      })
+      const missRes = await new AssetsRoute(missCtx).serve(missCtx)
+      assertEquals(missRes.status, 200)
+      assertEquals(missRes.headers.get('etag'), '"real.svg"')
+      assertEquals(await missRes.text(), '<svg>real</svg>')
+    } finally {
+      resetResolvedAssets()
+      setAssetsManifestState(undefined)
+      await Deno.remove(buildOutputDir, { recursive: true })
+    }
+  },
+)
+
+/**
  * Regression coverage for the LIVE-scanned (`getAssetPath`) lookup's own catch block — the
  * "build/deploy skew" graceful degradation this route's own doc describes: a path resolved at
  * `setup()` time (real, in the `resolvedAssets` map) that no longer exists on disk by the time a

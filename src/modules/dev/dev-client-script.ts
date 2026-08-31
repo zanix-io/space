@@ -19,7 +19,7 @@ export interface DevClientScriptOptions {
  * production response (`isDevClientEnabled()` false, the only state a plain `deno run mod.ts` boot
  * ever leaves it in) carries none of this. Connects to {@linkcode SpaceDevSocket} (same-origin,
  * `location.host`, computed in the browser so no server-resolved URL needs to be embedded) and
- * handles two notification kinds over that one connection:
+ * handles four notification kinds over that one connection:
  *
  * - `ssr-module-changed`: a full `location.reload()` when `affectedRoutes` includes this page's own
  *   `routeFilePath` — the same choice Fresh, Astro, and Hono's own dev-server integrations
@@ -38,13 +38,29 @@ export interface DevClientScriptOptions {
  *   `devClient` on the response (`render-page-react.tsx`/`render-page-preact.ts` both already do,
  *   unconditionally, whenever `isDevClientEnabled()` — this was never renderer-specific) and (b)
  *   serve `createViteHotClientHandler()`'s own response for `/@vite/client`, ahead of
- *   `createDevAssetHandler`'s generic forwarding. A page whose orchestrator hasn't wired (b) yet has
- *   no such global — this branch is then a deliberate no-op there (`typeof` guard, never a
- *   `ReferenceError`), the exact same "does nothing" outcome a Comet-only edit already produced
- *   before this message kind existed. See `dev-vite-hot-client.ts`'s own doc for what that function
- *   actually does (a cache-busted re-import + whichever renderer's own real `accept()` callback was
- *   registered for that module — React's own `RefreshRuntime`-driven one or Preact's own
- *   `@prefresh/vite`-driven one, this script never distinguishes between them).
+ *   `createDevAssetHandler`'s generic forwarding. Reloads (`typeof` guard, never a `ReferenceError`)
+ *   rather than silently doing nothing when that global isn't defined yet — a real, reproduced race
+ *   confirmed live: this dev socket's own connection can finish (and start relaying an edit) before
+ *   a Comet's own dynamic `import()`, requested concurrently with several of its own static imports
+ *   including `/@vite/client`, has resolved that one specifically. See `dev-vite-hot-client.ts`'s
+ *   own doc for what `__spaceApplyClientUpdate` actually does once defined (a cache-busted
+ *   re-import + whichever renderer's own real `accept()` callback was registered for that module —
+ *   React's own `RefreshRuntime`-driven one or Preact's own `@prefresh/vite`-driven one, this script
+ *   never distinguishes between them).
+ * - `full-reload`: an unconditional `location.reload()` — relays Vite's OWN internal
+ *   `environment.hot.send({ type: 'full-reload' })` calls (`dev-engine.ts`'s own
+ *   `onFullReloadNeeded` option/`broadcastFullReloadNeeded`), which this engine would otherwise
+ *   never deliver to a browser at all (see that option's own doc for the real incident this
+ *   closes — a mid-session dependency re-optimize silently splitting one package into two module
+ *   instances for the same page). No `urls`/`affectedRoutes` to compare against, unlike the other
+ *   three kinds — this is a Vite-internal recovery signal, not tied to any specific file.
+ *
+ * Deliberately does NOT try to recover from `socket.onclose` (e.g. `@zanix/cli`'s own
+ * `zanix space dev` restarting its whole process on a `space.app.ts` change): a reconnect-then-poll
+ * mechanism was tried and pulled back out — it only ever recovered the FIRST such restart
+ * reliably, not a second one, for reasons that didn't reproduce consistently enough to fix with
+ * confidence. A person notices the dead connection and reloads manually instead — worse UX for
+ * that one case, but predictable, unlike a "mostly works" auto-reload.
  *
  * A pure function — no I/O of its own, easy to unit-test (`new Function(source)` confirms valid
  * JS syntax, the same technique `buildServiceWorkerSource` already uses).
@@ -91,7 +107,20 @@ export function buildDevClientScript(
     // would throw a ReferenceError on a page whose dev-server orchestrator hasn't served
     // dev-vite-hot-client.ts's own /@vite/client replacement yet -- true for either renderer until
     // that's wired.
-    if (typeof __spaceApplyClientUpdate !== 'function') return
+    //
+    // Reloads, rather than silently doing nothing, when it's still undefined -- confirmed as a
+    // real, reproduced race: right after a fresh page load, this dev socket's own WebSocket can
+    // finish connecting (and start relaying a 'client-module-changed' message for an edit) BEFORE
+    // the browser's own dynamic import() of a Comet's module has fully resolved /@vite/client (one
+    // of that Comet's own static imports, requested concurrently with several others) -- the exact
+    // "never silently stuck on stale code" philosophy dev-vite-hot-client.ts's own doc already
+    // establishes for its two other failure modes, extended to this caller's own check instead of
+    // only guarding what happens once the function IS defined.
+    if (typeof __spaceApplyClientUpdate !== 'function') {
+      console.warn('[space] dev client not ready yet, reloading');
+      location.reload();
+      return;
+    }
     var urls = message.urls || []
     for (var i = 0; i < urls.length; i++) {
       __spaceApplyClientUpdate(urls[i])
@@ -108,6 +137,7 @@ export function buildDevClientScript(
     if (message.kind === 'ssr-module-changed') handleSsrModuleChanged(message)
     else if (message.kind === 'client-css-changed') handleClientCssChanged(message)
     else if (message.kind === 'client-module-changed') handleClientModuleChanged(message)
+    else if (message.kind === 'full-reload') location.reload()
   }
 })();
 `.trim()

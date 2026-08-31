@@ -27,10 +27,15 @@ export default defineSpaceApp({
 // main.ts — after activateApps(), before bootstrapServers(), same convention as loadCssManifest
 import { loadPwaBuildOutput } from '@zanix/space'
 
-loadPwaBuildOutput('./dist/client') // the client build's own output dir — WHERE the build wrote
+loadPwaBuildOutput('./.dist/client') // the client build's own output dir — WHERE the build wrote
 // the generated icons/sw.js, never author configuration, so it's never a `defineSpaceApp({ pwa })`
 // field
 ```
+
+Set `defineSpaceApp({ clientBuildDir: './.dist/client' })` instead to skip this call (and every
+other production manifest load — Comets, client entry, CSS, assets, sitemap): `setup()` calls
+`loadPwaBuildOutput` automatically from there, in production only, right before `registerPwa` reads
+it back — see `SpaceAppConfig.clientBuildDir`'s own doc for the exact ordering.
 
 That's the whole setup — **no `vite.config.ts` involved**: `zanix space build`/`zanix space dev`
 never read one at all (`configFile: false` in both `buildSpaceClient` and the dev engine; every

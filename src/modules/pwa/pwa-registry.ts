@@ -35,7 +35,7 @@ export function getPwaConfig(): PwaConfig | undefined {
  * `resolvePwaHead` below omits the service-worker `<link>` — `/manifest.webmanifest` alone still
  * works either way, since it needs no built file at all.
  *
- * @param dir - The client build's own output directory (e.g. `'./dist/client'`).
+ * @param dir - The client build's own output directory (e.g. `'./.dist/client'`).
  */
 export function loadPwaBuildOutput(dir: string): void {
   pwaBuildOutputDir = dir

@@ -257,12 +257,13 @@ Deno.test(
 )
 
 Deno.test(
-  'buildDevClientScript: client-module-changed is a silent no-op when __spaceApplyClientUpdate ' +
-    'was never declared (a page whose orchestrator has not yet served dev-vite-hot-client.ts)',
+  'buildDevClientScript: client-module-changed reloads, rather than silently doing nothing, ' +
+    'when __spaceApplyClientUpdate was never declared (e.g. a real, reproduced race — this dev ' +
+    "socket's own connection finishing before a Comet's own /@vite/client import resolves)",
   () => {
     // No `spaceApplyClientUpdate` argument at all here — `__spaceApplyClientUpdate` stays a truly
-    // undeclared identifier for the executed script, exactly like a page whose orchestrator hasn't
-    // wired `createViteHotClientHandler()` yet. Must not throw.
+    // undeclared identifier for the executed script, exactly like the race this guards against.
+    // Must not throw.
     const run = runDevClientScript({}, httpLocation)
 
     run.socket.trigger(
@@ -272,6 +273,18 @@ Deno.test(
       }),
     )
 
-    assert(!run.reloaded)
+    assert(run.reloaded)
+  },
+)
+
+Deno.test(
+  'buildDevClientScript: full-reload reloads unconditionally, no urls/affectedRoutes to compare ' +
+    "against — relays Vite's own internal dep-optimizer recovery signal",
+  () => {
+    const run = runDevClientScript({}, httpLocation)
+
+    run.socket.trigger(JSON.stringify({ kind: 'full-reload' }))
+
+    assert(run.reloaded)
   },
 )

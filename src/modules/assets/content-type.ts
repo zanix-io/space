@@ -5,9 +5,20 @@
  * default — never guessed as `text/*`, which could enable content-sniffing in a browser) covers
  * anything not listed here.
  *
+ * `.js`/`.mjs`/`.css` are included even though they predate this table's original "images/fonts"
+ * scope — this SAME route also serves the client build's own hashed output once
+ * `loadAssetsBuildOutput` is loaded (see `register-assets.ts`'s own doc), and a browser refuses to
+ * execute a `<script type="module">` served as `application/octet-stream` at all (a strict MIME
+ * check, not a sniffing concern) — confirmed as a real production failure, not theoretical.
+ * `text/javascript` is the modern, IANA-registered value (not the legacy `application/javascript`
+ * some older tooling still emits).
+ *
  * @module
  */
 const CONTENT_TYPES: Record<string, string> = {
+  '.js': 'text/javascript',
+  '.mjs': 'text/javascript',
+  '.css': 'text/css',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',

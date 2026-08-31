@@ -29,6 +29,8 @@ Deno.test(
         ErrorFallback,
         RootLayout: undefined,
         error: new Error('should never be shown to an end user'),
+        formattedError: {},
+        params: {},
         fragmentOnly: false,
       })
       const html = await response.text()

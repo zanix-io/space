@@ -458,7 +458,14 @@ export async function createSpaceDevEngine(
       fs: { strict: false },
       watch: {
         usePolling: true,
-        interval: 100,
+        // 300ms, not chokidar's own 100ms default — real polling-fallback watchers elsewhere in
+        // the ecosystem (webpack, nodemon) default considerably higher (1000ms) specifically
+        // because polling is understood to cost more than native fs events; 300ms keeps a saved
+        // file feeling instant to a human (well under normal edit-save-observe perception) while
+        // cutting real `fs.stat` volume 3x against every watched file, every tick, forever — real
+        // relief for exactly the kind of main-thread contention documented below, on top of (not
+        // instead of) excluding known-unbounded output directories.
+        interval: 300,
         // Every one of these mirrors a directory `zanix new`'s own generated `.gitignore`
         // (`ignore.base`, `@zanix/cli`) already calls out as build/report output, never a real
         // source file a route/layout/Comet could live in — `coverage/` is the real, confirmed
@@ -466,7 +473,7 @@ export async function createSpaceDevEngine(
         // thousands of small HTML/JSON files there (`deno coverage`'s own per-source-line report),
         // and this watcher previously had no entry for it. `usePolling` (this option's own doc,
         // above) means every one of those files gets a real `fs.stat` every `interval` — thousands
-        // of them, every 100ms, forever, on the SAME single-threaded process this whole dev server
+        // of them, every tick, forever, on the SAME single-threaded process this whole dev server
         // (and the native `zanix space dev` process hosting it) runs on. That's enough sustained
         // main-thread contention to starve out unrelated `await`s queued behind it: confirmed by
         // reproducing a real login POST against `console`'s own `csrfGuard()`-protected page —

@@ -39,9 +39,9 @@ const isRouteEntry = (id: string) => id.endsWith('/page.tsx') || id.endsWith('pa
 
 /**
  * Polls `check` until it returns a truthy value or `timeoutMs` elapses — real file-watcher
- * propagation (`usePolling`, 100ms interval, per `createSpaceDevEngine`'s own doc) is
- * inherently async and not on a fixed schedule, so a fixed `sleep` would be either flaky (too
- * short) or needlessly slow (too long) depending on the machine running the test.
+ * propagation (`usePolling`, per `createSpaceDevEngine`'s own doc) is inherently async and not
+ * on a fixed schedule, so a fixed `sleep` would be either flaky (too short) or needlessly slow
+ * (too long) depending on the machine running the test.
  */
 async function waitUntil<T>(
   check: () => T | undefined | Promise<T | undefined>,
@@ -1259,7 +1259,7 @@ Deno.test(
 Deno.test(
   'createSpaceDevEngine: a large coverage/ report tree at the project root never slows the ' +
     "file watcher down — a real, confirmed incident: `usePolling` (this engine's own default, " +
-    'see its own doc) means every watched file gets a real `fs.stat` every 100ms, and a project ' +
+    'see its own doc) means every watched file gets a real `fs.stat` every `interval`, and a project ' +
     'that has ever run `deno test --coverage` leaves thousands of small report files there, none ' +
     'of them a real route/Comet source file. Boot completing quickly alone would not catch a ' +
     'regression of the underlying `ignored` glob list (a slow but still-under-the-bound boot is a ' +

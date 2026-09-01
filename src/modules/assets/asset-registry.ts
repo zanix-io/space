@@ -20,9 +20,9 @@ let mediaConfig: MediaOptimizeOptions | undefined
  * `renderer` — see `defineSpaceApp`'s own doc), unlike {@linkcode setResolvedAssets} below (which
  * still only runs inside `setup()`, since scanning the directory is real, async filesystem work).
  * This is what lets `buildSpaceClient()` learn WHICH directories to hash during `zanix space build`
- * without needing `activateApps()` to have run first — that CLI action never calls it (same real
- * gap `getActiveRenderer()`'s own doc already found and fixed for `renderer`; `assetsDir` had the
- * identical gap until this was added).
+ * without needing `activateApps()` to have run first — that CLI action never calls it (the same
+ * class of gap `getActiveRenderer()`'s own doc already covers for `renderer`, applying identically
+ * to `assetsDir` here).
  */
 export function setAssetsDirConfig(dirs: string | string[]): void {
   assetsDirConfig = dirs

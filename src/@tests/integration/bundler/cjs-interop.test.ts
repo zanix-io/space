@@ -189,6 +189,105 @@ Deno.test(
 )
 
 Deno.test(
+  "wrapCjsIfNeeded: a relatively-required .json file (require('../package.json'), the real shape " +
+    "mongoose's own lib/mongoose.js uses) is wrapped as a real assignment, never as raw JSON text " +
+    'sitting in statement position',
+  async () => {
+    await withTempProject(
+      {
+        'package.json': `{\n  "name": "fake-pkg",\n  "version": "1.2.3"\n}\n`,
+        'entry.js': `const pkg = require('./package.json')\nmodule.exports = pkg.version\n`,
+      },
+      async (root) => {
+        const entryId = fileUrlFor(root, 'entry.js')
+        const code = await Deno.readTextFile(join(root, 'entry.js'))
+        const result = await wrapCjsIfNeeded(code, entryId, root)
+        assert(result, 'expected a real CJS bundle')
+        // The real bug this locks in: before the fix, a required `.json` file's raw content was
+        // wrapped as `function(module, exports) {\nconst require = __cjsRequire__\n{"name": ...}\n}`
+        // — a bare object literal in statement position, right after a `const` declaration with no
+        // separator between them. `new Function` is the actual proof that matters: a real syntax
+        // error there throws here too, the same way it crashed a real `zanix space dev` run against
+        // mongoose. `export {}` (ESM syntax) is stripped first since `new Function` parses as a
+        // plain script, not a module.
+        const script = result.code.replace('export {}', '')
+        const parses = () => new Function(script)
+        parses() // throws SyntaxError if the bug regresses — the actual assertion.
+        assert(
+          result.code.includes('module.exports = {'),
+          `expected the .json file's factory to assign its content, got: ${result.code}`,
+        )
+      },
+    )
+  },
+)
+
+Deno.test(
+  'wrapCjsIfNeeded: a bare require() for a genuinely OPTIONAL native dependency that fails to ' +
+    "resolve at all at runtime (mongoose's own real require('kerberos') shape, always wrapped in " +
+    "its own try/catch) does not crash the whole bundle's top-level evaluation — the ORIGINAL " +
+    'try/catch still catches it, since the failure is deferred to the exact __bareRequire__() ' +
+    'call site the require() text was rewritten to, inside whatever try/catch already wraps it',
+  async () => {
+    await withTempProject(
+      {
+        'entry.js': [
+          'let hasOptionalDep',
+          'try {',
+          "  hasOptionalDep = !!require('missing-optional-native-dep')",
+          '} catch (e) {',
+          '  hasOptionalDep = false',
+          '}',
+          'module.exports = { hasOptionalDep }',
+          '',
+        ].join('\n'),
+      },
+      async (root) => {
+        const entryId = fileUrlFor(root, 'entry.js')
+        const code = await Deno.readTextFile(join(root, 'entry.js'))
+        const result = await wrapCjsIfNeeded(code, entryId, root)
+        assert(result, 'expected a real CJS bundle')
+
+        // Real EXECUTION, not just a syntax check (unlike the .json test above) — the property
+        // under test is runtime behavior, not parseability. Mocks `__vite_ssr_import__` to reject
+        // exactly the way a genuinely-missing npm package would at real runtime, wraps the bundle
+        // body in an async IIFE (the same shape `RealImportEvaluator.runInlinedModule`'s own
+        // production wrapping uses, just inlined here instead of written to a temp `.ts` file), and
+        // confirms the WHOLE bundle's own top-level evaluation completes successfully: a rejected
+        // `await __vite_ssr_import__(...)` at this bundle's own top level must never throw straight
+        // out of this `run(...)` call without ever reaching the ORIGINAL `try/catch` this test's
+        // own fixture wrote around its `require(...)` call.
+        const script = result.code.replace('export {}', '')
+        const exportedNames: string[] = []
+        const exportedGetters: Record<string, () => unknown> = {}
+        const run = new Function(
+          '__vite_ssr_import__',
+          '__vite_ssr_exportName__',
+          `return (async () => {\n${script}\n})()`,
+        )
+        await run(
+          (spec: string) => Promise.reject(new Error(`Cannot find module '${spec}'`)),
+          (name: string, getter: () => unknown) => {
+            exportedNames.push(name)
+            exportedGetters[name] = getter
+          },
+        )
+        assert(
+          exportedNames.includes('hasOptionalDep'),
+          `expected a real export from the completed bundle, got: ${result.code}`,
+        )
+        assertEquals(
+          exportedGetters.hasOptionalDep(),
+          false,
+          "expected the ORIGINAL catch block's own fallback value, proving the deferred error " +
+            'was caught exactly where the source code already expected it to be',
+        )
+      },
+    )
+  },
+)
+
+Deno.test(
   'denoOnLoadCjsInterop: returns null outside the ssr environment, without ever calling wrapCjsIfNeeded',
   async () => {
     await withTempProject({}, async (root) => {
@@ -218,6 +317,167 @@ Deno.test(
         } as unknown as LoadContext)
         assert(result, 'expected wrapCjsIfNeeded to produce a real bundle')
         assert(result.code.includes('SSR_DELEGATE_VALUE'))
+      },
+    )
+  },
+)
+
+// The three regression tests below reproduce the exact real, confirmed shape of TWO genuine
+// `zanix space dev` crashes (`console`/`mongoose`/`mongodb`, 2026-08-31), both the same underlying
+// cause: a package's own CJS source `require()`s something in a DIFFERENT package that the
+// CONSUMING project's own top-level import map never declares directly — only transitively, the
+// same way `console` never declares `mongodb` itself, only through `mongoose`. Confirmed for BOTH
+// shapes real `mongoose` source takes: a SUBPATH into `mongodb`'s internals
+// (`require('mongodb/lib/bulk/common')`) AND `mongodb`'s own bare PACKAGE ROOT
+// (`require('mongodb')`) — an earlier fix version only caught the first, gated on whether the
+// specifier had a subpath at all, a narrower heuristic than the real distinction (see
+// `bareSpecifierResolvesAtTopLevel`'s own doc in `cjs-interop.ts`). `resolveBareSpecifierCanonically`
+// (`bare-specifier-resolve.ts`) only ever resolves a bare specifier WITHOUT a real referrer for any
+// `node_modules`-rooted importer (deliberate, for an unrelated module-identity asymmetry — see that
+// file's own doc) — which fails outright for anything the consuming project's own top-level import
+// map doesn't declare directly, falling back to Vite's own SSR "bare string + known importer" fast
+// path, which resolves it as an EXTERNAL module, entirely bypassing this file's own CJS wrapping —
+// the real, confirmed cause of `ReferenceError: exports is not defined`. Own temp `deno.json` (not
+// `withTempProject`'s flat, config-less files) since real import-map `imports`/`scopes` entries are
+// what this fix's own detection needs to resolve through — `scopes`, not a top-level `imports`
+// entry, is what reproduces "resolvable only relative to the requiring package's own directory,
+// never from the consuming project's own top level" faithfully: a plain top-level `imports` entry
+// (an EXACT-match key, not a package with real subpath expansion) resolves identically with or
+// without a referrer, so it can't reproduce the asymmetry this fix closes at all.
+async function withTempConfiguredProject(
+  files: Record<string, string>,
+  imports: Record<string, string>,
+  run: (root: string) => Promise<void>,
+  scopes?: Record<string, Record<string, string>>,
+): Promise<void> {
+  const root = await Deno.makeTempDir({ dir: TMP_ROOT })
+  try {
+    const config: Record<string, unknown> = { imports }
+    if (scopes) config.scopes = scopes
+    await Deno.writeTextFile(join(root, 'deno.json'), JSON.stringify(config))
+    await Promise.all(
+      Object.entries(files).map(async ([name, content]) => {
+        const filePath = join(root, name)
+        await Deno.mkdir(join(filePath, '..'), { recursive: true })
+        await Deno.writeTextFile(filePath, content)
+      }),
+    )
+    await run(root)
+  } finally {
+    await Deno.remove(root, { recursive: true })
+  }
+}
+
+Deno.test(
+  'wrapCjsIfNeeded: a bare require() with a SUBPATH into another package, resolvable only via a ' +
+    "SCOPED entry relative to the requiring file's own directory — never the consuming project's " +
+    "own top level (mongoose's own real require('mongodb/lib/bulk/common') shape) — is inlined " +
+    'exactly like a relative require, never left on the __bareRequire__/__vite_ssr_import__ ' +
+    'external path',
+  async () => {
+    await withTempConfiguredProject(
+      {
+        'heavy-pkg/index.js': `module.exports = 'HEAVY_PKG_ROOT'\n`,
+        'heavy-pkg/lib/deep.js': `module.exports = 'HEAVY_PKG_SUBPATH_VALUE'\n`,
+        // Lives INSIDE heavy-pkg's own directory — mirroring mongoose's own
+        // lib/drivers/node-mongodb-native/bulkWriteResult.js requiring straight into mongodb's own
+        // internals, never the consuming project's own top-level source.
+        'heavy-pkg/entry.js': `module.exports = require('heavy-pkg/lib/deep')\n`,
+      },
+      // Deliberately does NOT declare 'heavy-pkg/lib/deep' here — only the scope below does.
+      { 'heavy-pkg': './heavy-pkg/index.js' },
+      async (root) => {
+        const entryId = fileUrlFor(root, 'heavy-pkg/entry.js')
+        const code = await Deno.readTextFile(join(root, 'heavy-pkg/entry.js'))
+        const result = await wrapCjsIfNeeded(code, entryId, root)
+        assert(result, 'expected a real CJS bundle')
+        assert(
+          result.code.includes('HEAVY_PKG_SUBPATH_VALUE'),
+          `expected the subpath's own factory to be inlined, got: ${result.code}`,
+        )
+        assertFalse(
+          result.code.includes('__vite_ssr_import__("heavy-pkg/lib/deep"'),
+          'a subpath require must never reach the external __vite_ssr_import__ path — that path ' +
+            'is exactly what reaches Vite\'s "bare string + known importer" fast path and ' +
+            `externalizes the module instead of wrapping it, got: ${result.code}`,
+        )
+        assertFalse(
+          result.code.includes('__bareRequire__("heavy-pkg/lib/deep")'),
+          `expected __cjsRequire__ (inlined), never __bareRequire__, got: ${result.code}`,
+        )
+      },
+      // Scoped to heavy-pkg's own directory — resolvable ONLY relative to a referrer that falls
+      // under this prefix, never from the top-level `imports` map above (confirms the fix's real
+      // criterion is "resolves with a referrer", not merely "has a subpath").
+      { './heavy-pkg/': { 'heavy-pkg/lib/deep': './heavy-pkg/lib/deep.js' } },
+    )
+  },
+)
+
+Deno.test(
+  "wrapCjsIfNeeded: a bare require() of ANOTHER package's own PUBLIC ROOT (no subpath), " +
+    "resolvable only via a SCOPED entry relative to the requiring file's own directory — never " +
+    "the consuming project's own top level (mongoose's own real require('mongodb') shape, " +
+    'confirmed to crash identically to the subpath case above) — is ALSO inlined, never left on ' +
+    'the external path. The earlier, narrower "has a subpath" heuristic missed this exact case.',
+  async () => {
+    await withTempConfiguredProject(
+      {
+        'other-pkg/index.js': `module.exports = 'OTHER_PKG_ROOT_VALUE'\n`,
+        // Lives INSIDE heavy-pkg's own directory, same shape as the subpath test above — mirroring
+        // mongoose's own source requiring mongodb's bare package root, never declared at
+        // console's own top level either.
+        'heavy-pkg/entry.js': `module.exports = require('other-pkg')\n`,
+      },
+      // Deliberately does NOT declare 'other-pkg' here — only the scope below does.
+      {},
+      async (root) => {
+        const entryId = fileUrlFor(root, 'heavy-pkg/entry.js')
+        const code = await Deno.readTextFile(join(root, 'heavy-pkg/entry.js'))
+        const result = await wrapCjsIfNeeded(code, entryId, root)
+        assert(result, 'expected a real CJS bundle')
+        assert(
+          result.code.includes('OTHER_PKG_ROOT_VALUE'),
+          `expected other-pkg's own root factory to be inlined, got: ${result.code}`,
+        )
+        assertFalse(
+          result.code.includes('__vite_ssr_import__("other-pkg"'),
+          'a bare root require unreachable from the top-level import map must never reach the ' +
+            `external __vite_ssr_import__ path, got: ${result.code}`,
+        )
+        assertFalse(
+          result.code.includes('__bareRequire__("other-pkg")'),
+          `expected __cjsRequire__ (inlined), never __bareRequire__, got: ${result.code}`,
+        )
+      },
+      { './heavy-pkg/': { 'other-pkg': './other-pkg/index.js' } },
+    )
+  },
+)
+
+Deno.test(
+  "wrapCjsIfNeeded: a bare require() of a package's own PUBLIC ROOT that DOES resolve via the " +
+    "consuming project's own TOP-LEVEL import map (a real, independently-declared dependency, " +
+    "the react/react-dom singleton shape this file's own header doc describes) still goes " +
+    'through the external __bareRequire__/__vite_ssr_import__ path unchanged — inlining it would ' +
+    "duplicate the module instance a page's own top-level import of the same package already " +
+    'holds.',
+  async () => {
+    await withTempConfiguredProject(
+      {
+        'heavy-pkg/index.js': `module.exports = 'HEAVY_PKG_ROOT'\n`,
+        'entry.js': `module.exports = require('heavy-pkg')\n`,
+      },
+      { 'heavy-pkg': './heavy-pkg/index.js' },
+      async (root) => {
+        const entryId = fileUrlFor(root, 'entry.js')
+        const code = await Deno.readTextFile(join(root, 'entry.js'))
+        const result = await wrapCjsIfNeeded(code, entryId, root)
+        assert(result, 'expected a real CJS bundle')
+        assert(
+          result.code.includes('__bareRequire__("heavy-pkg")'),
+          `expected the package's own root require to stay external (__bareRequire__), got: ${result.code}`,
+        )
       },
     )
   },

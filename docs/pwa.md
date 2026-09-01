@@ -63,7 +63,11 @@ The service worker precaches this app's real, hashed CSS (scanned directly from 
 not read from `cssPlugin`'s own manifest — Rollup gives no ordering guarantee between two
 same-priority plugins) plus the `offlineFallback` route, if set. Fetch handling: network-first for
 navigations (so a live deploy is never masked by a stale cached page), falling back to cache, then
-to the offline fallback; cache-first for everything else.
+to the offline fallback; cache-first for everything else, and — since `install` never precaches the
+JS bundles Vite emits (`client-entry-*.js` and any chunk), only CSS — a same-origin miss is written
+into the same cache the first time it's actually fetched, so this app's own hydration bundle still
+survives a later fully offline visit instead of only ever living in the browser's separate,
+unreliable disk cache.
 
 **Not implemented yet**: `protocolHandlers`/`fileHandlers`/`shareTarget`/`push` (Tier-2, mostly
 Chromium-only manifest fields) and maskable icons — deferred, not silently dropped, since none of

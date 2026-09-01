@@ -37,8 +37,8 @@ Deno.test(
   async () => {
     const store = createInMemoryTransformCacheStore()
     // Simulate corruption/incompatibility by writing directly through the public contract with a
-    // value the store must still validate on READ, not just trust because it was written by
-    // `setEntry` itself in a prior version of this module.
+    // value the store must still validate on READ, never simply trusted merely because `setEntry`
+    // itself wrote it.
     // deno-lint-ignore no-explicit-any
     await store.setEntry('k', { result: 'done' } as any)
     assertEquals(await store.getEntry('k'), undefined)

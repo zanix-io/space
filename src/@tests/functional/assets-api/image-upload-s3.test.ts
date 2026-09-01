@@ -16,11 +16,11 @@ import { gradientJpeg } from './image-fixtures.ts'
  * The real end-to-end composition for an IMAGE upload — HTTP -> AssetsController -> AssetService
  * -> AssetStorage -> (via `resolveAssetStorage()`) the real `'s3'` core connector ->
  * `S3ObjectStorage` -> a REAL SeaweedFS instance. Same gating/setup convention as
- * `voice-upload-s3.test.ts`, which this file mirrors for the image kind — that one, plus
- * `assets-encrypted-s3-e2e.test.ts`, previously only proved images STORE and DOWNLOAD via S3, never
- * that the bytes are actually SMALLER/optimized once they get there; this file closes that gap with
- * real, quality-sensitive fixtures (same technique `image-optimize.test.ts` already uses for the
- * transformer itself). The never-worsened counterpart lives in its own sibling file,
+ * `voice-upload-s3.test.ts`, which this file mirrors for the image kind. `voice-upload-s3.test.ts`
+ * and `assets-encrypted-s3-e2e.test.ts` prove images STORE and DOWNLOAD via S3, but neither proves
+ * the bytes are actually SMALLER/optimized once they get there — this file is the one that does,
+ * with real, quality-sensitive fixtures (same technique `image-optimize.test.ts` already uses for
+ * the transformer itself). The never-worsened counterpart lives in its own sibling file,
  * `image-upload-s3-never-worsened.test.ts` — see that file's own doc for why.
  *
  * Its own file, one real server boot — same convention `voice-upload-s3.test.ts` already
@@ -67,7 +67,11 @@ Deno.test({
       })
     })
     const [serverId] = await bootstrapServers({
-      rest: { application: 'assets-api-image-s3-test', id: 'assets-api-image-s3-test' },
+      rest: {
+        port: 23007,
+        application: 'assets-api-image-s3-test',
+        id: 'assets-api-image-s3-test',
+      },
     })
     assert(serverId, 'the server should have been started')
     try {

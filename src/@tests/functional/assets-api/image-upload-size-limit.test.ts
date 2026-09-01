@@ -12,9 +12,9 @@ console.error = () => {}
 /**
  * Its own file, one real server boot — same convention `voice-upload-wrong-content-type.test.ts`
  * already establishes. No S3/RUN_S3_TESTS gate needed (unlike `image-upload-s3.test.ts`'s own
- * sibling suites): a real disk-backed `LocalFilesystemAssetStorage` is enough to prove the real,
- * found gap this session closed — `AssetService` used to drain an upload's whole `ReadableStream`
- * into memory with no cap, `Content-Length` read but never validated against anything.
+ * sibling suites): a real disk-backed `LocalFilesystemAssetStorage` is enough to prove
+ * `AssetService` never drains an upload's whole `ReadableStream` into memory with no cap —
+ * `Content-Length` alone is read but is not sufficient on its own to bound it.
  *
  * Proves `AssetServiceOptions.limits`'s two real layers over a REAL HTTP request/response cycle,
  * not just the in-process `createAsset()` calls `asset-service.test.ts` already covers:
@@ -53,6 +53,7 @@ Deno.test({
     })
     const [serverId] = await bootstrapServers({
       rest: {
+        port: 23005,
         application: 'assets-api-image-size-limit-test',
         id: 'assets-api-image-size-limit-test',
       },

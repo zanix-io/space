@@ -179,7 +179,7 @@ export function defineSpaceApp(config: SpaceAppConfig): ZanixAppDefinition {
   // Eager too, same reasoning/timing as `renderer` above — `assetsPlugin` (`@zanix/space/vite`,
   // wired through `buildSpaceClient`) needs to know WHICH directories to hash during
   // `zanix space build`, which never calls `activateApps()` (so never runs the `setup()` block
-  // below, where `assetsDir` was previously ONLY readable). This is a separate concern from
+  // below, the only OTHER place `assetsDir` is read). This is a separate concern from
   // `setResolvedAssets`/`registerAssets` inside `setup()` below — those still only run there, since
   // scanning the directory is real, async filesystem work with no reason to run twice.
   if (assetsDir !== undefined) setAssetsDirConfig(assetsDir)

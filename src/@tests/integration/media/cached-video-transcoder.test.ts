@@ -15,7 +15,7 @@ import type {
 console.error = () => {}
 
 /**
- * Closes the "no asumir que extractThumbnail() por existir ya resuelve el flujo completo" gap:
+ * Closes the "extractThumbnail() existing doesn't mean the whole flow is proven" gap:
  * real, end-to-end proof — against real `ffmpeg`/`ffprobe`, never a fake — that a thumbnail is a
  * genuinely independent, cached, idempotent asset transformation, and that its own real-world
  * properties (cleanup, format, dimensions, determinism) hold. Same `ignore`-when-unavailable

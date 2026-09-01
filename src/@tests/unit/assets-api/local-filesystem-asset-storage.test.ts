@@ -4,11 +4,11 @@ import { InternalError } from '@zanix/errors'
 import { createLocalFilesystemAssetStorage } from 'modules/assets-api/adapters/local-filesystem-asset-storage.ts'
 
 /**
- * Regression coverage for a confirmed path-traversal vulnerability: `key` used to be joined
- * straight onto `rootDir` (`join(rootDir, key)`) with no containment check, so a `key` that
- * escaped `rootDir` (`../`, or an absolute path overriding it entirely) let `put`/`get`/`delete`
- * touch disk outside the intended store. Fixed via `@zanix/helpers`'s `confinePath` — this suite
- * proves each `AssetStorage` method rejects such a `key` instead of ever reaching `Deno.*`.
+ * Regression coverage for a real path-traversal risk class: a `key` that escapes `rootDir`
+ * (`../`, or an absolute path overriding it entirely) must never let `put`/`get`/`delete` touch
+ * disk outside the intended store — `key` is joined onto `rootDir` through `@zanix/helpers`'s
+ * `confinePath`, which enforces containment, never a bare `join(rootDir, key)`. This suite proves
+ * each `AssetStorage` method rejects such a `key` instead of ever reaching `Deno.*`.
  *
  * `AssetIdParamsRTO`'s own `@IsUUID` (see `assets-rto.test.ts`) closes the same class of payload
  * off earlier, at the API boundary — this is the deeper, backend-level invariant that must hold

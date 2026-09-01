@@ -201,11 +201,10 @@ behaviors:
   other language's own URL as an `alternates` entry (self included). A route mixing `:lang` with any
   OTHER dynamic segment (`[lang]/regions/[region]/page.tsx`) still excludes entirely — see
   `deriveAutoSitemapEntries`'s own doc (`modules/bundler/auto-sitemap.ts`) for the exact rule. An
-  app with no `langPreHandler` registered sees no change: every dynamic segment excludes, same as
-  before this expansion existed. `zanix space build` derives entries once, from the same static
-  discovery pass document validation already runs, and writes them into
-  `{outDir}/sitemap-manifest.json`. **Production only reads that back when
-  `defineSpaceApp({ clientBuildDir })` is set** — `setup()` calls `loadSitemapManifest`
+  app with no `langPreHandler` registered sees no change: every dynamic segment excludes.
+  `zanix space build` derives entries once, from the same static discovery pass document validation
+  already runs, and writes them into `{outDir}/sitemap-manifest.json`. **Production only reads that
+  back when `defineSpaceApp({ clientBuildDir })` is set** — `setup()` calls `loadSitemapManifest`
   automatically from there, same as every other build manifest (Comets, client entry, CSS, assets,
   PWA); without `clientBuildDir`, call `loadSitemapManifest('<outDir>/sitemap-manifest.json')`
   yourself from `main.ts`, before `activateApps()`, same convention `loadCometManifest`/

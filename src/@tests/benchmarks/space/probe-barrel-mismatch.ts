@@ -5,28 +5,30 @@
 // is right for a running server and wrong for a metrics table. Library code in this package uses
 // the logger; these scripts are tools, not library code, and none of them ships anywhere.
 /**
- * Evidence probe for the renderer seam that used to be unguarded: an app whose client barrel does
- * not match its renderer.
+ * Evidence probe for what an unguarded client-barrel/renderer mismatch does at runtime: an app
+ * whose client barrel does not match its renderer.
  *
  * `@zanix/space/client` exports React's `hydrateComets`; `@zanix/space/client/preact` exports
  * Preact's. Neither barrel consults `getActiveRenderer()`, and none ever will — that would be
- * renderer detection, which this package does not do anywhere. When this probe was written nothing
- * else checked the pairing either, so the mismatch it builds (Preact comets, server-rendered by
- * Preact, hydrated by React's barrel) was what a Preact app got by following the README literally.
+ * renderer detection, which this package does not do anywhere. Nothing else in a real app's own
+ * build checks the pairing either, so the mismatch this probe builds (Preact comets, server-
+ * rendered by Preact, hydrated by React's barrel) is exactly what a Preact app gets by following
+ * the README literally, absent the guard described below.
  *
- * **That gap is closed.** `clientBarrelGuardPlugin` (`modules/bundler/client-barrel-guard.ts`),
- * wired from `spacePlugin({ renderer })`, fails the CLIENT build when the other renderer's hydrate
- * module reaches the graph — keyed on the resolved module, so a re-export or an alias is caught
- * too. `renderer-invariant.test.ts` ([4/4], [4/4b], [4/4c]) owns its regression suite, and the
- * README now states the pairing explicitly at its own `hydrateComets` example.
+ * A real app never reaches this state: `clientBarrelGuardPlugin`
+ * (`modules/bundler/client-barrel-guard.ts`), wired from `spacePlugin({ renderer })`, fails the
+ * CLIENT build when the other renderer's hydrate module reaches the graph — keyed on the resolved
+ * module, so a re-export or an alias is caught too. `renderer-invariant.test.ts` ([4/4], [4/4b],
+ * [4/4c]) owns its regression suite, and the README states the pairing explicitly at its own
+ * `hydrateComets` example.
  *
- * This probe therefore documents the ORIGINAL failure mode, and stays runnable as the evidence for
- * why the build-time guard exists: it reproduces what the mismatch actually does at runtime
- * (nothing throws; the page renders; no Comet is ever interactive). It can still build that
- * mismatch because `build-comets-client.ts` composes `deno()`/`rendererPlugins()`/`cometPlugin()`
- * by hand rather than going through `spacePlugin()` — the guard rides on the latter, so a REAL app
- * (which always builds through `spacePlugin`) cannot reach this state any more, and this probe can.
- * It measures nothing else — run it and read the console output it captures.
+ * This probe documents that failure mode directly, and stays runnable as the evidence for why the
+ * build-time guard exists: it reproduces what the mismatch actually does at runtime (nothing
+ * throws; the page renders; no Comet is ever interactive). It can still build that mismatch
+ * because `build-comets-client.ts` composes `deno()`/`rendererPlugins()`/`cometPlugin()` by hand
+ * rather than going through `spacePlugin()` — the guard rides on the latter, so a REAL app (which
+ * always builds through `spacePlugin`) cannot reach this state, only this probe can. It measures
+ * nothing else — run it and read the console output it captures.
  *
  * @module
  */

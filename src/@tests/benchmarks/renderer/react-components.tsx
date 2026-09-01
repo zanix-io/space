@@ -19,9 +19,9 @@ export function StaticTree({ items }: { items: Item[] }) {
 /** Same data as `StaticTree`, restructured so every item contributes its own top-level Fragment
  * instead of a single `<li>` — isolates fragment-handling cost specifically, at the same item
  * count. Uses the explicit `<Fragment key={...}>` form, not the `<>...</>` shorthand — React's own
- * shorthand syntax doesn't accept a `key` prop at all (confirmed the hard way: the shorthand form
- * here originally produced a real "Each child in a list should have a unique key prop" warning on
- * every single bench iteration, since the key silently had nowhere to attach). */
+ * shorthand syntax doesn't accept a `key` prop at all (confirmed directly: the shorthand form here
+ * produces a real "Each child in a list should have a unique key prop" warning on every single
+ * bench iteration, since the key silently has nowhere to attach). */
 export function FragmentTree({ items }: { items: Item[] }) {
   return (
     <>

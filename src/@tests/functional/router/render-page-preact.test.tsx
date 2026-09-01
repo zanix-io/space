@@ -22,13 +22,11 @@ class FakePreactPage extends SpacePageController {
  * A root `layout.tsx` written the way an app really writes one: it owns the document and knows
  * nothing whatsoever about head management.
  *
- * This fixture used to be the opposite — it destructured a `headExtras` prop and rendered the
- * resolved head itself — because that prop was, at the time, the only way metadata reached the
- * document under Preact. That made the tests below prove something much weaker than they appeared
- * to: that a layout which cooperates gets the head. The realistic failure was a layout that does
- * not cooperate, which silently served pages with no metadata at all. Head placement now happens
- * after render (`render/head-markup.ts`), so this fixture is deliberately uncooperative and the
- * tests assert the head arrives regardless.
+ * Deliberately uncooperative: this layout destructures no head-related prop and renders no head
+ * content itself, so the tests below prove the realistic case — a layout that does nothing for
+ * metadata still gets a real head — rather than the much weaker claim that a layout which
+ * cooperates gets the head. Head placement happens entirely after render
+ * (`render/head-markup.ts`), independent of what any layout component itself renders.
  */
 function Layout(
   { params, children }: {

@@ -8,16 +8,16 @@ import { serializeHeadMarkup } from 'modules/render/head-markup.ts'
 import type { DocumentModel } from 'modules/render/document-model.ts'
 import { BUILTIN_CSS } from 'modules/render/builtin-css.ts'
 
-// This file covers the Preact document shell AFTER head placement moved out of it.
+// This file covers the Preact document shell, which is purely structural and never resolves head
+// content itself.
 //
-// The shell used to receive the resolved head as a `headExtras` prop and — when the app declared
-// its own root `layout.tsx` — pass that prop on to that layout, depending on it to render the head.
-// That made a document's entire metadata conditional on an app-authored component destructuring a
-// prop that was not even part of the public `LayoutProps` type, so a root layout written from this
-// package's own README served every page with no `<title>`, no canonical and no stylesheet links —
-// under Preact only. Placement now happens once, after render, in `render-to-response-preact.ts`
-// (see `render/head-markup.ts`). The shell is purely structural, and the tests below assert exactly
-// that split: structure here, placement end-to-end.
+// Head placement happens once, after render, in `render-to-response-preact.ts` (see
+// `render/head-markup.ts`) — never delegated to an app-authored root `layout.tsx` component, and
+// the public `LayoutProps` type gives that component no `headExtras`-shaped prop to opt into
+// placement with anyway. A root layout written from this package's own README must serve every
+// page a real `<title>`, canonical, and stylesheet links regardless of what that layout's own
+// component renders — the tests below assert exactly that split: structure here, placement
+// end-to-end.
 
 function Content() {
   return createElement('p', null, 'content')
@@ -79,7 +79,7 @@ Deno.test(
 )
 
 // ---------------------------------------------------------------------------------------------
-// A custom root layout — the shape that used to silently lose the whole head
+// A custom root layout that renders its own <head> with nothing in it — must never lose the head
 // ---------------------------------------------------------------------------------------------
 
 Deno.test('applyDocumentShell: a custom RootLayout is used as-is, with params forwarded', () => {

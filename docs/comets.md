@@ -132,7 +132,7 @@ that shouldn't reset just because the user navigated away and back:
 
 Retained per `persist` key, bounded to the 5 most recently used — reused only when the SAME comet
 (same module + export) reappears under that key later; anything beyond the cap, or a mismatched
-comet reappearing under a reused key, is simply discarded, same as before this existed.
+comet reappearing under a reused key, is simply discarded.
 
 ### Server-only code boundary
 

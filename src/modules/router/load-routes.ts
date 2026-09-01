@@ -349,7 +349,7 @@ async function loadRoutesOnce(
     // object; only `Page()`'s own decorator is responsible for rejecting a real class that doesn't
     // extend `SpacePageController` — narrowing this check to functions only would silently skip
     // every such test double instead of registering it, a real regression confirmed against
-    // `load-routes-multi-dir.test.ts`'s own `fakeImportModule` before this comment was written.
+    // `load-routes-multi-dir.test.ts`'s own `fakeImportModule`.
     const isValidPageTarget = typeof Target === 'function' ||
       (typeof Target === 'object' && Target !== null)
     if (!isValidPageTarget) {

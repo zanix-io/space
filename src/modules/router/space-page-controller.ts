@@ -68,6 +68,12 @@ function toPageContext<Params>(ctx: HandlerContext): PageContext<Params> {
     url: ctx.url,
     csrfToken: ctx.locals[CSRF_TOKEN_LOCALS_KEY] as string | undefined,
     population: ctx.locals[POPULATION_LOCALS_KEY] as string | undefined,
+    // `ctx.locals.session` wins: it's what a page-level `@Guard` (e.g. `@zanix/auth`'s
+    // `jwtValidationGuard`) writes when it resolves a session for THIS route, which runs AFTER
+    // `@zanix/server`'s own request-setup pipe already merged whatever session existed earlier onto
+    // `ctx.session` — so `ctx.locals.session`, when present, is always the fresher of the two. See
+    // `PageContext.session`'s own doc (`typings/page.ts`) for the full contract.
+    session: ctx.locals.session ?? ctx.session,
     // One fresh cache per `toPageContext` call — this function runs exactly once per request
     // (`handleGet` for a GET, `handlePost` for a POST — `renderInvalidAction` does NOT call this
     // again; it spreads `handlePost`'s own already-built context, `{ ...actionCtx, fieldErrors,

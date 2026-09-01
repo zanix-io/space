@@ -89,9 +89,11 @@ const ESM_SHAPE_RE = /^\s*(import|export)\b/m
 const decoder = new TextDecoder()
 
 /**
- * Blanks out (space-fills, same length/offsets, so `REQUIRE_RE` match indices stay valid against
- * the ORIGINAL `code`) every `//` and `/* *‍/`-style comment span in `code` — used ONLY to decide
- * which `require(...)` occurrences {@linkcode buildCjsBundle} should treat as real dependencies,
+ * Blanks out (space-fills, same length/offsets, so a caller's own match indices stay valid against
+ * the ORIGINAL `code`) every `//` and `/* *‍/`-style comment span in `code`. Exported for reuse by
+ * `dynamic-import-interop.ts`'s own `DYNAMIC_IMPORT_RE` scan — same rationale, same tokenizer, a
+ * different regex applied against the masked result. Used here to decide which `require(...)`
+ * occurrences {@linkcode buildCjsBundle} should treat as real dependencies,
  * never to produce output text (comments reach the final rewritten source completely untouched).
  *
  * `REQUIRE_RE`'s own content-based heuristic (this module's own header doc) cannot tell a real
@@ -141,7 +143,7 @@ const decoder = new TextDecoder()
  *   JS tokenizers use — and, once opened, its own `[...]` character class is tracked separately
  *   since a `/` inside one never closes the regex either.
  */
-function maskComments(code: string): string {
+export function maskComments(code: string): string {
   type Frame =
     | { type: 'code' }
     | { type: 'string'; quote: string }
@@ -357,14 +359,76 @@ interface CjsBundle {
   entryId: string
   /** Resolved id -> factory function source (`''` for an externalized/`node:` dependency). */
   factories: Map<string, string>
-  /** Every bare (non-relative) specifier `require()`d anywhere in the subtree. */
+  /** Every bare (non-relative) specifier `require()`d anywhere in the subtree that stayed on the
+   * `__vite_ssr_import__` path — see {@linkcode bareSpecifierResolvesAtTopLevel}'s own doc for
+   * which bare specifiers this excludes now, and why. */
   bareSpecifiers: Set<string>
 }
 
 /**
+ * Whether `spec` (a bare specifier — never one starting with `.`) resolves via the TOP-LEVEL
+ * project's own import map, with NO referrer — the exact same referrer-less resolution
+ * {@linkcode resolveBareSpecifierCanonically} (`bare-specifier-resolve.ts`) already performs for a
+ * normal import statement, and the one Vite's own SSR module-runner `fetchModule` fast path
+ * effectively relies on for "a bare string + a known importer" (see that file's own doc).
+ *
+ * This is the real distinction {@linkcode buildCjsBundle}'s own `visit()` needs — NOT whether
+ * `spec` has a subpath, an earlier, narrower heuristic (`mongodb/lib/bulk/common` vs. plain
+ * `mongodb`) that missed a real, confirmed second case: `mongodb`'s own bare PACKAGE ROOT
+ * (`require('mongodb')`, no subpath at all) crashes the IDENTICAL way, because `console` (a real
+ * consumer) never declares `mongodb` at its own top level either — only transitively, through
+ * `mongoose`. A specifier that resolves HERE is a real, independently-declared dependency
+ * (`react`, reachable from a page's own `import 'react'`) — exactly the case
+ * `__bareRequire__`/`__vite_ssr_import__` exists FOR (see this module's own header doc): Vite
+ * dedupes that shared instance by resolved id, so a page's own `import 'react'` and `react-dom`'s
+ * internal `require('react')` land on the SAME module, and leaving it on the external path
+ * preserves that singleton. A specifier that does NOT resolve here is private to whatever package
+ * requires it — nothing else in the graph could ever reach it via the SAME bare id anyway
+ * (`mongodb`'s own root included, once nothing besides `mongoose` itself ever requires it bare),
+ * so there is no singleton to protect, and inlining it exactly like a relative require is both
+ * safe and correct.
+ */
+function bareSpecifierResolvesAtTopLevel(spec: string, loader: Loader): boolean {
+  try {
+    loader.resolveSync(spec, undefined, ResolutionMode.Import)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
  * Recursively resolves and loads every RELATIVE `require()` reachable from `entryUrl`, producing
- * one synchronous CJS factory per file. Never recurses into a bare specifier's own subtree — that
- * stays external, resolved through Vite's real module graph instead (see this module's own doc).
+ * one synchronous CJS factory per file. Never recurses into a bare specifier that resolves via the
+ * TOP-LEVEL project's own import map — that stays external, resolved through Vite's real module
+ * graph instead (see this module's own doc) — but DOES recurse into any OTHER bare specifier (see
+ * {@linkcode bareSpecifierResolvesAtTopLevel}'s own doc), the same as a relative require, PROVIDED
+ * the resolved target is itself CJS-shaped (the same `CJS_SHAPE_RE`/`ESM_SHAPE_RE` check
+ * {@linkcode wrapCjsIfNeeded} already applies to the bundle's own entry file — a bare specifier
+ * reached this way CAN point at a real ESM module, which this bundler's own `function(module,
+ * exports) {...}` wrapping would corrupt if forced through it).
+ *
+ * ## Why this closes a real, confirmed `zanix space dev` crash `bareSpecifiers`/
+ * `__vite_ssr_import__` cannot
+ *
+ * A bare specifier reaches `__vite_ssr_import__(target, {})` only after
+ * {@linkcode resolveBareSpecifierCanonically} resolves it FIRST — but that resolution is only ever
+ * attempted WITHOUT a real referrer for any `node_modules`-rooted importer (a deliberate choice in
+ * `bare-specifier-resolve.ts`'s own `referrerUrlFor`, made for an unrelated asymmetry bug — see
+ * that file's own doc). Confirmed, real, and reproducible, for BOTH shapes: `mongoose`'s own
+ * `require('mongodb/lib/bulk/common')` (a subpath) AND its plain `require('mongodb')` (the bare
+ * package root) alike fail to resolve that way — `@deno/loader`, given no referrer, tries to
+ * resolve `mongodb` against the top-level project's OWN import map, which never declares this
+ * deeply transitive dependency directly (subpath or not), and throws `Import "mongodb" not a
+ * dependency and not in import map`. `wrapCjsIfNeeded`'s own fallback (`?? spec`, the RAW
+ * unresolved string) then reaches Vite's SSR module-runner `fetchModule`'s own "bare string +
+ * known importer" fast path — which resolves it fine, but as an EXTERNAL module, entirely
+ * bypassing this file's own CJS-wrapping — producing the exact `ReferenceError: exports is not
+ * defined` this fix closes, for either shape identically. Resolving a bare specifier HERE instead,
+ * with `fileUrl` as a real referrer (`ResolutionMode.Require`, the same call a relative require
+ * already makes successfully), sidesteps the broken referrer-less path entirely — confirmed
+ * directly: the SAME `mongodb` specifiers (subpath and bare root alike) resolve cleanly when given
+ * a real referrer, only failing without one.
  */
 async function buildCjsBundle(
   entryUrl: string,
@@ -386,6 +450,23 @@ async function buildCjsBundle(
     }
 
     const code = decoder.decode(result.code)
+
+    // A relatively-required `.json` file (`require('../package.json')`, a real, confirmed pattern
+    // in `mongoose`'s own `lib/mongoose.js`) is raw JSON data, not JS source made of statements —
+    // Node's own `require('./x.json')` returns the PARSED object as the module's exports. Treating
+    // its raw content as JS-statement text (the general case below) produces a syntactically
+    // invalid factory body: a bare object literal sitting where a statement is expected, right
+    // after `const require = __cjsRequire__` below — confirmed as the exact, real cause of a
+    // `mongoose`-specific crash (`Parse failure: Expected a semicolon...`, pointing straight at its
+    // own inlined `package.json` content). Wrapped as a real assignment instead, which is valid JS
+    // regardless of what the JSON's own top-level shape is (object, array, or primitive). Never
+    // itself scanned for `require(...)`/visited further — JSON can't contain one.
+    if (fileUrl.endsWith('.json')) {
+      factories.set(fileUrl, `function(module, exports) {\nmodule.exports = ${code}\n}`)
+      visiting.delete(fileUrl)
+      return
+    }
+
     // Matched against the COMMENT-MASKED text, never the raw `code` — see `maskComments`'s own doc
     // for the real, confirmed false positive this avoids (a `require(...)` call sitting inside a
     // JSDoc usage example, not real executable code). Masking preserves every character's offset,
@@ -395,6 +476,15 @@ async function buildCjsBundle(
     const specs = matches.map((match) => match[2])
 
     const resolvedIds: string[] = []
+    // Parallel to `resolvedIds`/`specs` — whether THIS occurrence was actually inlined into the
+    // synchronous `__cjsRequire__` registry, as opposed to left on the external `__bareRequire__`/
+    // `__vite_ssr_import__` path. Deliberately NOT re-derived from `specs[index].startsWith('.')`
+    // at rewrite time below: a bare specifier can ALSO end up inlined (see
+    // `bareSpecifierResolvesAtTopLevel`'s own doc) — using the original spec's own leading
+    // character would emit `__bareRequire__` for an id that was never added to
+    // `bareSpecifiers`/`__bareModules__`, resolving to `undefined` at runtime instead of the real
+    // module.
+    const useCjsRequire: boolean[] = []
     for (const spec of specs) {
       if (spec.startsWith('.')) {
         const resolved = loader.resolveSync(
@@ -406,9 +496,55 @@ async function buildCjsBundle(
         // deno-lint-ignore no-await-in-loop -- a genuine recursive graph walk; each require's own
         await visit(resolved)
         resolvedIds.push(resolved)
-      } else {
+        useCjsRequire.push(true)
+        continue
+      }
+
+      // A bare specifier that does NOT resolve via the top-level project's own import map (see
+      // `bareSpecifierResolvesAtTopLevel`'s own doc) is attempted as an INLINE target instead, the
+      // same as a relative require, before ever falling back to the external `__vite_ssr_import__`
+      // path below — see this function's own doc for the real crash this closes. Resolution/load/
+      // shape-check failures all fall through to the ORIGINAL external behavior rather than
+      // throwing — this whole block is an optimization attempt, not a new hard requirement a bare
+      // specifier must satisfy.
+      let inlinedAsPrivate = false
+      if (!bareSpecifierResolvesAtTopLevel(spec, loader)) {
+        let resolved: string | undefined
+        try {
+          resolved = loader.resolveSync(spec, fileUrl, ResolutionMode.Require)
+        } catch {
+          resolved = undefined
+        }
+        if (resolved && factories.has(resolved)) {
+          // Already inlined via a PRIOR occurrence of this exact specifier (a shared internal
+          // helper module a package's own source requires from many of its own files is a real,
+          // common shape — mongodb's own tree has several) — `visit()`'s own body already ran the
+          // shape check once; skip the redundant `loader.load()`/`CJS_SHAPE_RE` probe here, it can
+          // only repeat the SAME verdict this file already recorded.
+          resolvedIds.push(resolved)
+          useCjsRequire.push(true)
+          inlinedAsPrivate = true
+        } else if (resolved) {
+          // Same reasoning as the relative-require branch above: a genuine recursive graph walk,
+          // one require at a time.
+          // deno-lint-ignore no-await-in-loop
+          const subResult = await loader.load(resolved, RequestedModuleType.Default)
+          if (subResult.kind !== 'external') {
+            const subCode = decoder.decode(subResult.code)
+            if (CJS_SHAPE_RE.test(subCode) && !ESM_SHAPE_RE.test(subCode)) {
+              // deno-lint-ignore no-await-in-loop -- same reasoning as above.
+              await visit(resolved)
+              resolvedIds.push(resolved)
+              useCjsRequire.push(true)
+              inlinedAsPrivate = true
+            }
+          }
+        }
+      }
+      if (!inlinedAsPrivate) {
         bareSpecifiers.add(spec)
         resolvedIds.push(spec)
+        useCjsRequire.push(false)
       }
     }
 
@@ -421,9 +557,8 @@ async function buildCjsBundle(
     let lastIndex = 0
     matches.forEach((match, index) => {
       const resolvedId = resolvedIds[index]
-      const isRelative = specs[index].startsWith('.')
       rewritten += code.slice(lastIndex, match.index)
-      rewritten += isRelative
+      rewritten += useCjsRequire[index]
         ? `__cjsRequire__(${JSON.stringify(resolvedId)})`
         : `__bareRequire__(${JSON.stringify(resolvedId)})`
       lastIndex = match.index + match[0].length
@@ -484,21 +619,46 @@ export async function wrapCjsIfNeeded(
   // untouched when canonical resolution declines (e.g. a real npm package `@deno/loader` and Vite's
   // own native Node resolution already agree on) — the whole namespace object is used as-is either
   // way, never narrowed to `.default` (an earlier version did; see this file's own header doc).
+  //
+  // Each fetch is individually try/caught, never left to throw straight out of this `await` chain
+  // — a real, confirmed shape: `mongoose`'s own `require('kerberos')` (a genuinely OPTIONAL native
+  // binding almost never actually installed) is written inside a `try { require('kerberos') }
+  // catch { ... }` in `mongoose`'s own real source. Rewriting that `require(...)` text to
+  // `__bareRequire__("kerberos")` leaves the surrounding `try`/`catch` completely intact in the
+  // output — this bundle never restructures control flow, only the call text — so the ORIGINAL
+  // try/catch is still exactly where it needs to be once `__bareRequire__` actually runs, INSIDE
+  // whatever factory does the requiring. Awaiting every fetch here eagerly and unconditionally, at
+  // this bundle's own true top level, would run it BEFORE any factory (and its own try/catch) ever
+  // gets a chance to run — an optional dependency that's genuinely absent would then throw at the
+  // top level instead, crashing the whole bundle's evaluation instead of being caught the way the
+  // original source always intended. Storing the error here and re-throwing it from
+  // `__bareRequire__` itself below defers the failure to the exact point the original code already
+  // guards.
   const bareFetches = (await Promise.all(bareEntries.map(async (spec, i) => {
     const resolved = await resolveBareSpecifierCanonically(spec, root)
     const target = resolved ?? spec
-    return `const __bareModule_${i}__ = await __vite_ssr_import__(${JSON.stringify(target)}, {})`
+    return `let __bareModule_${i}__\ntry {\n  __bareModule_${i}__ = ` +
+      `await __vite_ssr_import__(${
+        JSON.stringify(target)
+      }, {})\n} catch (__bareModuleError_${i}__) ` +
+      `{\n  __bareModuleErrors__[${JSON.stringify(spec)}] = __bareModuleError_${i}__\n}`
   }))).join('\n')
   const bareMap = bareEntries
     .map((spec, i) => `  ${JSON.stringify(spec)}: __bareModule_${i}__,`)
     .join('\n')
 
   const bundle = `export {}
+const __bareModuleErrors__ = {}
 ${bareFetches}
 const __bareModules__ = {
 ${bareMap}
 }
-function __bareRequire__(spec) { return __bareModules__[spec] }
+function __bareRequire__(spec) {
+  if (Object.prototype.hasOwnProperty.call(__bareModuleErrors__, spec)) {
+    throw __bareModuleErrors__[spec]
+  }
+  return __bareModules__[spec]
+}
 ${factoryDecls}
 const __cjsFactories__ = {
 ${registryEntries}

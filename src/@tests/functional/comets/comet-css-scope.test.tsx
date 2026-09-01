@@ -214,8 +214,8 @@ Deno.test(
 
       assert(html.includes('href="/assets/widget-hash.css"'), html)
       assertFalse(html.includes('precedence'), html)
-      // The boundary and its content really rendered — the assertion the old version could not
-      // make, because under React it was never Preact's renderer producing this HTML.
+      // The boundary and its content really rendered — proof this is genuinely Preact's own
+      // renderer producing the HTML, not React's.
       assert(html.includes('data-comet-export="PreactWidget"'), html)
       assert(html.includes('preact-widget'), html)
     } finally {

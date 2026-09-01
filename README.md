@@ -54,6 +54,9 @@ nothing else is stubbed ahead of time:
 - ✅ **Not-found page** — `routesDir`'s own `not-found.tsx` renders for any unmatched route, via
   `createNotFoundHandler()`. See [`docs/routing.md`](./docs/routing.md#not-found-page) for the
   opt-in Orbit-fragment behavior.
+- ✅ **`globalErrorHandler()`** — composes `createNotFoundHandler()` with other
+  `server.ssr.onError`-shaped recovery handlers, since that slot only ever accepts one. See
+  [`docs/routing.md`](./docs/routing.md#composing-multiple-onerror-handlers) for the full contract.
 - ✅ **`defineSpaceApp({ errorResponse: 'json' })`** — an app that never wants to serve a rendered
   HTML page for its own built-in not-found/error fallback, for a pure API/backend built on
   `@zanix/space` purely for its routing. See
@@ -391,10 +394,10 @@ Deno.test('ProductPage renders the product', async () => {
 ```
 
 `mockPageContext<Params>(overrides?)` builds the exact object shape a `loader`/`action` receives
-(`request`/`url`/`params`/`csrfToken`), typed against the page's own `Params` generic.
-`renderPageForTest(Controller, params?, ctxOverrides?)` instantiates `Controller`, calls its real
-`handleGet`, and resolves once the streamed response has fully settled — generic over that same
-`Params`. `mockHandlerContext` is the lower-level `HandlerContext` builder both use internally;
+(`request`/`url`/`params`/`csrfToken`/`population`/`session`), typed against the page's own `Params`
+generic. `renderPageForTest(Controller, params?, ctxOverrides?)` instantiates `Controller`, calls
+its real `handleGet`, and resolves once the streamed response has fully settled — generic over that
+same `Params`. `mockHandlerContext` is the lower-level `HandlerContext` builder both use internally;
 reach for it directly only when testing something below the page level, e.g. a custom `@Guard`.
 
 ### CSS

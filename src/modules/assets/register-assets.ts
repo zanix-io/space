@@ -9,7 +9,7 @@ import { contentTypeFor } from './content-type.ts'
 
 /**
  * The one route every `assetsDir`-declaring app registers — `@zanix/server`'s own trailing
- * catch-all (`:name*`, see that package's own CHANGELOG for the full contract), which this
+ * catch-all (`:name*`, matching every remaining path segment as one param), which this
  * package's `defineSpaceApp()` composes over an already-resolved `Map` (`scanAssets`/
  * `asset-registry.ts`) instead of Vite's own build-time-only `publicDir` convention: this
  * codebase's dev server never mounts Vite middleware, so a build-time-only mechanism would never

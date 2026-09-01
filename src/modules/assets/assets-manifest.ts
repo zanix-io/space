@@ -19,9 +19,9 @@
  * module-scoped mutable manifest). Without it, a Comet that (directly or transitively, e.g.
  * through a `resolveAssetHref`-calling wrapper component) imports this module fails the build with
  * an opaque bundler resolution error instead of `cometPlugin`'s own clear, purpose-built violation
- * message — confirmed as the real, previously-unexplained failure a `'use comet'` file hit by
- * importing `resolveAssetHref` transitively; this directive is what makes that failure actionable
- * instead of a bare "module not found".
+ * message — confirmed as the real failure a `'use comet'` file hits by importing
+ * `resolveAssetHref` transitively; this directive is what makes that failure actionable instead of
+ * a bare "module not found".
  *
  * @module
  */

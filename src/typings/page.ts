@@ -7,6 +7,7 @@
  */
 import type { SpaceChildren } from './renderable.ts'
 import type { serializeError } from '@zanix/errors'
+import type { Session } from '@zanix/server'
 import type { Messages } from '../modules/i18n/load-messages.ts'
 
 /**
@@ -56,6 +57,23 @@ export type PageContext<Params = Record<string, string>> = {
    * (same opt-in mechanism as `csrfGuard`) — `undefined` otherwise. Use it in `loader` to pick the
    * right content override; see `populationGuard`'s own doc for the resolution order. */
   population?: string
+  /**
+   * This request's resolved `Session` (`@zanix/server`), if one was resolved for it by the time
+   * this context is built — `undefined` for an anonymous route, or one whose guards never resolve
+   * a session at all. A read-only SNAPSHOT, same lifetime as `csrfToken`/`population` above:
+   * mutating it here has no effect on the real request's own session state, and it never reflects a
+   * session resolved LATER than this snapshot (e.g. inside `loader` itself). Issuing or mutating a
+   * session still requires `@zanix/auth`'s own session functions against the real, live
+   * `ctx.locals` — see {@link PageActionContext.locals}'s own doc for that escape hatch.
+   *
+   * Resolves `ctx.locals.session` first, falling back to `ctx.session` — `ctx.locals.session` is
+   * what a page-level `@Guard` (e.g. `@zanix/auth`'s `jwtValidationGuard`) writes when it resolves a
+   * session for THIS route specifically, which runs after `@zanix/server`'s own request-setup pipe
+   * already merged whatever session existed at that earlier point onto `ctx.session` — so
+   * `ctx.locals.session`, when present, is always the fresher of the two. See `toPageContext`
+   * (`space-page-controller.ts`) for where this precedence is applied.
+   */
+  session?: Session
   /**
    * Dedupes an async fetch, by `key`, across every `loader` this SAME request's composition chain
    * runs — the page's own AND every `layout.tsx`'s own (see `LayoutProps.data`'s own doc for how

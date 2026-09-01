@@ -10,10 +10,10 @@ console.error = () => {}
 
 /**
  * Its own file, one real server boot — same convention `voice-upload-wrong-content-type.test.ts`
- * mirrors for the audio kind. Proves a real, found gap this session closed is genuinely fixed at
- * the HTTP layer, not just the unit layer: `runImageTransformation` used to trust the client-
- * supplied `Content-Type` header alone, with nothing checking the uploaded BYTES actually matched
- * it — a real jpeg-labeled, non-jpeg upload would previously have been handed straight to `sharp`.
+ * mirrors for the audio kind. Proves the magic-byte check is genuinely enforced at the HTTP layer,
+ * not just the unit layer: `runImageTransformation` must never trust the client-supplied
+ * `Content-Type` header alone — a real jpeg-labeled, non-jpeg upload must be rejected before ever
+ * reaching `sharp`, never handed straight to it on the header's word alone.
  *
  * No S3/ffmpeg gate needed — rejected by the magic-byte check before `sharp` (or any real
  * transform) is ever invoked, using the REAL default transformer (no fake, no override).
@@ -43,6 +43,7 @@ Deno.test({
     })
     const [serverId] = await bootstrapServers({
       rest: {
+        port: 23006,
         application: 'assets-api-image-content-type-mismatch-test',
         id: 'assets-api-image-content-type-mismatch-test',
       },

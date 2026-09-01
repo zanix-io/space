@@ -79,6 +79,37 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
   instead: it's recorded in a separate `__bareModuleErrors__` map keyed by specifier, and only
   re-thrown lazily from `__bareRequire__(spec)` at the exact call site the original `require(...)`
   text was rewritten to — inside whatever `try/catch` the source already wrapped it in.
+- **The generated PWA service worker (`modules/bundler/service-worker-source.ts`) now caches a
+  non-navigation asset the first time it's actually fetched, not just the CSS/`offlineFallback`
+  precached at `install`.** `install` never precached the JS bundles Vite emits (`client-entry-*.js`
+  and any chunk) — only CSS — and the fetch handler for everything else was pure cache-first with no
+  fallback write: `caches.match(request).then((cached) => cached || fetch(request))`. Confirmed via
+  a real `zanix new space` project with `pwa` configured, built, and taken offline: a forced
+  `fetch(url, { cache: 'reload' })` (bypassing the browser's own disk cache, which otherwise masked
+  this in normal use) on the app's own hydration bundle failed outright once offline, leaving static
+  SSR HTML with zero interactivity — while a precached CSS file kept serving fine. The fetch handler
+  now caches falling back to network: a cache miss still fetches from the network exactly as before,
+  but a successful (`response.ok`) response is also written into the same precache before being
+  returned, so the hydration bundle — and every other same-origin asset — survives a later fully
+  offline visit instead of only ever living in the browser's separate, unreliable disk cache.
+- **`createSpaceDevEngine(...).transformClientAsset` (`modules/bundler/dev-engine.ts`) now returns a
+  clean `404` for a second, structurally different "file not found" shape**, not just the one it
+  already handled. A missing `.js`/`.ts`/`.css` request previously translated to a clean `404` only
+  when Vite's own transform rejected with `code: 'ERR_LOAD_URL'` — the shape a genuinely
+  unresolvable specifier produces. A second shape reaches the same catch for at least some requests:
+  a plain `Error` thrown by the `@deno/vite-plugin`/`@jsr/deno__loader` bridge (the WASM loader Deno
+  uses to read real files off disk), with no `.code` and no `.cause` — confirmed empirically
+  (`constructor.name`/`name` both `"Error"`, `Object.getOwnPropertyNames` only
+  `["stack",
+  "message"]`, `cause` `undefined`, not a `TypeError`), leaving the message text as the
+  only available signal. Left unhandled, this escaped as an uncaught error and fell through to the
+  generic `500` path with a raw error message, instead of the same clean `404` an unrecognized
+  extension (like `.png`) already got. Confirmed live against both `/sw.js` (a fixed PWA route that
+  is never a real source file in dev, only generated at build) and an arbitrary nonexistent file,
+  ruling out anything route-specific. The catch now also matches this second shape by its message
+  text (`/^Import '.+' failed, not found\.$/`) — the only signal available, since no structured
+  field exists to key off instead — and translates it to the same `null`/`404` path the first shape
+  already took.
 
 ## [0.3.2] - 2026-08-31
 

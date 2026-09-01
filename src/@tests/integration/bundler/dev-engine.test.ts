@@ -343,6 +343,35 @@ Deno.test(
 )
 
 Deno.test(
+  'createSpaceDevEngine: transformClientAsset returns null for an arbitrary, genuinely ' +
+    'nonexistent .js/.ts asset — not just the ERR_LOAD_URL shape the .css case above hits',
+  async () => {
+    await withTempProject(
+      async () => {},
+      async (root) => {
+        const engine = await createSpaceDevEngine({ root, isRouteEntry })
+        try {
+          // `/sw.js` (or any arbitrary, never-created `.js`/`.ts` path) reaches
+          // `transformClientAsset` through a structurally different rejection than
+          // `/does-not-exist.css` above — confirmed live: the `@deno/vite-plugin`/
+          // `@jsr/deno__loader` bridge throws a plain `Error` with no `.code` here (message
+          // `Import 'file:///sw.js' failed, not found.`), not the `ERR_LOAD_URL`-coded one Vite
+          // itself synthesizes for the `.css` case. This is a general "some missing-file requests
+          // take this other path" case, not a one-off for `/sw.js` specifically — asserted here
+          // with a path that has nothing to do with a service worker.
+          const asset = await engine.transformClientAsset(
+            '/some-arbitrary-missing-file.js',
+          )
+          assertEquals(asset, null)
+        } finally {
+          await engine.close()
+        }
+      },
+    )
+  },
+)
+
+Deno.test(
   'createSpaceDevEngine: transformClientAsset rejects with a real error for a syntax error',
   async () => {
     await withTempProject(
@@ -1219,6 +1248,72 @@ Deno.test(
           await new Promise((resolve) => setTimeout(resolve, 300))
           const asset = await engine.transformClientAsset('/counter.tsx')
           assert(asset?.code.includes('v2'), asset?.code)
+        } finally {
+          await engine.close()
+        }
+      },
+    )
+  },
+)
+
+Deno.test(
+  'createSpaceDevEngine: a large coverage/ report tree at the project root never slows the ' +
+    "file watcher down — a real, confirmed incident: `usePolling` (this engine's own default, " +
+    'see its own doc) means every watched file gets a real `fs.stat` every 100ms, and a project ' +
+    'that has ever run `deno test --coverage` leaves thousands of small report files there, none ' +
+    'of them a real route/Comet source file. Boot completing quickly alone would not catch a ' +
+    'regression of the underlying `ignored` glob list (a slow but still-under-the-bound boot is a ' +
+    'passing false negative), so this also confirms a REAL page edit is still detected promptly ' +
+    'with that tree present — proof the watcher is not busy polling it in the background.',
+  async () => {
+    await withTempProject(
+      async (root) => {
+        await Deno.writeTextFile(
+          join(root, 'page.tsx'),
+          `export const marker = 'v1'\n`,
+        )
+        // Mirrors a real `deno coverage` HTML report's own shape closely enough to matter here:
+        // many small, flat files, the same thing `usePolling` would otherwise `fs.stat` on every
+        // tick. 3000 is well past what a real project's report tree looks like in practice, while
+        // still fast enough to write in a test's own `build` phase.
+        const coverageDir = join(root, 'coverage', 'html')
+        await Deno.mkdir(coverageDir, { recursive: true })
+        await Promise.all(
+          Array.from(
+            { length: 3000 },
+            (_, i) => Deno.writeTextFile(join(coverageDir, `file-${i}.html`), '<html></html>'),
+          ),
+        )
+      },
+      async (root) => {
+        const events: SsrModuleChangedEvent[] = []
+        const bootStart = performance.now()
+        const engine = await createSpaceDevEngine({
+          root,
+          isRouteEntry,
+          onSsrModuleChanged: (event) => events.push(event),
+        })
+        try {
+          const bootMs = performance.now() - bootStart
+          // Generous on purpose — this suite's own unaffected boots (no `coverage/` at all, see
+          // every other test above) finish in well under a second locally; this only needs to
+          // catch the underlying regression class (the watcher choking on thousands of ignored
+          // files), not chase a tight ceiling that would make this test flaky on a loaded CI box.
+          assert(bootMs < 8000, `expected a fast boot despite coverage/, took ${bootMs}ms`)
+
+          await engine.ssrLoadModule('/page.tsx') // establish the module graph before editing
+
+          await Deno.writeTextFile(
+            join(root, 'page.tsx'),
+            `export const marker = 'v2'\n`,
+          )
+
+          // Same `waitUntil` bound every other real-edit-propagation test in this file already
+          // trusts — if the watcher were starved by `coverage/`'s own polling, this real edit
+          // would either miss that bound or take dramatically longer than the unaffected tests
+          // above, not just "eventually" resolve.
+          const event = await waitUntil(() => events.find((e) => e.changeType === 'update'))
+          assert(event.affectedRoutes.some((route) => route.endsWith('page.tsx')))
         } finally {
           await engine.close()
         }

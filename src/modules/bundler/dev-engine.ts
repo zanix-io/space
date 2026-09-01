@@ -459,7 +459,48 @@ export async function createSpaceDevEngine(
       watch: {
         usePolling: true,
         interval: 100,
-        ignored: ['**/node_modules/**', '**/.git/**'],
+        // Every one of these mirrors a directory `zanix new`'s own generated `.gitignore`
+        // (`ignore.base`, `@zanix/cli`) already calls out as build/report output, never a real
+        // source file a route/layout/Comet could live in — `coverage/` is the real, confirmed
+        // incident this list closes: a project that has ever run `deno test --coverage` accumulates
+        // thousands of small HTML/JSON files there (`deno coverage`'s own per-source-line report),
+        // and this watcher previously had no entry for it. `usePolling` (this option's own doc,
+        // above) means every one of those files gets a real `fs.stat` every `interval` — thousands
+        // of them, every 100ms, forever, on the SAME single-threaded process this whole dev server
+        // (and the native `zanix space dev` process hosting it) runs on. That's enough sustained
+        // main-thread contention to starve out unrelated `await`s queued behind it: confirmed by
+        // reproducing a real login POST against `console`'s own `csrfGuard()`-protected page —
+        // `@zanix/helpers`' `validateHash` (a tight loop of thousands of sequential
+        // `await crypto.subtle.digest()` calls, each one a fresh trip through the event loop) took
+        // several MINUTES to resolve with a populated `coverage/` present at the project root,
+        // against ~100ms with none — while every other request stayed fast, since nothing else on
+        // the hot path awaits that many times in a row. Removing (or excluding) `coverage/` alone
+        // reproducibly fixes it; the same reasoning extends to every other output directory below,
+        // since none of them can ever legitimately grow without bound the way `coverage/` does.
+        //
+        // Deliberately no `**/__tmp__/**` entry, despite `__tmp__/` appearing right alongside
+        // `coverage/` in that same `.gitignore` template — confirmed the hard way, not an
+        // oversight: unlike every directory below (always build/report OUTPUT living inside a
+        // project), `getTemporaryFolder` (`@zanix/utils`) uses `__tmp__` ecosystem-wide as a
+        // general scratch ROOT that a whole temporary PROJECT gets created inside (this repo's own
+        // `dev-engine.test.ts`, and `@zanix/cli`'s own `command-live-boot.test.ts`, both do
+        // exactly this). A glob broad enough to exclude a project's own `__tmp__` SUBFOLDER also
+        // excludes the project's OWN root when `root` itself lives inside an ancestor `__tmp__` —
+        // adding it here silently stopped every one of that file's file-watch-propagation tests
+        // from ever seeing an edit at all (every `waitUntil` there timed out uniformly, not just
+        // the ones touching this list), which is how this was caught.
+        ignored: [
+          '**/node_modules/**',
+          '**/.git/**',
+          '**/coverage/**',
+          '**/.vite/**',
+          '**/dist/**',
+          '**/.dist/**',
+          '**/dist-ssr/**',
+          '**/out/**',
+          '**/vendor/**',
+          '**/.logs/**',
+        ],
       },
     },
     // Vite 8's default CSS transformer (Lightning CSS, a Rust native addon) fails to load under
@@ -677,7 +718,23 @@ export async function createSpaceDevEngine(
         // message). Translated to `null` here so this is the one, sole place a caller needs to
         // handle "not found" — every other rejection (a real syntax error, for instance) still
         // propagates unchanged, matching this method's own documented contract.
-        if ((error as { code?: string }).code === 'ERR_LOAD_URL') return null
+        const code = (error as { code?: string }).code
+        if (code === 'ERR_LOAD_URL') return null
+        // A SECOND, structurally different "not found" shape reaches here for at least some
+        // requests (confirmed live: `/sw.js` against a real project reproduces this every time,
+        // `/does-not-exist.css` reproduces the `ERR_LOAD_URL` shape above instead — both are a
+        // genuinely missing file, not a syntax/transform error) — thrown by the
+        // `@deno/vite-plugin`/`@jsr/deno__loader` bridge (the WASM loader Deno uses to read real
+        // files off disk), as a plain `Error` with no `.code` and no `.cause` (confirmed empirically:
+        // `constructor.name`/`name` are both `"Error"`, `Object.getOwnPropertyNames` is only
+        // `["stack", "message"]`, `cause` is `undefined`, and it is not a `TypeError`) — the message
+        // text is the only signal that exists to identify it. That makes this match strictly more
+        // fragile than the structured `.code` check above: if `@jsr/deno__loader` ever reworks this
+        // message's wording, this stops matching silently, with no compile-time or type-level way to
+        // catch the drift. Accepted trade-off — no structured field is available to key off instead.
+        if (/^Import '.+' failed, not found\.$/.test((error as Error).message ?? '')) {
+          return null
+        }
         throw error
       }
       if (!result) return null

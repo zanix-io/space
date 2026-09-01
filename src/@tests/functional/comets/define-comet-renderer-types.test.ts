@@ -66,11 +66,10 @@ const propsStillChecked: (props: { label: string } & CometProps) => unknown = Pr
 
 // -- The boundary's RETURN does not leak as `any` ------------------------------------------------
 //
-// `CometBoundaryComponent` returns `SpaceChildren`, not `any`. It used to return `any`, and that
-// escaped the package: calling a comet outside JSX (legal, if unusual) handed the consumer an `any`
-// that then flowed into any position at all, unchecked. The directives below are the assertion —
-// each one fails this suite (TS2578, "unused '@ts-expect-error'") the moment that return widens
-// back to `any`.
+// `CometBoundaryComponent` returns `SpaceChildren`, never `any` — calling a comet outside JSX
+// (legal, if unusual) must never hand the consumer an `any` that then flows into any position at
+// all, unchecked. The directives below are the assertion — each one fails this suite (TS2578,
+// "unused '@ts-expect-error'") the moment that return widens to `any`.
 function returnDoesNotLeak(): unknown[] {
   // @ts-expect-error a rendered comet is not a number
   const asNumber: number = ReactComet({ label: 'a' })

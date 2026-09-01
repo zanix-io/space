@@ -8,9 +8,10 @@ console.error = () => {}
 /**
  * `useWorker` is exclusively an execution-strategy switch — every test here proves it changes
  * WHERE the CPU work runs, never WHAT it computes. Real `WorkerManager` (`@zanix/utils/workers`),
- * not mocked: this exact combination (a worker task that throws) hung indefinitely in a real spike
- * during design until `@zanix/logger` was imported ahead of `@zanix/workers` — the "errors aren't
- * silenced" test below is the regression test for that exact, previously-reproduced bug.
+ * not mocked: a worker task that throws must reject its caller, never hang the process —
+ * reproducible only when `@zanix/logger` is imported ahead of `@zanix/workers`, so that import
+ * order is load-bearing here, not incidental. The "errors aren't silenced" test below is exactly
+ * that guarantee's own regression coverage.
  */
 
 function gradientRaw(width: number, height: number): Uint8Array {

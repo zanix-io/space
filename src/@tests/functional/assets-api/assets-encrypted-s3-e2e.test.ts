@@ -122,7 +122,11 @@ Deno.test({
       })
     })
     const [serverId] = await bootstrapServers({
-      rest: { application: 'assets-encrypted-e2e-test', id: 'assets-encrypted-e2e-test' },
+      rest: {
+        port: 23010,
+        application: 'assets-encrypted-e2e-test',
+        id: 'assets-encrypted-e2e-test',
+      },
     })
     assert(serverId, 'the server should have been started')
 

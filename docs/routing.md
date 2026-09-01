@@ -227,6 +227,45 @@ carry `Authorization`/cookies, to `onError` at all). Without the flag, every 404
 document — Orbit's own client runtime already degrades gracefully on any non-`ok` fragment response,
 just one wasted round-trip slower.
 
+### Composing multiple `onError` handlers
+
+`bootstrapServers`/`bootstrapRemoteApp`'s `ssr.onError` accepts exactly one handler — but a real app
+often needs more than one concern wired there, e.g. `createNotFoundHandler()` above alongside
+something app-specific. `globalErrorHandler(...handlers)` tries each handler in order against the
+same thrown error; the first one that returns a real `Response` wins. A handler that returns
+`undefined` (this package's own "not handled, fall through" convention — the same one
+`createNotFoundHandler()`'s own returned function already follows) is skipped, exactly as if it were
+never in the list. If every handler declines, so does the composed one, falling through to
+`@zanix/server`'s own default error response unchanged:
+
+```ts
+// main.ts
+import { createNotFoundHandler, globalErrorHandler } from '@zanix/space'
+import { recoverRotatedSessionCookie } from '@zanix/auth'
+import { bootstrapServers } from '@zanix/server'
+
+await bootstrapServers({
+  ssr: {
+    application: 'storefront',
+    onError: globalErrorHandler(recoverRotatedSessionCookie(), createNotFoundHandler()),
+  },
+})
+```
+
+`recoverRotatedSessionCookie()` above is `@zanix/auth`'s own real motivating case: a guard that
+rotates a session token before a later guard/pipe throws never delivers the replacement cookie
+through the normal response path, since `@zanix/server`'s own guard pipeline skips its registered
+response interceptors on a thrown error — that recovery function reads the rotated token back off
+the error and reattaches it here instead. Order is entirely the caller's choice; a handler that only
+recognizes one specific error shape (like `createNotFoundHandler()`'s own `HttpError('NOT_FOUND')`
+check) is naturally safe to place anywhere in the list, since it already returns `undefined` for
+everything else.
+
+Write a handler meant for this composer against `ComposableErrorHandler`
+(`(error: unknown) => Response | Promise<Response> | undefined`), not `OnErrorHandler` —
+`createNotFoundHandler()`'s own return value already satisfies it structurally, no cast needed at
+the call site.
+
 ### A thrown `loader` never leaks raw JSON
 
 A page's own `loader`, or a nested layout segment's own `loader`, throwing is recovered into a real,

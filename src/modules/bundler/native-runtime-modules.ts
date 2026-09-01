@@ -26,7 +26,7 @@ import type { Plugin } from 'vite'
  *
  * ## Why neither `resolve.external` (Vite config) nor a plain `resolveId` external marker works
  *
- * Both were tried and ruled out empirically, not by inspection alone, before this file was written:
+ * Both are ruled out empirically, not by inspection alone:
  *
  * - **`environments.ssr.resolve.external: ['@zanix/space', '@zanix/server']`** (alongside this
  *   engine's existing `noExternal: true`, which a bare config `external` entry legitimately takes
@@ -75,10 +75,10 @@ import type { Plugin } from 'vite'
  *
  * ## `react`/`react-dom` are on this list too, for the identical reason
  *
- * Previously believed unnecessary: `canonicalBareSpecifierResolvePlugin` already resolves a bare
- * `import 'react'` to the SAME physical file `react-dom/server`'s own native-side copy loads from,
- * so a hookless component renders correctly either way — confirmed empirically, but only for THAT
- * case. `canonicalBareSpecifierResolvePlugin` only ever fixes WHICH FILE a specifier resolves to;
+ * `canonicalBareSpecifierResolvePlugin` alone is not sufficient here, even though it already
+ * resolves a bare `import 'react'` to the SAME physical file `react-dom/server`'s own native-side
+ * copy loads from, so a hookless component renders correctly either way — confirmed empirically,
+ * but only for THAT case. `canonicalBareSpecifierResolvePlugin` only ever fixes WHICH FILE a specifier resolves to;
  * it returns a plain absolute path, not a truly external `scheme://` id, so Vite still treats that
  * path as an ordinary project file — transforms it and evaluates the result as its OWN, separate
  * module instance, same physical source or not. A route/Comet file's own `import 'react'` and
@@ -172,10 +172,11 @@ function isNativeRuntimeSpecifier(id: string): boolean {
  * array order) before any un-enforced ("normal") plugin gets a turn, regardless of where either
  * sits in the overall array. `@vitejs/plugin-react` (reached via `dev-engine.ts`'s own
  * `...options.plugins`, positionally AFTER this plugin) registers its own `resolveId` hooks with
- * `enforce: 'pre'` too — without matching that tier here, THIS plugin (previously un-enforced, so
- * "normal" tier) never got a turn for a bare `import 'react'` at all, no matter how early in the
- * array it was registered: confirmed by inspecting a real generated SSR module, which still
- * resolved `react` to a plain `node_modules` path even after `NATIVE_RUNTIME_MODULES` listed it.
+ * `enforce: 'pre'` too — without matching that tier here, this plugin (at "normal" tier) would
+ * never get a turn for a bare `import 'react'` at all, no matter how early in the array it's
+ * registered: confirmed by inspecting a real generated SSR module, which still resolves `react` to
+ * a plain `node_modules` path even without `enforce: 'pre'` here, despite `NATIVE_RUNTIME_MODULES`
+ * listing it.
  * `@zanix/space`/`@zanix/server` never needed this — nothing else in the pipeline resolves those
  * two at `enforce: 'pre'`, so "normal" tier already won for them; `react`/`react-dom` need the same
  * tier as their own competing resolver to reliably win the array-order tiebreak within it.

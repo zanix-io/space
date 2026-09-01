@@ -83,7 +83,7 @@ Deno.test({
       })
     })
     const [serverId] = await bootstrapServers({
-      rest: { application: 'assets-api-s3-test', id: 'assets-api-s3-test' },
+      rest: { port: 23004, application: 'assets-api-s3-test', id: 'assets-api-s3-test' },
     })
     assert(serverId, 'the server should have been started')
     try {

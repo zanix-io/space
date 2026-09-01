@@ -11,18 +11,21 @@ Deno.test(
     assertEquals(ctx.url.href, 'http://localhost/')
     assertStrictEquals(ctx.csrfToken, undefined)
     assertStrictEquals(ctx.population, undefined)
+    assertStrictEquals(ctx.session, undefined)
   },
 )
 
 Deno.test(
-  'mockPageContext: a loader receives exactly the params/request/url/csrfToken/population passed as overrides',
+  'mockPageContext: a loader receives exactly the params/request/url/csrfToken/population/session passed as overrides',
   async () => {
     const request = new Request('http://localhost/products/1')
+    const session = { id: 'user-1', type: 'user' as const, rateLimit: 100 }
     const ctx = mockPageContext({
       params: { id: '1' },
       request,
       csrfToken: 'test-token',
       population: 'zanix',
+      session,
     })
 
     // Proves the shape is what a real `loader` expects — no `SpacePageController` instance
@@ -33,11 +36,18 @@ Deno.test(
         path: loaderCtx.url.pathname,
         token: loaderCtx.csrfToken,
         population: loaderCtx.population,
+        session: loaderCtx.session,
       }
     }
 
     const data = await loader(ctx)
-    assertEquals(data, { id: '1', path: '/products/1', token: 'test-token', population: 'zanix' })
+    assertEquals(data, {
+      id: '1',
+      path: '/products/1',
+      token: 'test-token',
+      population: 'zanix',
+      session,
+    })
     assertStrictEquals(ctx.request, request)
   },
 )

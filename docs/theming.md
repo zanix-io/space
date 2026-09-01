@@ -219,7 +219,7 @@ export default defineSpaceApp({
   BEFORE ever revalidating at all — that partitioning question is a separate, already-documented
   architectural boundary (`populationGuard`'s own doc: "nothing in `@zanix/space` itself assumes a
   shared cache exists today") and stays explicitly out of scope here. `cacheControl` itself stays
-  the page author's own explicit responsibility, exactly as before this feature existed.
+  the page author's own explicit responsibility.
 - **Prefetch**: Orbit's own hover/viewport prefetch never modifies the DOM or triggers extra
   hydration/render on its own — a resolved theme is entirely a SERVER-SIDE, SSR-time concern (the
   `<style>` block is just more text inside whatever HTML gets cached/served), so prefetch needs no

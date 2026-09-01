@@ -18,8 +18,9 @@ import { renderToResponse as renderToResponsePreact } from 'modules/render/rende
 // Per variant matters: installing a renderer replaces the page/not-found renderer wholesale (one
 // renderer per app). The Comet element factory is kept per renderer instead, so both stay
 // registered regardless of order, which is what lets `defineComet` render in variants B/C (React)
-// and D (Preact) within a single run. Without this, `getCometElementFactory()` throws and every
-// Comet boundary disappears — exactly the guard that replaced the old silent-empty-markup defect.
+// and D (Preact) within a single run. Without this, `getCometElementFactory()` throws for
+// whichever renderer isn't registered — a loud failure, not a silent empty-markup one, and every
+// Comet boundary disappears from the render as a result.
 import { installReactRuntime } from '../../../../../mod-react.ts'
 import { installPreactRuntime } from '../../../../../mod-preact.ts'
 import { setCometManifest } from 'modules/comets/comet-manifest.ts'

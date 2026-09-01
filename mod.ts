@@ -143,6 +143,7 @@ export {
   getActiveRenderer,
   getDefaultPageHeaders,
   getRoutesDir,
+  globalErrorHandler,
   loadRoutes,
   Page,
   scanPageFiles,
@@ -154,6 +155,7 @@ export type { RendererKind } from 'modules/router/mod.ts'
 export type {
   BaseContext,
   ClassConstructor,
+  ComposableErrorHandler,
   DiscoveredPage,
   GenericPayload,
   HandlerContext,

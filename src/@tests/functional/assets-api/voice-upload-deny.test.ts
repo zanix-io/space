@@ -32,7 +32,7 @@ Deno.test({
       createAssetsController({ prefix: 'assets', service: createUnreachableAssetService() })
     })
     const [serverId] = await bootstrapServers({
-      rest: { application: 'assets-api-deny-test', id: 'assets-api-deny-test' },
+      rest: { port: 23003, application: 'assets-api-deny-test', id: 'assets-api-deny-test' },
     })
     assert(serverId, 'the server should have been started')
 

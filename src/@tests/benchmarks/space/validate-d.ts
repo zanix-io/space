@@ -64,30 +64,30 @@ function validate(html: string, label: string): Check[] {
 
   return [
     {
-      name: '1. HTML de servidor presente',
+      name: '1. server HTML present',
       pass: html.length > 5000 && html.includes('<html') && html.includes('</html>'),
-      detail: `${html.length} bytes, documento completo`,
+      detail: `${html.length} bytes, complete document`,
     },
     {
-      name: '2. data-comet-module presente',
+      name: '2. data-comet-module present',
       pass: moduleAttrs.length === cometBoundaries && moduleAttrs.length > 0 &&
         !moduleAttrs.some((a) => a.includes('file://') || a.includes('""')),
-      detail: `${moduleAttrs.length}/${cometBoundaries} boundaries con módulo resoluble`,
+      detail: `${moduleAttrs.length}/${cometBoundaries} boundaries with a resolvable module`,
     },
     {
-      name: '3. contenido de los Comets presente',
+      name: '3. Comets content present',
       pass: likeCounts > 0 && cartRendered,
-      detail: `${likeCounts} LikeButton renderizados, Cart presente: ${cartRendered}`,
+      detail: `${likeCounts} LikeButton rendered, Cart present: ${cartRendered}`,
     },
     {
-      name: '4. múltiples Comets renderizados',
+      name: '4. multiple Comets rendered',
       pass: cometBoundaries > 1 && distinctExports.size >= 3,
-      detail: `${cometBoundaries} boundaries, ${distinctExports.size} tipos distintos: ${
+      detail: `${cometBoundaries} boundaries, ${distinctExports.size} distinct types: ${
         [...distinctExports].join(', ')
       }`,
     },
     {
-      name: '5. props serializadas correctamente',
+      name: '5. props serialized correctly',
       pass: propAttrs.length === cometBoundaries &&
         propAttrs.every((a) => {
           const raw = a.slice('data-comet-props="'.length, -1)
@@ -99,32 +99,32 @@ function validate(html: string, label: string): Check[] {
             return false
           }
         }),
-      detail: `${propAttrs.length}/${cometBoundaries} atributos, todos JSON parseable`,
+      detail: `${propAttrs.length}/${cometBoundaries} attributes, all JSON-parseable`,
     },
     {
-      name: '6. Comet stateful funcionando',
+      name: '6. stateful Comet working',
       // LikeButton renders `♡ N` from its own useState initial value — its presence proves the
       // hook ran during SSR instead of the component degrading to an empty shell.
       pass: /[♡♥]\s*\d+/.test(textOnly),
-      detail: `estado inicial de useState en el HTML: ${/[♡♥]\s*\d+/.test(textOnly)}`,
+      detail: `useState initial state present in HTML: ${/[♡♥]\s*\d+/.test(textOnly)}`,
     },
     {
-      name: '7. CSS/scoping correcto',
+      name: '7. CSS/scoping correct',
       // This scenario ships no per-comet CSS module, so the correct outcome is NO comet stylesheet
       // link at all — never a broken or empty href.
       pass: !html.includes('href=""') && !html.includes('href="undefined"'),
-      detail: 'sin hrefs vacíos/undefined',
+      detail: 'no empty/undefined hrefs',
     },
     {
-      name: '8. ausencia de errores silenciosos',
+      name: '8. no silent errors',
       pass: !html.includes('undefined') && !html.includes('[object Object]') &&
         !html.includes('NaN'),
-      detail: 'sin undefined / [object Object] / NaN en el marcado',
+      detail: 'no undefined / [object Object] / NaN in the markup',
     },
     {
-      name: '9. mismo escenario y datos que A/B/C',
+      name: '9. same scenario and data as A/B/C',
       pass: productsPresent === products.length,
-      detail: `${productsPresent}/${products.length} productos del dataset compartido presentes`,
+      detail: `${productsPresent}/${products.length} products from the shared dataset present`,
     },
   ].map((c) => ({ ...c, name: `[${label}] ${c.name}` }))
 }
@@ -201,17 +201,17 @@ async function main(): Promise<void> {
   await Deno.writeTextFile(join(tmp, 'variant-b.html'), htmlB)
 
   const checks = [...validate(htmlB, 'B/ref'), ...validate(htmlD, 'D')]
-  console.log('\n=== Validación funcional de la variante D ===\n')
+  console.log('\n=== Functional validation of variant D ===\n')
   for (const c of checks) {
     console.log(`${c.pass ? 'PASS' : 'FAIL'}  ${c.name} — ${c.detail}`)
   }
 
   const failed = checks.filter((c) => !c.pass)
-  console.log(`\nHTML volcado en: ${tmp}`)
+  console.log(`\nHTML dumped to: ${tmp}`)
   console.log(
     failed.length === 0
-      ? '\nRESULTADO: D es funcionalmente equivalente a B. Apto para medición.'
-      : `\nRESULTADO: ${failed.length} verificación(es) fallaron. D NO es apto para medición.`,
+      ? '\nRESULT: D is functionally equivalent to B. Fit for measurement.'
+      : `\nRESULT: ${failed.length} check(s) failed. D is NOT fit for measurement.`,
   )
   Deno.exit(failed.length === 0 ? 0 : 1)
 }

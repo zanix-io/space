@@ -48,8 +48,8 @@ const DEFAULT_CSP_DIRECTIVES = (nonce: string): CspDirectives => ({
  * three-tier chain: this page's own explicit config (including `false`) > a guard registered via
  * `defineMiddleware`/`@Guard` (`cspGuard()`/`securityHeadersGuard()`) > this page's own zero-config
  * default.** Tiers 1 and 3 are resolved entirely here, inside this function; tier 2 is resolved by
- * `@zanix/server`'s own `mainInterceptor` (see that package's own CHANGELOG), which this function
- * only ever DEFERS to — never duplicates. The real problem this solves: `mainInterceptor`'s own
+ * `@zanix/server`'s own `mainInterceptor`, which this function only ever DEFERS to — never
+ * duplicates. The real problem this solves: `mainInterceptor`'s own
  * merge can only tell "the response already has this header" from "it doesn't" — a plain boolean,
  * not enough to express three tiers. Without the extra signals below, this page's own zero-config
  * defaults (values nobody actually asked for — CSP's nonce-based policy exists purely so hydration

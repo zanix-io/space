@@ -17,14 +17,14 @@ import { gradientJpeg } from './image-fixtures.ts'
  * second `Deno.test` block in that same file) per the "its own file, one real server boot"
  * convention `voice-upload-deny.test.ts` already establishes: `deno test` runs each file in its
  * own isolated worker, so two server boots sharing one process (and one `webServerManager`/port
- * 8000) never interfere. Confirmed the hard way — a first attempt at putting both cases in one
- * file produced a real, reproducible `Connection refused` on the second server boot, not a bug in
- * the product.
+ * 8000) never interfere. Two server boots sharing one process and port, confirmed empirically,
+ * produce a real, reproducible `Connection refused` on the second boot — not a bug in the product,
+ * just why this file stays split from its sibling.
  *
- * Proves the never-worsened guardrail survives the FULL HTTP+S3 round trip: nothing in this repo
- * tested that before — `optimizeImageAsset`'s own "no improvement keeps the original bytes
- * exactly" case was previously only proven directly against the transformer
- * (`image-optimize.test.ts`), never through `AssetService`/HTTP/S3.
+ * Proves the never-worsened guardrail survives the FULL HTTP+S3 round trip — the ONLY place this
+ * repo does: `optimizeImageAsset`'s own "no improvement keeps the original bytes exactly" case is
+ * otherwise only proven directly against the transformer (`image-optimize.test.ts`), never through
+ * `AssetService`/HTTP/S3.
  */
 const runS3 = Deno.env.get('RUN_S3_TESTS') === 'true'
 
@@ -50,8 +50,8 @@ Deno.test({
     // A source already encoded at LOW quality (15) — re-encoding at the pipeline's own higher
     // default quality reliably produces a LARGER result (same fixture/reasoning
     // `image-optimize.test.ts`'s own "no improvement keeps the original bytes exactly" case
-    // already verified for the transformer directly; this proves the SAME guardrail survives the
-    // full HTTP+S3 round trip, which nothing in this repo tested before).
+    // already verifies for the transformer directly; this proves the SAME guardrail survives the
+    // full HTTP+S3 round trip, the only place in this repo that does).
     const sourceBytes = await gradientJpeg(200, 150, 15)
 
     const service = createAssetService({
@@ -68,6 +68,7 @@ Deno.test({
     })
     const [serverId] = await bootstrapServers({
       rest: {
+        port: 23008,
         application: 'assets-api-image-s3-never-worsened-test',
         id: 'assets-api-image-s3-never-worsened-test',
       },

@@ -16,11 +16,11 @@ import { resolveAssetStorage } from '../../support/resolve-asset-storage.ts'
  * The real end-to-end composition for a VIDEO upload — HTTP -> AssetsController -> AssetService ->
  * AssetStorage -> (via `resolveAssetStorage()`) the real `'s3'` core connector ->
  * `S3ObjectStorage` -> a REAL SeaweedFS instance. Same gating/setup convention as
- * `voice-upload-s3.test.ts`/`image-upload-s3.test.ts`, which this file mirrors for the video kind
- * — previously video only reached S3 inside `assets-encrypted-s3-e2e.test.ts` (a tiny 64x64 fixture
- * proving encryption, never a real size reduction). This file closes that gap: a real,
- * higher-resolution source, transcoded down at the default `'mlg'` breakpoint (720px width), and
- * proven genuinely smaller once actually round-tripped through S3.
+ * `voice-upload-s3.test.ts`/`image-upload-s3.test.ts`, which this file mirrors for the video kind.
+ * `assets-encrypted-s3-e2e.test.ts` covers video reaching S3 too, but only with a tiny 64x64
+ * fixture proving encryption, never a real size reduction — this file is the one that proves size
+ * reduction specifically: a real, higher-resolution source, transcoded down at the default `'mlg'`
+ * breakpoint (720px width), and proven genuinely smaller once actually round-tripped through S3.
  *
  * Its own file, one real server boot — same convention every sibling S3 functional test uses.
  */
@@ -91,7 +91,11 @@ Deno.test({
       })
     })
     const [serverId] = await bootstrapServers({
-      rest: { application: 'assets-api-video-s3-test', id: 'assets-api-video-s3-test' },
+      rest: {
+        port: 23009,
+        application: 'assets-api-video-s3-test',
+        id: 'assets-api-video-s3-test',
+      },
     })
     assert(serverId, 'the server should have been started')
     try {

@@ -10,12 +10,12 @@ console.error = () => {}
 
 /**
  * Its own file, one real server boot — same convention `voice-upload.test.ts`/`voice-upload-deny.
- * test.ts` already establish. Proves a REAL, found gap this session closed is genuinely fixed at
- * the HTTP layer, not just the unit layer: `AssetService` used to hardcode `.wav` as the temp
- * source file's own extension regardless of what a caller actually uploaded, which meant the
- * voice profile's own `.wav`-only guardrail (`validateVoiceSource`) could never actually fire
- * through a real upload — any content, mislabeled as `.wav` internally, always passed. Fixed by
- * deriving the temp file's extension from the REAL, stored `Content-Type` instead of assuming one.
+ * test.ts` already establish. Proves the voice profile's own `.wav`-only guardrail
+ * (`validateVoiceSource`) is genuinely enforced at the HTTP layer, not just the unit layer:
+ * `AssetService` must never hardcode `.wav` as the temp source file's own extension regardless of
+ * what a caller actually uploads — it derives that extension from the REAL, stored `Content-Type`
+ * instead, which is what lets the guardrail actually fire through a real upload rather than always
+ * seeing a fixed `.wav` label internally, no matter what content arrives.
  *
  * No `ignore` gate — this never reaches real ffmpeg (rejected before it's ever probed), so it runs
  * unconditionally, unlike its sibling `voice-upload.test.ts`.
@@ -45,6 +45,7 @@ Deno.test({
     })
     const [serverId] = await bootstrapServers({
       rest: {
+        port: 23001,
         application: 'assets-api-wrong-content-type-test',
         id: 'assets-api-wrong-content-type-test',
       },

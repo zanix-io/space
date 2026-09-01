@@ -89,8 +89,8 @@ Deno.test(
     // staying alive. The default `finalize: true` would wipe it here, leaving that next test's own
     // `bootstrapServers({ socket: {...} })` with zero socket routes to bind — its `new
     // WebSocket(...)` would then hang forever waiting for an `onopen` that never fires, since a
-    // route-less socket listener never actually starts (confirmed the hard way: this test
-    // originally used the default finalize, and it broke exactly that next test).
+    // route-less socket listener never actually starts (confirmed directly: the default
+    // `finalize: true` here breaks exactly that next test).
     const port = 21003
     const servers = await bootstrapServers({ socket: { port } }, {
       finalize: false,

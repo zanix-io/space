@@ -1,6 +1,6 @@
 {
   "name": "@zanix/space",
-  "version": "0.3.2",
+  "version": "1.0.0",
   "zanix": {
     "project": "library"
   },
@@ -195,14 +195,14 @@
   // `jsr:` specifier instead, never a bare alias declared here. A bare alias declared in a
   // package's own `imports`, on its own, is enough for Deno's `nodeModulesDir: "auto"`-style
   // npm-install resolution to materialize the WHOLE declared dependency into every consumer's
-  // `node_modules/.deno` — REGARDLESS of whether any reachable code actually imports it — which is
-  // exactly what made every `@zanix/space` app's own build resolve `@zanix/auth`'s real
+  // `node_modules/.deno` — REGARDLESS of whether any reachable code actually imports it — exactly
+  // what would make every `@zanix/space` app's own build resolve `@zanix/auth`'s real
   // `@zanix/datamaster` dependency (`mongoose`/`mongodb`/`bson`/`redis`/`@redis/*`), whether or not
-  // it ever used the Log API's rate limiting. Confirmed real via the identical root cause already
-  // fixed in `zanix-io/app`'s own `deno.jsonc` — see that package's own doc comment there for the
-  // full empirical trace. `@zanix/datamaster/storage`/`@zanix/datamaster/core` were never used by
-  // any shipped (non-`@tests`) file at all — only by this package's own test suite, which resolves
-  // both aliases (and `@zanix/auth`, for the same reason) via `scopes` below instead.
+  // it ever uses the Log API's rate limiting, if a bare alias were declared here instead. Confirmed
+  // real: the identical root cause independently applies to `zanix-io/app`'s own `deno.jsonc`,
+  // avoided there the same way. `@zanix/datamaster/storage`/`@zanix/datamaster/core` are never used
+  // by any shipped (non-`@tests`) file at all — only by this package's own test suite, which
+  // resolves both aliases (and `@zanix/auth`, for the same reason) via `scopes` below instead.
   "scopes": {
     "./src/@tests/": {
       // Test-only, never reachable from `mod.ts`/`mod-react.ts`/`mod-preact.ts` — see
@@ -220,9 +220,9 @@
       // resize) — not the same abstraction wearing two names.
       "happy-dom": "npm:happy-dom@^20.11.2",
       "@zanix/app/runtime": "jsr:@zanix/app@^0.2.1/runtime",
-      "@zanix/auth": "jsr:@zanix/auth@^0.8.1",
-      "@zanix/datamaster/storage": "jsr:@zanix/datamaster@^1.8.0/storage",
-      "@zanix/datamaster/core": "jsr:@zanix/datamaster@^1.8.0/core"
+      "@zanix/auth": "jsr:@zanix/auth@^1.0.0",
+      "@zanix/datamaster/storage": "jsr:@zanix/datamaster@^1.9.0/storage",
+      "@zanix/datamaster/core": "jsr:@zanix/datamaster@^1.9.0/core"
     }
   },
   "exports": {
@@ -241,7 +241,7 @@
     // imported from it, regardless of which named symbol the consumer actually asked for. That
     // means a consumer importing ONLY `mediaPlugin` from `./vite` still reaches `assets-plugin.ts`,
     // and transitively `sharp`/`svgo`, purely as a side effect of the barrel shape — confirmed via
-    // `deno info --json` before this pair existed. `./vite/assets` and `./vite/media` point
+    // `deno info --json` against `./vite` alone. `./vite/assets` and `./vite/media` point
     // directly at each plugin's own already-self-contained file (each already exports its own
     // `*PluginOptions`/`*OptimizeOptions` alongside the plugin function) — a consumer wanting only
     // `mediaPlugin` imports from `./vite/media` and never resolves `sharp`/`svgo` at all (confirmed
@@ -254,19 +254,19 @@
     "./vite/media": "./src/modules/bundler/media-plugin.ts",
     "./client": "./src/modules/client/mod.ts",
     "./client/preact": "./src/modules/client/mod-preact.ts",
-    // Was `defineComet`/`loadCometManifest`/`resolveCometModuleUrl` re-exported from `.` (`mod.ts`)
-    // itself. Moved here because `.` ALSO carries genuinely server/dev-only code elsewhere in the
+    // `defineComet`/`loadCometManifest`/`resolveCometModuleUrl` live under this subpath, never `.`
+    // (`mod.ts`), because `.` ALSO carries genuinely server/dev-only code elsewhere in the
     // SAME file (`defineSpaceApp`, and `SpaceDevSocket` — a real TC39-decorated class Vite's
     // normal transform can't parse at all) — a real browser bundling a Comet's own
-    // `import { defineComet } from '@zanix/space'` has to resolve `.`'s ENTIRE export graph, not
-    // just the one symbol it asked for (a plain ES barrel resolves every one of its own export
+    // `import { defineComet } from '@zanix/space'` would have to resolve `.`'s ENTIRE export graph,
+    // not just the one symbol it asked for (a plain ES barrel resolves every one of its own export
     // statements' source files regardless of which named symbol a consumer actually imports — the
     // same reasoning `./vite/assets`/`./vite/media`'s own comment already establishes for a
     // different barrel). Confirmed empirically as a real, hard client-build failure
     // (`SpaceDevSocket`'s own decorator syntax, plus `@zanix/server`/`@zanix/app` — both needed by
     // `defineSpaceApp`, neither resolvable in a browser context), not a theoretical gap.
-    // `modules/comets/mod.ts` itself needs no changes — it already only ever touched
-    // Comet-relevant code, so this subpath is that same file, exposed under its own name.
+    // `modules/comets/mod.ts` itself already only ever touches Comet-relevant code — this subpath
+    // is that same file, exposed under its own name.
     "./comet": "./src/modules/comets/mod.ts",
     "./testing": "./src/modules/testing/mod.ts",
     "./dev": "./src/modules/dev/mod.ts",
@@ -283,8 +283,8 @@
     "./assets-manifest": "./src/modules/assets/assets-manifest.ts",
     // Image/video/thumbnail/audio transformation + the shared transform cache
     // (`transform-cache.ts`) — a runtime-agnostic facade over `optimizeImageAsset`/
-    // `VideoTranscoder`/`AudioTranscoder`, plus the real image/cache primitives that were
-    // previously reachable only via internal relative paths. Sibling of `./media` for the same
+    // `VideoTranscoder`/`AudioTranscoder`, plus the real image/cache primitives, published here as
+    // this package's one canonical public entry point for them. Sibling of `./media` for the same
     // reason: sharp (transitively) is an opt-in, heavier-dependency capability, never folded into
     // the main `.` barrel. Deliberately does NOT export `AssetManifestRegistry` (publication stays
     // an adapter concern), anything from `ffmpeg-availability.ts` (capability probing stays in
@@ -292,7 +292,7 @@
     // `createSystemFfmpegTranscoder`, `createSystemFfmpegAudioTranscoder`, the voice policy, ...) —
     // those are already public via `./media`, one canonical subpath per symbol, never two.
     "./assets": "./src/modules/asset-transform/mod.ts",
-    // The Asset Application/HTTP API — a NEW, strictly one-way layer ABOVE `./assets`: it imports
+    // The Asset Application/HTTP API — a strictly one-way layer ABOVE `./assets`: it imports
     // from `modules/asset-transform/`, never the reverse (enforced by
     // `src/@tests/unit/asset-transform/dependency-boundary.test.ts`). Real `@Controller`/
     // `ZanixController` REST routes (never `ZanixSsrController` — that's this package's own

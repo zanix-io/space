@@ -12,6 +12,10 @@ import { isDenoSpecifier, parseDenoSpecifier } from '@deno/vite-plugin/resolver'
 import { computeAffectedRoutes } from './affected-routes.ts'
 import { RealImportEvaluator } from './ssr-module-evaluator.ts'
 import { cjsInteropFallbackPlugin, denoOnLoadCjsInterop } from './cjs-interop.ts'
+import {
+  denoOnLoadDynamicImportInterop,
+  dynamicImportInteropFallbackPlugin,
+} from './dynamic-import-interop.ts'
 import { canonicalBareSpecifierResolvePlugin } from './bare-specifier-resolve.ts'
 import { nativeRuntimeModulesPlugin } from './native-runtime-modules.ts'
 import { USE_COMET_DIRECTIVE } from './comet-directive.ts'
@@ -338,9 +342,8 @@ function ssrHotUpdatePlugin(options: SpaceDevEngineOptions): Plugin {
 
         // Any other `client`-environment change (a Comet's own `.tsx`/`.ts`/`.jsx`/`.js`, never a
         // local CSS import — see `onClientModuleChanged`'s own doc for why that stays excluded) is
-        // reported here, previously left untouched/falling through. A caller
-        // that never sets `onClientModuleChanged` (any existing caller, unmodified) sees IDENTICAL
-        // behavior to before this was added: falls through below, `return`s `undefined`.
+        // reported here only when `onClientModuleChanged` is set. A caller that never sets it sees
+        // identical behavior either way: falls through below, `return`s `undefined`.
         const clientModuleUrls = ctx.modules
           .filter((mod) => !mod.file?.endsWith('.css'))
           .map((mod) => mod.url)
@@ -510,21 +513,35 @@ export async function createSpaceDevEngine(
     // `client` environment too (not just `ssr`) — see that file's own "The `client` environment has
     // the identical asymmetry" section for the real, confirmed Preact HMR regression this closes.
     //
-    // `cjsInteropFallbackPlugin()` is listed before `deno()` so its `transform` hook always runs,
-    // regardless of which of the two resolution paths described in its own doc a given file
-    // arrives through; `deno({ onLoad })` is the primary integration point for the common path.
+    // `cjsInteropFallbackPlugin()`/`dynamicImportInteropFallbackPlugin()` are listed before
+    // `deno()` so their `transform` hooks always run, regardless of which of the two resolution
+    // paths described in their own docs a given file arrives through; `deno({ onLoad })` — composed
+    // below from both fixes' own `onLoad` integration — is the primary integration point for the
+    // common path. `denoOnLoadDynamicImportInterop()` runs second, only when
+    // `denoOnLoadCjsInterop()` declines (a CJS-shaped file's own bundle text never itself contains
+    // an unanalyzable dynamic import worth rewriting) — see `dynamic-import-interop.ts`'s own doc
+    // for the real, separate `zanix space dev` blocker this closes: a genuinely dynamic
+    // `import(specifier)` (a variable, never a string literal) that Vite's own transform leaves
+    // untouched, bypassing `noExternal`/CJS interop/every other fix here entirely.
     //
-    // All four fix real, confirmed `zanix space dev` blockers — see `native-runtime-modules.ts`'s,
-    // `ssr-module-evaluator.ts`'s, `bare-specifier-resolve.ts`'s, and `cjs-interop.ts`'s own docs.
-    // `nativeRuntimeModulesPlugin()`/`cjsInteropFallbackPlugin()`/`deno({ onLoad })` stay `ssr`-only
-    // in effect (the first two are inherently SSR-shaped concerns; `onLoad` only ever fires for
+    // All five fix real, confirmed `zanix space dev` blockers — see `native-runtime-modules.ts`'s,
+    // `ssr-module-evaluator.ts`'s, `bare-specifier-resolve.ts`'s, `cjs-interop.ts`'s, and
+    // `dynamic-import-interop.ts`'s own docs. `nativeRuntimeModulesPlugin()`/
+    // `cjsInteropFallbackPlugin()`/`dynamicImportInteropFallbackPlugin()`/`deno({ onLoad })` stay
+    // `ssr`-only in effect (all inherently SSR-shaped concerns; `onLoad` only ever fires for
     // `deno()`'s own SSR-side module loading) — `canonicalBareSpecifierResolvePlugin()` is the one
     // exception, per its own doc above.
     plugins: [
       nativeRuntimeModulesPlugin(),
       canonicalBareSpecifierResolvePlugin(),
       cjsInteropFallbackPlugin(),
-      deno({ onLoad: denoOnLoadCjsInterop(options.root) }),
+      dynamicImportInteropFallbackPlugin(),
+      deno({
+        onLoad: async (ctx) => {
+          const cjsResult = await denoOnLoadCjsInterop(options.root)(ctx)
+          return cjsResult ?? denoOnLoadDynamicImportInterop()(ctx)
+        },
+      }),
       ...(options.plugins ?? []),
       ssrHotUpdatePlugin(options),
     ],

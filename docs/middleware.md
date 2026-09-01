@@ -157,10 +157,9 @@ export default class CheckoutPage extends SpacePageController {
 A page in an app with no guard registered for a given field at all falls through to tier 3, that
 field's own zero-config default (nonce-based for CSP;
 `SAMEORIGIN`/`strict-origin-when-cross-origin`/ `nosniff` for
-`frameOptions`/`referrerPolicy`/`noSniff` — the three that have one at all), exactly as before this
-precedence chain existed. A field with no zero-config default of its own
-(`permissionsPolicy`/`strictTransportSecurity`/the three cross-origin-isolation fields, all off by
-default) simply stays absent in that case, same as always.
+`frameOptions`/`referrerPolicy`/`noSniff` — the three that have one at all). A field with no
+zero-config default of its own (`permissionsPolicy`/`strictTransportSecurity`/the three
+cross-origin-isolation fields, all off by default) simply stays absent in that case, same as always.
 
 **Cross-origin isolation** (`SharedArrayBuffer`, precise timers) is available but off by default —
 `crossOriginOpenerPolicy`/`crossOriginEmbedderPolicy`/`crossOriginResourcePolicy` on `headers` (or
@@ -290,7 +289,7 @@ customized; both default to `X-Znx-Lang`, and both throw at construction (via `@
 `@zanix/server >=
 3.2.0`, which merges multiple guards' `headers` on the same route instead of
 letting same-name headers (here, `Set-Cookie`) silently clobber each other — needed for
-`populationGuard` and `langGuard` to coexist on one page (see that package's own CHANGELOG).
+`populationGuard` and `langGuard` to coexist on one page.
 
 **No per-route opt-out is provided**: every route is prefixed uniformly. Simpler, and nothing in
 `@zanix/space` today has a proven need for mixing prefixed and unprefixed pages in the same app;

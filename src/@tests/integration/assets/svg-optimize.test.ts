@@ -3,7 +3,7 @@ import { extractSymbolIds, optimizeSvgAsset } from 'modules/assets/svg-optimize.
 import { SVGO_SPECIFIER } from 'modules/lazy/specifiers.ts'
 
 /** Real `svgo` calls, not mocks — confirmed to run cleanly under Deno with no native binary
- * (a real spike during design: import, run, verified output). */
+ * (verified directly: import, run, verified output). */
 
 Deno.test(
   "optimizeSvgAsset: a real improvement replaces the same key's bytes — no new keys, " +

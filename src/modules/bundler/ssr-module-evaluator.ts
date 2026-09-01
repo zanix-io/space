@@ -8,7 +8,7 @@ import { fromNativeRuntimeSentinel } from './native-runtime-modules.ts'
  * `SSRCompatModuleRunner`, with no way to swap it out) for exactly one reason: its
  * `runInlinedModule` evaluates transformed code via `new AsyncFunction(...)`, and V8 (Deno's own
  * engine) never parses native TC39 decorator syntax through the `Function`/`AsyncFunction`
- * constructor — confirmed directly, isolated from Vite entirely, before this was written. A real
+ * constructor — confirmed directly, isolated from Vite entirely. A real
  * `@zanix/space` page's `@Page()` (and any other decorator `@zanix/server`'s handler classes use)
  * is real, standard ECMAScript decorator syntax — `@Page()`'s own registration logic branches on
  * a real TC39 decorator `context.kind`, so downleveling to TypeScript's legacy
@@ -19,8 +19,8 @@ import { fromNativeRuntimeSentinel } from './native-runtime-modules.ts'
  * The actual fix turned out to need nothing more than a different file EXTENSION: the identical
  * transformed code that throws `SyntaxError: Invalid or unexpected token` at the decorator line
  * when evaluated as `.mjs` parses and runs correctly as `.ts` — Deno only enables decorator-syntax
- * parsing for TypeScript file extensions, confirmed with a minimal, Vite-free reproduction before
- * this was built. `runInlinedModule` here does exactly that: writes the SAME code Vite's own
+ * parsing for TypeScript file extensions, confirmed with a minimal, Vite-free reproduction.
+ * `runInlinedModule` here does exactly that: writes the SAME code Vite's own
  * evaluator would have passed to `AsyncFunction`, unmodified, into a real `.ts` file (wrapped in an
  * `export async function` using the identical parameter names/order Vite's own evaluator uses —
  * `ssrModuleExportsKey`/`ssrImportMetaKey`/`ssrImportKey`/`ssrDynamicImportKey`/`ssrExportAllKey`/
@@ -32,7 +32,7 @@ import { fromNativeRuntimeSentinel } from './native-runtime-modules.ts'
  * `client` environment, HMR) stays entirely Vite's own, untouched. This class owns no
  * invalidation/caching logic of its own; a fresh temp file per call is what lets a re-evaluation
  * after invalidation always see the newly transformed code, never a stale one — verified with a real
- * edit-and-reload spike (not assumed) before this was written: decorators, `accessor` fields, a
+ * edit-and-reload spike (not assumed): decorators, `accessor` fields, a
  * relative import, an npm bare specifier resolved through the project's own Deno import map (via
  * `@deno/vite-plugin`), invalidate-then-re-evaluate producing a genuinely fresh module (not a cached
  * one), a real syntax error still surfacing a clear file/line/column message, and

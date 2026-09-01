@@ -51,7 +51,7 @@ function notUsed(): never {
 }
 
 /** A fake `AssetTransformer` — only `transformAudio` is real; the other three are never expected
- * to be called from this suite (only voice/audio is wired up this session). */
+ * to be called from this suite (only voice/audio is wired up here). */
 function createFakeTransformer(behavior: 'optimized' | 'never-worsened'): AssetTransformer {
   return {
     transformImage: notUsed,
@@ -251,13 +251,12 @@ Deno.test(
 )
 
 // --- the voice .wav-only guardrail is REACHABLE through the real HTTP upload flow --------------
-// A real, found gap this session closed: `AssetService` used to hardcode `.wav` as the temp
-// source file's own suffix, REGARDLESS of what content-type was actually uploaded — which meant
-// `validateVoiceSource` (`modules/media/audio/policies/voice.ts`), an extension-based check, would
-// always see `.wav` and always pass, no matter what bytes a caller actually sent. The guardrail
-// existed but could never actually fire through this path. Fixed by deriving the temp file's own
-// extension from the REAL uploaded `contentType` (`AssetObject.contentType`, read back from
-// storage) instead of assuming it. Proven here with the REAL DEFAULT transformer (no override, no
+// The temp source file's own extension must never be hardcoded to `.wav` regardless of what
+// content-type was actually uploaded: `AssetService` derives it from the REAL uploaded
+// `contentType` (`AssetObject.contentType`, read back from storage), which is what lets
+// `validateVoiceSource` (`modules/media/audio/policies/voice.ts`), an extension-based check,
+// actually see the extension that matches the uploaded bytes rather than a fixed `.wav`
+// regardless of caller input. Proven here with the REAL DEFAULT transformer (no override, no
 // fake) — the actual production wiring `createAssetService({storage, repository})` uses. No real
 // ffmpeg needed: the guardrail rejects before ffmpeg is ever probed.
 
@@ -815,11 +814,10 @@ Deno.test(
 )
 
 // --- createAsset: AssetServiceOptions.limits — the two-layer size defense ----------------------
-// A real, found gap this session closed: `AssetService` used to drain an upload's whole
-// `ReadableStream` into memory with no cap at all — `UploadedAsset.size` (the `Content-Length`
-// header) was read but never validated against anything, and `Content-Length` is itself optional/
-// spoofable. See `AssetServiceOptions.limits`'s own doc for the full two-layer design these tests
-// prove.
+// `AssetService` must never drain an upload's whole `ReadableStream` into memory with no cap at
+// all: `UploadedAsset.size` (the `Content-Length` header) alone is not sufficient, since
+// `Content-Length` is itself optional/spoofable. See `AssetServiceOptions.limits`'s own doc for
+// the full two-layer design these tests prove.
 
 /** Wraps a real stream but throws if `getReader()` is ever called — proves Layer 1 (the
  * `Content-Length` fast reject) rejects BEFORE the stream is touched at all, not merely before it
@@ -915,8 +913,8 @@ Deno.test(
 )
 
 // --- runImageTransformation: magic-byte verification --------------------------------------------
-// A real, found gap this session closed: the image content-type allowlist only ever checked the
-// client-supplied `Content-Type` HEADER — nothing verified the uploaded BYTES actually matched it.
+// The image content-type allowlist must never trust the client-supplied `Content-Type` HEADER
+// alone — the uploaded BYTES must actually match it.
 
 Deno.test(
   'createAsset: an image upload whose Content-Type header LIES about the real bytes is rejected ' +

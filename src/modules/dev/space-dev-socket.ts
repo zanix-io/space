@@ -142,8 +142,8 @@ export function broadcastClientModuleChanged(urls: string[]): void {
 /**
  * Sends a `full-reload` notification to every currently-connected {@linkcode SpaceDevSocket} —
  * the real, browser-facing counterpart of `SpaceDevEngine`'s `onFullReloadNeeded` callback
- * (`@zanix/space`'s own bundler module, which only reports the event). Relays a REAL, previously
- * unreachable signal: Vite's own dependency optimizer calls `environment.hot.send({ type:
+ * (`@zanix/space`'s own bundler module, which only reports the event). Relays a signal this
+ * engine has no other path for: Vite's own dependency optimizer calls `environment.hot.send({ type:
  * 'full-reload' })` internally whenever it needs to re-run mid-session (discovers a dependency it
  * didn't know about during its first scan) — real Vite's own dev server relies on its own
  * WebSocket/HMR channel to relay this to the browser, so the page reloads onto the now-settled,

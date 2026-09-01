@@ -171,10 +171,9 @@ async function buildAndRenderAll(products: ReturnType<typeof makeProducts>) {
   )
 
   const assetsD = join(dirs.d, 'assets')
-  // No casts — `defineComet` returns a renderer-neutral boundary component
+  // No casts needed — `defineComet` returns a renderer-neutral boundary component
   // (`CometBoundaryComponent`, `typings/comet.ts`), so a Preact-authored comet arrives here as a
-  // value Preact's own `createElement` accepts directly. This used to require three `as any`s,
-  // because that return type named React's own `ComponentType`.
+  // value Preact's own `createElement` accepts directly, never React's own `ComponentType`.
   const htmlD = await renderVariantPreactComets(
     products,
     join(dirs.d, 'comets-manifest.json'),
@@ -207,8 +206,8 @@ async function measure(
   page.setDefaultTimeout(STEP_TIMEOUT_MS)
   // Real browser-side errors forwarded to THIS process's own stderr immediately — without this, a
   // hydration failure inside the page is invisible until a `waitForFunction` below times out with
-  // no clue why (see this benchmark's own run log for why this was added: variant B hung with zero
-  // diagnostic output the first time this ran).
+  // no diagnostic clue at all: a variant's own hydration can hang with zero console output
+  // otherwise.
   page.on('console', (msg) => {
     if (msg.type() === 'error') console.error(`  [${name}] console.error: ${msg.text()}`)
   })
@@ -289,9 +288,9 @@ export async function measureAllVariants(): Promise<MeasureAllResult> {
       try {
         // A hard outer watchdog on top of `page.setDefaultTimeout` — belt and suspenders: if
         // anything inside `measure()` hangs past every Playwright-level timeout combined (should
-        // never happen, but did once with zero diagnostic output before `page.on('console'/
-        // 'pageerror')` was added), this guarantees the whole run still finishes and reports every
-        // OTHER variant instead of hanging indefinitely.
+        // never happen, but a hang here can otherwise produce zero diagnostic output at all), this
+        // guarantees the whole run still finishes and reports every OTHER variant instead of
+        // hanging indefinitely.
         const result = await Promise.race([
           measure(browser, name, `http://localhost:${port}/`),
           new Promise<never>((_, reject) =>

@@ -53,18 +53,17 @@ export class LogIngestRTO extends BaseRTO {
    * constructor, so `@Expose()` is what includes it in the resolved RTO instance without running
    * it through this package's normal per-field validation pipeline.
    *
-   * `{ optional: true }` is REQUIRED here, not cosmetic — confirmed via a real, previously
-   * untested (no functional/integration test ever exercised this route over real HTTP) bug:
-   * `@zanix/validator`'s own `@Expose()` "must be defined" check is keyed off the RAW request
-   * body's OWN `data` property (`plainPayload.data`), which never exists as a literal top-level
-   * key on the wire — `data` here is this constructor's own COMPUTED rest-spread of "everything
-   * except `level`", not a field with a matching name in the payload. Without `optional: true`,
-   * every real request — even a well-formed one — failed `classValidation` with `"The 'data'
-   * property must be defined."`, regardless of what the constructor actually assigned afterward
-   * (the constructor's own explicit `this.data = data` still runs correctly through the real
-   * setter; only the framework's own eager, payload-key-based required-check was wrong). This is
-   * also semantically correct on its own terms, independent of the bug: a body carrying only
-   * `{ level }` with no extra fields is still valid, and should resolve to `data: {}`. */
+   * `{ optional: true }` is REQUIRED here, not cosmetic: `@zanix/validator`'s own `@Expose()`
+   * "must be defined" check is keyed off the RAW request body's OWN `data` property
+   * (`plainPayload.data`), which never exists as a literal top-level key on the wire — `data` here
+   * is this constructor's own COMPUTED rest-spread of "everything except `level`", not a field
+   * with a matching name in the payload. Without `optional: true`, every real request — even a
+   * well-formed one — fails `classValidation` with `"The 'data' property must be defined."`,
+   * regardless of what the constructor actually assigns afterward (the constructor's own explicit
+   * `this.data = data` still runs correctly through the real setter; only the framework's own
+   * eager, payload-key-based required-check misfires). This is also semantically correct on its
+   * own terms: a body carrying only `{ level }` with no extra fields is still valid, and should
+   * resolve to `data: {}`. */
   @Expose({ optional: true })
   accessor data!: Record<string, unknown>
 }

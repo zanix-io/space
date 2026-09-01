@@ -421,7 +421,7 @@ Deno.test(
 Deno.test(
   'buildSpaceClient: zero comets and zero global CSS still runs a real build — the ' +
     'auto-generated client entry (see client-entry-plugin.ts) means `input` is never actually ' +
-    'empty any more, so the old "skip the build entirely" early return is unreachable in practice',
+    'empty, so the "skip the build entirely" early return is unreachable in practice',
   async () => {
     await withTempDir(async (root) => {
       const result = await buildSpaceClient({ root, css: { tailwind: false } })

@@ -72,10 +72,10 @@ export type PageOptions = {
    * 2. **A `cspGuard()` registered via `defineMiddleware` (app-wide) or `@Guard` (this page's own
    *    class)** — acts as the base/default ONLY for a page that genuinely configured nothing at
    *    tier 1 (not even `false`). `@zanix/server`'s own `mainInterceptor` is what actually merges
-   *    this in (see that package's own CHANGELOG) — a guard's header is only applied when the
-   *    handler's response doesn't already have that header, never blindly combined into an
-   *    already-set value (which used to corrupt into one invalid, comma-joined result — CSP
-   *    directives are `;`-separated, never `,`).
+   *    this in — a guard's header is only applied when the handler's response doesn't already have
+   *    that header, never blindly combined into an already-set value (blindly combining the two
+   *    would corrupt into one invalid, comma-joined result — CSP directives are `;`-separated,
+   *    never `,`).
    * 3. **This page's own zero-config default** (`DEFAULT_CSP_DIRECTIVES`, nonce-based — see
    *    `SpacePageController.headers`'s own doc) — the last resort, when NEITHER tier 1 NOR tier 2
    *    has an answer. This tier is what makes the chain genuinely three-deep rather than two: a

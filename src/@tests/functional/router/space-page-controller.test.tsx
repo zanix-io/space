@@ -3,6 +3,7 @@
 import '../../../../mod-react.ts'
 import { assert, assertEquals, assertMatch, assertRejects } from '@std/assert'
 import { HttpError } from '@zanix/errors'
+import type { Session } from '@zanix/server'
 import { SpacePageController } from 'modules/router/mod.ts'
 import { mockHandlerContext } from 'modules/testing/mod.ts'
 import { stripHydrationComments } from '../../support/strip-hydration-comments.ts'
@@ -22,6 +23,13 @@ class GreetingPage extends SpacePageController<{ name: string }> {
 
 class NoLoaderPage extends SpacePageController {
   public override component = Greeting
+}
+
+class SessionPage extends SpacePageController {
+  public override component = Greeting
+  public override loader = (ctx: { session?: Session }) => ({
+    name: ctx.session?.id,
+  })
 }
 
 class ActionPage extends SpacePageController {
@@ -61,6 +69,50 @@ Deno.test(
     const html = await response.text()
     assertMatch(stripHydrationComments(html), /Hello, stranger/)
     assert(!html.includes('__ZANIX_SPACE_STATE__'))
+  },
+)
+
+Deno.test(
+  'SpacePageController.handleGet: loader receives a page-level @Guard-resolved session off ' +
+    'ctx.locals.session',
+  async () => {
+    const session: Session = { id: 'guard-user', type: 'user', rateLimit: 100 }
+    const ctx = mockHandlerContext({ locals: { session } })
+    const page = new SessionPage(ctx)
+
+    const response = await page.handleGet(ctx)
+
+    const html = await response.text()
+    assertMatch(stripHydrationComments(html), /Hello, guard-user/)
+  },
+)
+
+Deno.test(
+  'SpacePageController.handleGet: loader falls back to ctx.session when no @Guard set locals.session',
+  async () => {
+    const session: Session = { id: 'earlier-user', type: 'user', rateLimit: 100 }
+    const ctx = mockHandlerContext({ session })
+    const page = new SessionPage(ctx)
+
+    const response = await page.handleGet(ctx)
+
+    const html = await response.text()
+    assertMatch(stripHydrationComments(html), /Hello, earlier-user/)
+  },
+)
+
+Deno.test(
+  'SpacePageController.handleGet: loader prefers ctx.locals.session over an earlier ctx.session',
+  async () => {
+    const earlier: Session = { id: 'earlier-user', type: 'user', rateLimit: 100 }
+    const fresher: Session = { id: 'guard-user', type: 'user', rateLimit: 100 }
+    const ctx = mockHandlerContext({ session: earlier, locals: { session: fresher } })
+    const page = new SessionPage(ctx)
+
+    const response = await page.handleGet(ctx)
+
+    const html = await response.text()
+    assertMatch(stripHydrationComments(html), /Hello, guard-user/)
   },
 )
 

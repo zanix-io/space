@@ -27,17 +27,17 @@ function View() {
 // config (including `false`) > a guard registered via `defineMiddleware`/`@Guard`
 // (`cspGuard()`/`securityHeadersGuard()`) > this page's own zero-config default — proved for CSP
 // AND for `frameOptions`/`noSniff` (representative of every other field `securityHeadersGuard`
-// manages, since the resolution itself is generic/data-driven, not per-field bespoke code; see
-// `SpacePageController`'s own CHANGELOG for the real bug this closes: before it, this page's own
-// zero-config defaults always counted as "already set" by the time a guard's header could apply,
-// permanently starving a guard-registered value of the one case it's meant to cover). Scenario 4
-// below (no guard at all) has to run BEFORE `defineMiddleware` is ever called in this process — once
-// it's called, there's no way back to a "no guard exists yet" state for the rest of the suite.
+// manages, since the resolution itself is generic/data-driven, not per-field bespoke code). The
+// real guarantee under test: this page's own zero-config defaults must never count as "already set"
+// by the time a guard's header gets the chance to apply — a guard-registered value must never be
+// starved of the one case it's meant to cover. Scenario 4 below (no guard at all) has to run BEFORE
+// `defineMiddleware` is ever called in this process — once it's called, there's no way back to a
+// "no guard exists yet" state for the rest of the suite.
 Deno.test(
   "Security header precedence: Page explicit (incl. false) > a registered guard > this page's " +
     'own zero-config default — CSP, frameOptions, and noSniff',
   async () => {
-    // Scenario 4 — sin guard + página sin configuración → se mantiene el default de Space. Must
+    // Scenario 4 — no guard + a page with no configuration → Space's own default is kept. Must
     // run first: no guard has been registered anywhere in this process yet.
     @Page({ path: 'middleware/no-guard-default' })
     class NoGuardDefaultPage extends SpacePageController {
@@ -79,7 +79,7 @@ Deno.test(
       },
     ])
 
-    // Scenario 1 — guard + página sin configuración → gana guard. No `headers` option at all (not
+    // Scenario 1 — guard + a page with no configuration → the guard wins. No `headers` option at all (not
     // even `headers: false`) — this is the exact case the real bug affected: this page's own
     // zero-config defaults must step aside for the guard's, not silently win by having already set
     // themselves first.
@@ -103,10 +103,10 @@ Deno.test(
 
     // A page-level `@Guard` runs AFTER `defineMiddleware`'s global guards (target-level guards are
     // appended last in `MiddlewaresContainer.getMiddlewares`) — so its own `cspGuard` header wins
-    // the merge in `mainGuard` (a real `Headers` accumulator, `.set()` for non-cookie headers —
-    // see `@zanix/server`'s own CHANGELOG — later entries override earlier ones), overriding the
-    // app-wide policy for just this page. Still just "a guard," from this page's own `csp`'s point
-    // of view — it never configured anything itself either.
+    // the merge in `mainGuard` (a real `Headers` accumulator: `.set()` for non-cookie headers means
+    // later entries override earlier ones), overriding the app-wide policy for just this page.
+    // Still just "a guard," from this page's own `csp`'s point of view — it never configured
+    // anything itself either.
     @Page({ path: 'middleware/stricter-csp-page', headers: false })
     @Guard(cspGuard({ 'default-src': ["'none'"] }))
     class StricterCspPage extends SpacePageController {
@@ -114,13 +114,12 @@ Deno.test(
     }
     void StricterCspPage
 
-    // Scenario 2 (CSP) — guard + Page({ headers: { csp } }) → gana página. Declares its OWN CSP,
+    // Scenario 2 (CSP) — guard + Page({ headers: { csp } }) → the page wins. Declares its OWN CSP,
     // applied directly inside `handleGet`, never through the guard pipeline — sits under the
     // app-wide `defineMiddleware([cspGuard(...)])` registered above, which acts only as the
     // base/default. This page's own, more specific policy must win outright — never combined with
-    // the guard's — real regression coverage for the `@zanix/server` `mainInterceptor` fix (see
-    // that package's own CHANGELOG): before it, this scenario produced a single, invalid,
-    // comma-joined `Content-Security-Policy` value instead of either policy cleanly applying.
+    // the guard's, which would otherwise produce a single, invalid, comma-joined
+    // `Content-Security-Policy` value instead of either policy cleanly applying.
     @Page({
       path: 'middleware/page-with-own-csp',
       headers: { csp: { 'default-src': ["'unsafe-inline'"] } },
@@ -142,7 +141,7 @@ Deno.test(
     }
     void PageWithOwnCspClassGuard
 
-    // Scenario 3 (CSP) — guard + csp: false explícito → header completamente ausente. The page
+    // Scenario 3 (CSP) — guard + an explicit csp: false → the header is completely absent. The page
     // explicitly disables CSP while keeping its other security-header defaults — must win even over
     // the guard's own app-wide policy, ending up with NO Content-Security-Policy header on the
     // response at all (never an empty value, never the guard's policy, never the two comma-joined).
@@ -155,7 +154,7 @@ Deno.test(
     }
     void CspExplicitlyDisabledPage
 
-    // Scenario 2 (frameOptions) — guard + Page({ headers: { frameOptions } }) → gana página.
+    // Scenario 2 (frameOptions) — guard + Page({ headers: { frameOptions } }) → the page wins.
     @Page({
       path: 'middleware/page-with-own-frame-options',
       headers: { frameOptions: 'SAMEORIGIN' },
@@ -165,8 +164,8 @@ Deno.test(
     }
     void PageWithOwnFrameOptions
 
-    // Scenario 3 (frameOptions) — guard + frameOptions: false explícito → header completamente
-    // ausente, even though the guard has its own `'DENY'` for this exact field.
+    // Scenario 3 (frameOptions) — guard + an explicit frameOptions: false → the header is
+    // completely absent, even though the guard has its own `'DENY'` for this exact field.
     @Page({
       path: 'middleware/frame-options-disabled',
       headers: { frameOptions: false },
@@ -250,8 +249,8 @@ Deno.test(
       assertEquals(disabled.headers.has('Content-Security-Policy'), false)
       // The rest of this page's security-header defaults are untouched — only CSP was disabled.
       assertEquals(disabled.headers.get('X-Frame-Options'), 'DENY')
-      // Blocking CSP has zero effect on an unrelated guard's own Set-Cookie — still accumulates via
-      // .append() exactly as before this mechanism existed.
+      // Blocking CSP has zero effect on an unrelated guard's own Set-Cookie — it still accumulates
+      // via its normal .append() behavior.
       assertEquals(disabled.headers.getSetCookie(), ['guard-cookie=1; Path=/'])
       await disabled.body?.cancel()
 

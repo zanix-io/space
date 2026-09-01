@@ -28,13 +28,14 @@
  * `jsr:` `import()` specifier, INSIDE {@linkcode resolveDefaultGuard} — never a top-level `import`,
  * and never `typeof import('@zanix/auth')` for its type either (see {@link AuthExports}'s own
  * doc). Confirmed real, not theoretical: `@zanix/auth`'s own real dependency on `@zanix/datamaster`
- * (for THIS guard's Redis-backed rate-limit counters) used to drag `mongoose`/`mongodb`/`bson`/
- * `redis`/`@redis/*` into the module graph of every `@zanix/space` app's build, whether or not it
- * ever used the Log API's rate limiting — same root cause `zanix-io/app`'s own `activateApps` had
- * (a bare alias declared in `deno.jsonc`'s own `imports` is, on its own, enough to trigger
- * `nodeModulesDir: "auto"`-style npm-install materialization, independent of whether reachable code
- * ever imports it) — see `deno.jsonc`'s own doc comment at the spot `@zanix/auth` used to be
- * declared. The real guard is constructed on its first genuine invocation (a real `POST /api/log`
+ * (for THIS guard's Redis-backed rate-limit counters) would drag `mongoose`/`mongodb`/`bson`/
+ * `redis`/`@redis/*` into the module graph of every `@zanix/space` app's build if declared as a
+ * bare alias instead, whether or not it ever uses the Log API's rate limiting — the same root
+ * cause `zanix-io/app`'s own `activateApps` shares (a bare alias declared in `deno.jsonc`'s own
+ * `imports` is, on its own, enough to trigger `nodeModulesDir: "auto"`-style npm-install
+ * materialization, independent of whether reachable code ever imports it) — see `deno.jsonc`'s own
+ * doc comment marking why `@zanix/auth` is deliberately absent from its `imports`. The real guard
+ * is constructed on its first genuine invocation (a real `POST /api/log`
  * request), memoized per `createLogApiController` call, never at controller-construction time —
  * `createLogApiController` itself stays fully synchronous either way.
  *
@@ -52,8 +53,8 @@ export type { LogApiControllerOptions, LogApiRateLimitOptions }
 
 /** Fully-qualified, deliberately non-literal `jsr:` specifier for `@zanix/auth` — see
  * {@linkcode resolveDefaultGuard}'s own doc for why this package is reached this way instead of a
- * normal top-level `import`. Kept in sync with `deno.jsonc`'s own doc comment at the spot
- * `@zanix/auth` used to be declared. */
+ * normal top-level `import`. Kept in sync with `deno.jsonc`'s own doc comment marking why
+ * `@zanix/auth` is deliberately absent from its `imports`. */
 const AUTH_SPECIFIER = 'jsr:@zanix/auth@^0.8.0'
 
 /** Narrow, hand-declared shape for exactly the one `@zanix/auth` export this module calls —
@@ -83,8 +84,8 @@ const LOG_API_RATE_LIMIT_WINDOW_SECONDS = 60
 
 /**
  * A single anonymous browser tab's own budget for `POST /api/log` calls per
- * {@linkcode LOG_API_RATE_LIMIT_WINDOW_SECONDS}-second window — deliberately conservative ("poco
- * límite" — a low limit is the explicit product decision here), grounded in what a genuinely human,
+ * {@linkcode LOG_API_RATE_LIMIT_WINDOW_SECONDS}-second window — deliberately conservative (a low
+ * limit is the explicit product decision here), grounded in what a genuinely human,
  * one-tab caller actually needs: page-load telemetry plus the occasional warn/error burst a normal
  * session produces, comfortably under a couple of requests per second even during a bad UI bug. 30
  * requests/minute is generous enough that a real human session never notices it, while still capping
@@ -234,9 +235,9 @@ export function createLogApiController(
   // exact same server-level prefix `createAssetsController`'s own `prefix = 'assets'` default
   // already composes with to land on `/api/assets/...` — a bare `'api'` default here stacked a
   // SECOND one on top, landing on `/api/api/log` instead of the documented, intended `/api/log`.
-  // Confirmed live: `client-logger.ts`'s own `postLog()` fetches `/api/log` unconditionally, and a
-  // real dev/production server registered `/api/api/log` — completely unreachable, a real,
-  // confirmed regression present since this controller's own default was written.
+  // Confirmed live: `client-logger.ts`'s own `postLog()` fetches `/api/log` unconditionally, so a
+  // bare `'api'` default here lands the route at `/api/api/log` instead — completely unreachable
+  // by that fetch.
   const { prefix = '', guards, rateLimit } = options
   const guard = combineGuards(guards, rateLimit)
 

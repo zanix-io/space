@@ -343,13 +343,13 @@ Deno.test(
       assert(!code.includes(forbidden), `render-probe must not reference '${forbidden}'`)
     }
 
-    // `getPageRenderer` IS referenced now, and deliberately: `renderPage` is optional, and omitting
-    // it means "whatever renderer this application installed". That reference used to be forbidden
-    // for a concrete reason — importing the registry once dragged `react-dom/server` into
-    // `@zanix/space/vite`, a build-tool entry point. The entry-point split removed the registry's
-    // eager React default, so it now reaches no renderer at all; `renderer-agnostic-layer.test.ts`
-    // asserts that `/vite` still has zero value edges to either renderer, which is what makes this
-    // reference safe rather than merely convenient.
+    // `getPageRenderer` IS referenced, and deliberately: `renderPage` is optional, and omitting it
+    // means "whatever renderer this application installed". That reference is safe here, not just
+    // convenient, only because the registry's entry point carries no eager React default of its
+    // own — importing it reaches no renderer at all; `renderer-agnostic-layer.test.ts` asserts that
+    // `/vite` still has zero value edges to either renderer, which is exactly the guarantee this
+    // reference relies on (without it, importing the registry would drag `react-dom/server` into
+    // `@zanix/space/vite`, a build-tool entry point that must never carry it).
     assert(code.includes('getPageRenderer'))
     assert(code.includes('renderPage'))
   },

@@ -5,6 +5,81 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-08-31
+
+### Added
+
+- **`globalErrorHandler`/`ComposableErrorHandler`** (`modules/router/global-error-handler.ts`) —
+  composes multiple `server.ssr.onError` recovery handlers into one.
+  `bootstrapServers`/`bootstrapRemoteApp`'s own `server.ssr.onError` accepts exactly one handler,
+  but a real app routinely needs more than one concern wired there — this package's own
+  `createNotFoundHandler()` alongside an app-specific one (e.g. `@zanix/auth`'s own
+  `recoverRotatedSessionCookie()`). Each handler is tried in order against the same error; the first
+  one that returns a real `Response` wins, and one that returns `undefined` (this package's own
+  established "not handled, fall through" convention) is skipped. `ComposableErrorHandler` names the
+  real, wider return shape `createNotFoundHandler()`'s own returned function already follows
+  internally (cast to the narrower native `OnErrorHandler` only at its own return statement) — write
+  a recovery function against this type when it's meant to be composed here.
+
+- **`PageContext.session`** (`typings/page.ts`) — carries this request's resolved `Session`
+  (`@zanix/server`) into a page's `loader`/`action` and every `layout.tsx`'s own `loader`, mirroring
+  how `csrfToken`/`population` already flow through `toPageContext`. Closes a real gap: a page-level
+  `@Guard` (e.g. `@zanix/auth`'s `jwtValidationGuard`) resolving a session writes it onto
+  `ctx.locals.session`, which no loader could previously reach — forcing a consumer to hand-roll a
+  read-only re-verification of the session cookie in every layout that needs permission-gated UI,
+  since the session-refresh mechanism single-use-rotates tokens and can't safely be called a second
+  time in the same request. `toPageContext` now resolves `ctx.locals.session`, falling back to
+  `ctx.session` — `ctx.locals.session` wins when both are set, since it reflects a page-level
+  `@Guard`'s resolution running AFTER `@zanix/server`'s own request-setup pipe already merged
+  whatever session existed earlier onto `ctx.session`. A read-only snapshot, same lifetime as
+  `csrfToken`/`population` — `mockPageContext`/`mockHandlerContext` (`@zanix/space/testing`) both
+  support it. Fixes `zanix-io/space#7`.
+
+### Fixed
+
+- **`buildCjsBundle` (`modules/bundler/cjs-interop.ts`) no longer produces a syntactically invalid
+  SSR bundle for a relatively-required `.json` file** (`require('../package.json')`, the real shape
+  `mongoose`'s own `lib/mongoose.js` uses). The generic CJS wrapper previously spliced a `.json`
+  file's raw content — a bare object literal — straight into statement position right after a
+  `const require = __cjsRequire__` declaration, producing `Parse failure: Expected a semicolon...`
+  and crashing `zanix space dev`/`zanix space build` for any project depending on a package that
+  requires its own `package.json` this way. A required `.json` file's factory now assigns its parsed
+  content as `module.exports = <content>` instead, matching Node's own `require('./x.json')`
+  semantics.
+- **A bare `require(...)` with a SUBPATH into another package** (`mongoose`'s own real
+  `require('mongodb/lib/bulk/common')` shape, as opposed to `require('mongodb')`, that package's own
+  public root) **is now inlined exactly like a relative require**, instead of always being left on
+  the external `__bareRequire__`/`__vite_ssr_import__` path. That external path only resolves a bare
+  specifier WITHOUT a real referrer for any `node_modules`-rooted importer (a deliberate choice
+  elsewhere in `bare-specifier-resolve.ts`, for an unrelated module-identity fix) — which fails
+  outright for a deeply transitive dependency no project's own top-level import map declares
+  directly, silently falling through to Vite's own SSR "bare string + known importer" fast path,
+  which resolves it as an EXTERNAL module and skips this package's own CJS wrapping entirely —
+  confirmed as the real, root cause of a `ReferenceError: exports is not defined` crash. A subpath
+  specifier is never a package's own publicly-imported entry point another part of the graph would
+  ALSO reach independently, so there is no shared-instance identity to preserve by leaving it
+  external — inlining it, the same as a relative require, is both safe and correct. A bare
+  specifier's own public root (no subpath) is untouched, still external, still preserving the
+  Vite-deduped singleton `__bareRequire__` exists for.
+- **A genuinely dynamic `import(specifier)` call — one whose argument isn't a plain string literal
+  Vite's own import-analysis can resolve statically (a variable, a member expression, a template
+  literal with real interpolation)** — is now forced through the SAME `__vite_ssr_dynamic_import__`
+  runtime helper Vite's own transform already uses for an analyzable dynamic import, via the new
+  `modules/bundler/dynamic-import-interop.ts`. Left untouched, such a call — the real shape a
+  lazy-optional-dependency pattern uses (a specifier string held in a variable so an optional
+  dependency is never imported unless actually needed) — reaches the SSR module runner as a raw,
+  unintercepted native `import()`, bypassing `noExternal`/CJS interop/every other fix in this
+  bundler entirely.
+- **A bare `require(...)` for a genuinely optional dependency that fails to resolve at all at
+  runtime** (`mongoose`'s own real `require('kerberos')` shape, always wrapped in its own
+  `try/catch`) **no longer crashes the whole bundle's top-level evaluation.** The top-level
+  `__bareRequire__` fetch previously awaited every bare specifier eagerly and let a rejection
+  propagate straight out of the bundle's own module-level `await`, before the CJS module's own code
+  — and its own `try/catch` around the `require()` call — ever ran. A failed fetch is now deferred
+  instead: it's recorded in a separate `__bareModuleErrors__` map keyed by specifier, and only
+  re-thrown lazily from `__bareRequire__(spec)` at the exact call site the original `require(...)`
+  text was rewritten to — inside whatever `try/catch` the source already wrapped it in.
+
 ## [0.3.2] - 2026-08-31
 
 ### Added
@@ -656,12 +731,12 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
   `createLogApiController`) — leaving rate limiting to the app's own reverse proxy/CDN would have
   zero precedent anywhere else in the ecosystem, so it's fixed at the source instead. Default:
   `anonymousLimit: 30` requests per `windowSeconds: 60`, `trustProxyHeader: true` (per-caller
-  IP+User-Agent buckets, not one shared bucket) — a deliberately low, human-tab-sized budget ("poco
-  límite"), sized well above real page-load/error telemetry but well short of meaningful storage
-  write amplification from a runaway/abusive caller. Two new, DIFFERENT `SpaceAppConfig.logApi`
-  knobs over this same default: `guards` lets an integrator append EXTRA guards after it — unlike
-  `assetsApi.guards` (which replaces its `[denyAllGuard]` placeholder once configured), this default
-  is the decided policy and is never replaceable via `guards`, only extended; `rateLimit`
+  IP+User-Agent buckets, not one shared bucket) — a deliberately low, human-tab-sized budget, sized
+  well above real page-load/error telemetry but well short of meaningful storage write amplification
+  from a runaway/abusive caller. Two new, DIFFERENT `SpaceAppConfig.logApi` knobs over this same
+  default: `guards` lets an integrator append EXTRA guards after it — unlike `assetsApi.guards`
+  (which replaces its `[denyAllGuard]` placeholder once configured), this default is the decided
+  policy and is never replaceable via `guards`, only extended; `rateLimit`
   (`{ anonymousLimit?, windowSeconds?,
   trustProxyHeader? }`) is the real "change the floor"
   surface instead, for an app whose traffic profile or deployment topology (whether it genuinely

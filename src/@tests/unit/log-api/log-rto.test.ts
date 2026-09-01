@@ -11,9 +11,10 @@ import { LogIngestRTO } from 'modules/log-api/controllers/rtos/log.rto.ts'
  * in isolation). This is the ONLY way to exercise the real per-field validation decorators
  * (`@IsEnum`/`@Expose`) at all: a direct `new LogIngestRTO(...)` never runs them (see
  * `defineSetter`'s own `this.constructor.prototype.validate` guard in `@zanix/utils`) — confirmed
- * load-bearing, not incidental: a real, previously-uncaught bug (`data`'s own `@Expose()` missing
- * `{ optional: true }`, see that accessor's own doc) made every well-formed real HTTP request fail
- * with a 400, invisibly to every test that only ever constructed the RTO directly.
+ * load-bearing, not incidental: whether `data`'s own `@Expose()` correctly carries
+ * `{ optional: true }` (see that accessor's own doc) decides whether every well-formed real HTTP
+ * request succeeds or fails with a 400, and a test that only ever constructs the RTO directly can
+ * never see that.
  */
 
 Deno.test(

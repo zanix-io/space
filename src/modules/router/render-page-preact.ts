@@ -256,7 +256,7 @@ async function composeSegments<Params>(
  *
  * `cssHrefs`/`pwaHead` are resolved here (same renderer-agnostic functions React's version calls)
  * but threaded into `composeSegments`/`applyDocumentShell` instead of into the SSR entry's own
- * options — see `document-shell-preact.ts`'s own doc for why. `devClient` is now resolved the exact
+ * options — see `document-shell-preact.ts`'s own doc for why. `devClient` is resolved the exact
  * same way React's own `render-page-react.tsx` does (`isDevClientEnabled()` +
  * `getPageTree(Target)?.filePath`), real Prefresh HMR wired end to end
  * (`dev-vite-hot-client.ts`'s own doc has the full transport, shared with React's own dev sessions).
@@ -353,10 +353,10 @@ export async function renderPageResponse<Params>(
         nonce: document.nonce,
         doctype: true,
         devClient: document.devClient,
-        // Placed into the rendered document's own `<head>` after serialization — the step that
-        // replaced the old `headExtras` prop threading, and the reason a custom root `layout.tsx`
-        // no longer has to cooperate for this document to carry its own metadata. See
-        // `head-markup.ts`'s own module doc.
+        // Placed into the rendered document's own `<head>` after serialization — independent of
+        // whatever a custom root `layout.tsx` itself renders, so that layout never has to
+        // cooperate for this document to carry its own metadata. See `head-markup.ts`'s own module
+        // doc.
         headMarkup: serializeHeadMarkup(document),
         serviceWorkerHref: document.pwa?.serviceWorkerHref,
         bootstrapModules: document.bootstrapModules,

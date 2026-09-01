@@ -12,8 +12,8 @@ import {
 /**
  * The "validation pass final" for the calibrated capped-CRF (x264) / CQ (VP9) values in
  * `video-breakpoints.ts` — real `ffmpeg`/`ffprobe`/`libvmaf` calls, through
- * `createSystemFfmpegTranscoder()` itself, never the standalone benchmark harness that originally
- * found these values (`/private/tmp/.../ffmpeg-benchmark/`, not part of this repo). Same
+ * `createSystemFfmpegTranscoder()` itself, never the standalone benchmark harness that found these
+ * values in the first place (`/private/tmp/.../ffmpeg-benchmark/`, not part of this repo). Same
  * `ignore`-when-unavailable gating as the sibling `system-ffmpeg-transcoder.test.ts`.
  *
  * What this confirms per breakpoint × codec, against the real production code path:

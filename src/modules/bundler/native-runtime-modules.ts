@@ -140,11 +140,51 @@ import type { Plugin } from 'vite'
  * resolve through two DIFFERENT evaluations of `@zanix/auth`'s own source under Vite's SSR graph,
  * same failure, same missing metadata — only routing `@zanix/auth` itself through this file's own
  * native-import mechanism gives both evaluations the same underlying class object.
+ *
+ * ## `@zanix/datamaster`, `@zanix/asyncmq`, and `@zanix/notifications` are on this list for the
+ * SAME confirmed mechanism, not a speculative extension of `@zanix/auth`'s case
+ *
+ * Each of these three packages ships its own `./core` side-effect module that registers a real
+ * `@Provider`-decorated class into `@zanix/server`'s DI container unconditionally — the identical
+ * shape `@zanix/auth/core` registers `ZanixAuthProvider` under, down to the same doc comment each
+ * one carries verbatim: "applies the decorator directly to `X`... so `this.providers.get(X)` — the
+ * class every consumer actually imports — resolves correctly. See `@zanix/auth`'s `providers/
+ * core.ts` for the full rationale" (`datamaster/src/modules/cache/providers/core.ts` and
+ * `datamaster/src/modules/dlq/core.ts`; `asyncmq`/`notifications` register their own core
+ * providers the same way). `getTargetKey` (`server/src/utils/targets.ts`) is the shared mechanism
+ * underneath all four packages: a `WeakMap<{name}, string>` keyed on the class OBJECT itself, so a
+ * lookup issued against one module evaluation can never find a registration made under a different
+ * one — a property of `@zanix/server`'s own container, not something particular to `@zanix/auth`.
+ * Without this entry, a guard/interactor/RTO/page file (reached through `ssrLoadModule`) that
+ * bare-imports any of these three packages directly — instead of only going through the
+ * already-native `@zanix/server` — holds a class reference `ProgramModule.providers.get()` cannot
+ * resolve: `[BaseInstancesContainer]: Target is not a constructor` — `INVALID_INSTANCE`,
+ * `'unknown': there is no metadata information`, the exact shape `@zanix/auth`'s own production
+ * incident hit. `native-runtime-modules-datamaster.test.ts` confirms both states directly, not
+ * just by the shared shape alone, by calling `ProgramModule.providers.get()` against an SSR-loaded
+ * `DlqProvider` class reference registered natively via `@zanix/datamaster/core` — see that test's
+ * own doc for the exact failure this entry closes.
+ *
+ * Not every `@zanix/*` package belongs here on the strength of this pattern alone, though —
+ * `@zanix/utils` (`@zanix/validator`'s `IsString`/`BaseRTO` decorators specifically) does not
+ * share this vulnerability: `classValidation`'s real validation logic is closure-captured directly
+ * onto each accessor at class-definition time, never looked up through a cross-module registry, so
+ * it survives the identical split unharmed (see `native-runtime-modules-validator.test.ts` — the
+ * one real gap there, `classMetadata`'s static field introspection, doesn't share this
+ * container-lookup mechanism at all and reaches no request-handling path). `@zanix/admin` and
+ * `@zanix/app` expose no real, non-type, non-primitive import through a `ssrLoadModule`-reached
+ * file in `console` (this ecosystem's real consumer app) — nothing to reproduce a failure against.
+ * A package earns an entry here only once its OWN identity-sensitive mechanism and a real (or
+ * realistically reachable) import path through this engine's SSR graph are both confirmed, the
+ * same bar every entry above already meets.
  */
 export const NATIVE_RUNTIME_MODULES = [
   '@zanix/space',
   '@zanix/server',
   '@zanix/auth',
+  '@zanix/datamaster',
+  '@zanix/asyncmq',
+  '@zanix/notifications',
   'react',
   'react-dom',
   'preact',

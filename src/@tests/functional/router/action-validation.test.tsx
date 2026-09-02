@@ -82,6 +82,35 @@ class CheckoutPage extends SpacePageController {
 }
 void CheckoutPage
 
+/** Renders the request's own `cspNonce` as visible text — the only thing this view exists to
+ * prove, for the 422 re-render regression test below. */
+function NonceCheckoutView(
+  { cspNonce, fieldErrors }: { cspNonce?: string; fieldErrors?: Record<string, unknown> },
+) {
+  return (
+    <form method='post'>
+      <p data-testid='nonce'>{cspNonce ?? 'MISSING'}</p>
+      {Object.keys(fieldErrors ?? {}).length > 0 && <p data-testid='has-errors' />}
+      <input name='email' />
+      <button type='submit'>Pay</button>
+    </form>
+  )
+}
+
+// Deliberately NO `headers: false` here, unlike `CheckoutPage` below — this page needs the
+// default, zero-config CSP (and the real nonce it generates) actually active, to reproduce and
+// pin the ordering regression this test targets.
+@Page({ path: 'action-validation/nonce-checkout', action: { Body: CheckoutBody } })
+class NonceCheckoutPage extends SpacePageController {
+  public override loader = (ctx: PageContext) => ({
+    cspNonce: ctx.cspNonce,
+    fieldErrors: ctx.fieldErrors,
+  })
+  public override component = NonceCheckoutView
+  public override action = () => Promise.resolve(new Response('paid'))
+}
+void NonceCheckoutPage
+
 /** A page with NO RTO — the unchanged path, which must keep behaving exactly as before. */
 @Page({ path: 'action-validation/plain', headers: false })
 class PlainPage extends SpacePageController {
@@ -225,6 +254,29 @@ Deno.test({
           assertEquals(postResponse.status, 200)
           assertEquals(await postResponse.text(), 'acted')
           assertEquals(actionInvocations, 1, 'POST must invoke action exactly once')
+        },
+      )
+
+      await t.step(
+        "9. the 422 re-render (#renderInvalidAction) carries this request's own REAL CSP nonce " +
+          'off ctx.cspNonce — not undefined. Real, confirmed regression this pins: ' +
+          "#renderInvalidAction spreads actionCtx (built by handlePost's own toPageContext call, " +
+          'itself snapshotted before cspGuard ever ran for this request) into a new pageCtx BEFORE ' +
+          'resolvePageChrome runs for THIS render — the identical ordering bug handleGet had, in a ' +
+          "genuinely separate code path, confirmed live: a Comet's own <style nonce> on a real " +
+          "422 re-render carried no nonce attribute at all, even though handleGet's own fix for " +
+          'the SAME field already existed by then.',
+        async () => {
+          const response = await post('nonce-checkout', { email: 'not-an-email' })
+          assertEquals(response.status, 422)
+
+          const cspHeader = response.headers.get('content-security-policy') ?? ''
+          const [, headerNonce] = cspHeader.match(/'nonce-([^']+)'/) ?? []
+          assert(headerNonce, cspHeader)
+
+          const html = await response.text()
+          assertStringIncludes(html, 'data-testid="has-errors"')
+          assertStringIncludes(html, `<p data-testid="nonce">${headerNonce}</p>`)
         },
       )
     } finally {

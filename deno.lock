@@ -30,6 +30,7 @@
     "jsr:@zanix/app@~0.2.1": "0.2.1",
     "jsr:@zanix/asyncmq@0.8": "0.8.0",
     "jsr:@zanix/auth@0.8": "0.8.1",
+    "jsr:@zanix/auth@1": "1.0.0",
     "jsr:@zanix/datamaster@^1.7.0": "1.9.0",
     "jsr:@zanix/datamaster@^1.9.0": "1.9.0",
     "jsr:@zanix/server@4": "4.1.0",
@@ -39,6 +40,8 @@
     "npm:@aws-sdk/client-s3@^3.700.0": "3.1121.0",
     "npm:@babel/core@^7.29.0": "7.29.7",
     "npm:@deno/vite-plugin@^2.0.3": "2.0.3_vite@8.2.2",
+    "npm:@formatjs/icu-messageformat-parser@^3.5.17": "3.5.17",
+    "npm:@formatjs/intl@^4.1.19": "4.1.20",
     "npm:@preact/preset-vite@^2.10.6": "2.10.6_@babel+core@7.29.7_vite@8.2.2_preact@10.29.8_preact-render-to-string@6.7.0",
     "npm:@prefresh/core@^1.5.10": "1.5.11_preact@10.29.8_preact-render-to-string@6.7.0",
     "npm:@prefresh/utils@^1.2.1": "1.2.1",
@@ -200,6 +203,14 @@
     "@zanix/auth@0.8.1": {
       "integrity": "0c6cfac247238b2784b739dc57d74403242ba6f78abf3edc4f0e8b11ec9cfbae",
       "dependencies": [
+        "jsr:@zanix/server@4",
+        "jsr:@zanix/utils@4"
+      ]
+    },
+    "@zanix/auth@1.0.0": {
+      "integrity": "b2a71f66f342d376b1c73b72b00454ed309703d7b45705e3f75367e832e19b8f",
+      "dependencies": [
+        "jsr:@zanix/datamaster@^1.9.0",
         "jsr:@zanix/server@4",
         "jsr:@zanix/utils@4"
       ]
@@ -743,6 +754,26 @@
       "integrity": "sha512-5ebpxr3nWMzrL/rnUI755Jkuee0bHL/Gq0WTF9lvcpv73wAp5eu8MfBUgWK9bhWvZjj7yX8etf/8tI8Ney695g==",
       "os": ["win32"],
       "cpu": ["x64"]
+    },
+    "@formatjs/fast-memoize@3.1.7": {
+      "integrity": "sha512-zXfhLpvA6T7+efdt9JLbBwZ00tT7NsBMDVnDu8rpHeNNv8KfRZAMo2gkG0k9lK/Nzc//3kJ9pImsfuJxk3KhUA=="
+    },
+    "@formatjs/icu-messageformat-parser@3.5.17": {
+      "integrity": "sha512-cN9jhVqT7u0K9tix43fhjoUwL0nazyW6zsNIXs2QdPADr+nurPfYyssUiMqcSCGlPcCiqnYVxgSn7zBSuI+5Bg==",
+      "dependencies": [
+        "@formatjs/icu-skeleton-parser"
+      ]
+    },
+    "@formatjs/icu-skeleton-parser@2.1.11": {
+      "integrity": "sha512-j8cUmOJzVgkHuS0QiQ6ga76UIoLOFSAMWhs7aZJztH3aAdCOAE6vpC8KVvFB4cU10ON0y2/5oOVmPJ43s2lTwA=="
+    },
+    "@formatjs/intl@4.1.20": {
+      "integrity": "sha512-q3gaFvc1mXrl0fcSY2QKSS+WzJxpbIXs48O+QLA3UsRtIwVhazvxtLrLGKEse5Mq4U8hAYyTB6Y9buU2ZRFz/w==",
+      "dependencies": [
+        "@formatjs/fast-memoize",
+        "@formatjs/icu-messageformat-parser",
+        "intl-messageformat"
+      ]
     },
     "@img/colour@1.1.0": {
       "integrity": "sha512-Td76q7j57o/tLVdgS746cYARfSyxk8iEfRxewL9h4OMzYhbW4TAcppl0mT4eyqXddh6L/jwoM75mo7ixa/pCeQ=="
@@ -1669,6 +1700,13 @@
       "integrity": "sha512-soFhflCVWLfRNOPU3iv5Z9VUdT44xFRbzjLsEzSr5AQmgqPMTHdU3PMT1Cf1ssx8fLNJDA1juftYl+PUcv3MqA==",
       "dependencies": [
         "postcss"
+      ]
+    },
+    "intl-messageformat@11.2.14": {
+      "integrity": "sha512-9f2VD1HFuxUvMw0RxsaP8WmMns6JRTnsNB/zghTFrp11ZktiXWwVDeZBPQchBKEmo+Gx/ZhxI7Qht7YglFD4PA==",
+      "dependencies": [
+        "@formatjs/fast-memoize",
+        "@formatjs/icu-messageformat-parser"
       ]
     },
     "javascript-stringify@2.1.0": {

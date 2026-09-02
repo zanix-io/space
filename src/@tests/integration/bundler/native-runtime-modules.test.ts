@@ -5,12 +5,32 @@ import '../../../../mod-react.ts'
 import { assert, assertEquals } from '@std/assert'
 import { join, relative } from '@std/path'
 import { bootstrapServers, ProgramModule, webServerManager } from '@zanix/server'
+import { ZanixAuthProvider } from '@zanix/auth'
 import { getTemporaryFolder } from '@zanix/helpers'
 import { createSpaceDevEngine } from 'modules/bundler/dev-engine.ts'
 import { loadRoutes } from 'modules/router/mod.ts'
 
 const TMP_ROOT = getTemporaryFolder(import.meta.url)
 const isRouteEntry = (id: string) => id.endsWith('/page.tsx') || id.endsWith('page.tsx')
+
+/**
+ * Gates the `@zanix/auth` identity test below — ignored by default, same `RUN_X_TESTS` convention
+ * `dev-engine.test.ts`'s own `shouldRunEnvSensitiveTests` already establishes, though the reason
+ * here is different: not machine-local state, but a real, deliberate dependency-bloat boundary
+ * this package's own `deno.jsonc` documents (next to `@zanix/auth`'s own removal comment) — `
+ * @zanix/auth` is NOT a top-level `imports` entry here on purpose, so that declaring it doesn't
+ * materialize its own `@zanix/datamaster` dependency (`mongoose`/`mongodb`/`redis`/...) into every
+ * `@zanix/space` consumer's `node_modules`, whether or not they use the one real feature that
+ * needs it. `RealImportEvaluator.runExternalModule`'s own native `import()` call (`ssr-module-
+ * evaluator.ts`) is issued from THAT file's own location, which is never under `src/@tests/`, so
+ * the `scopes["./src/@tests/"]` entry `deno.jsonc` already carries for other test-only packages
+ * does not reach it — only a real, TEMPORARY top-level `"@zanix/auth": "jsr:@zanix/auth@^1.0.0"`
+ * entry does. Confirmed both ways: this exact test fails with `Module not found ".../@zanix/auth"`
+ * without that entry, and passes (real reference equality) with it — see this test's own body for
+ * why. Run it, when actually needed, with `RUN_ZANIX_AUTH_IDENTITY_TEST=true` AND that temporary
+ * `deno.jsonc` entry added by hand first, removing the entry again afterward.
+ */
+const shouldRunZanixAuthIdentityTest = Deno.env.get('RUN_ZANIX_AUTH_IDENTITY_TEST') === 'true'
 
 Deno.test(
   'nativeRuntimeModulesPlugin: a "@zanix/server" import ssrLoadModule evaluates is the exact ' +
@@ -40,6 +60,44 @@ Deno.test(
             'duplicate — see native-runtime-modules.ts for the mechanism (a synthetic ' +
             '`znxruntime://` external id, decoded back to a plain native `import()` by ' +
             'ssr-module-evaluator.ts) this proves actually took effect.',
+        )
+      } finally {
+        await engine.close()
+      }
+    } finally {
+      await Deno.remove(root, { recursive: true })
+    }
+  },
+)
+
+Deno.test(
+  'nativeRuntimeModulesPlugin: a "@zanix/auth" import ssrLoadModule evaluates is the exact same, ' +
+    'reference-identical ZanixAuthProvider class the native process already holds — never a ' +
+    'second, Vite-transformed copy. Real, confirmed regression this pins (not a hypothetical ' +
+    "extension of the @zanix/server case above): a consuming app's own @Guard calling " +
+    "ctx.providers.get(ZanixAuthProvider) 500'd with '[BaseInstancesContainer]: Target is not a " +
+    "constructor ... no metadata information' on every request — the class reference a Guard " +
+    "file (reached through ssrLoadModule) held was a SEPARATE evaluation of @zanix/auth's own " +
+    "source than the one space.app.ts's own `import '@zanix/auth/core'` registered DI metadata " +
+    'onto natively, even though deno info --json showed both resolving the SAME byte-identical ' +
+    'jsr: URL — proof the split was a runtime module-identity bug, never a resolution/version one.',
+  { ignore: !shouldRunZanixAuthIdentityTest },
+  async () => {
+    const root = await Deno.makeTempDir({ dir: TMP_ROOT })
+    try {
+      await Deno.writeTextFile(
+        join(root, 'probe-auth.ts'),
+        `export { ZanixAuthProvider } from '@zanix/auth'\n`,
+      )
+
+      const engine = await createSpaceDevEngine({ root, isRouteEntry })
+      try {
+        const mod = await engine.ssrLoadModule('/probe-auth.ts')
+        assert(
+          mod.ZanixAuthProvider === ZanixAuthProvider,
+          'ssrLoadModule\'s own "@zanix/auth" import must resolve to the exact native ' +
+            'ZanixAuthProvider class (===), not a structurally-identical but reference-different ' +
+            "duplicate carrying none of the native side's own DI registration metadata.",
         )
       } finally {
         await engine.close()

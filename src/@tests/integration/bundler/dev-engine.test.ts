@@ -454,6 +454,143 @@ Deno.test(
   },
 )
 
+// Full, real end-to-end chain for a Comet's own real CSS Modules import — every earlier test on
+// this file (`transformClientAsset` alone) or on `dev-vite-hot-client.test.ts` (the hot-client
+// stub alone) verifies ITS OWN piece in isolation; this one actually WIRES the two real outputs
+// together and EXECUTES the result, the only way to catch a mismatch that only shows up once a
+// real browser tries to run both together (exactly how the real bug this closes was found: a
+// Comet's own `*.module.css` import, hydrated in a real browser, hit `SyntaxError: ... does not
+// provide an export named 'removeStyle'` — neither piece alone would have caught it, since
+// `transformClientAsset` never executes its own output, and the hot-client's own test file never
+// runs against Vite's REAL generated CSS-transform code).
+Deno.test(
+  "createSpaceDevEngine: a Comet's real *.module.css import, transformed by Vite's own real CSS " +
+    "pipeline and executed against this package's own real /@vite/client replacement, actually " +
+    'applies a real <style> element — the real end-to-end chain the "removeStyle" export gap broke',
+  async () => {
+    const { createViteHotClientHandler } = await import('modules/dev/dev-vite-hot-client.ts')
+
+    await withTempProject(
+      async (root) => {
+        await Deno.writeTextFile(
+          join(root, 'styles.module.css'),
+          '.button { color: red; }\n',
+        )
+        await Deno.writeTextFile(
+          join(root, 'example.comet.tsx'),
+          [
+            `'use comet'`,
+            `import styles from './styles.module.css'`,
+            `export default function ExampleComet() { return styles.button as unknown as JSX.Element }`,
+            '',
+          ].join('\n'),
+        )
+      },
+      async (root) => {
+        const engine = await createSpaceDevEngine({ root, isRouteEntry })
+        try {
+          // The Comet must be transformed FIRST — same reasoning as the 'server-only' test above:
+          // this is what makes Vite's own dev module graph actually discover and process the CSS
+          // import it reaches, exactly as a real browser request for the Comet would.
+          const comet = await engine.transformClientAsset('/example.comet.tsx')
+          assert(comet, 'the Comet itself must transform')
+          assert(comet.code.includes('/styles.module.css'), comet.code)
+
+          const css = await engine.transformClientAsset('/styles.module.css')
+          assert(css, 'the CSS Modules import must transform too')
+          // Real evidence this is genuinely Vite's own dev-serve CSS-HMR shape, not a guess at
+          // what it might generate — `dist/node/chunks/node.js`'s own literal code, confirmed by
+          // reading `vite@8.2.2`'s real source before writing this assertion.
+          assert(css.code.includes('/@vite/client'), css.code)
+          assert(css.code.includes('__vite__updateStyle'), css.code)
+          assert(css.code.includes('__vite__removeStyle'), css.code)
+
+          // Real fake DOM — just enough for `updateStyle` (`document.head.appendChild`,
+          // `createElement`, `setAttribute`, `querySelector('[nonce]')`) to run for real, same
+          // "run the real output as a real module" discipline `dev-vite-hot-client.test.ts` already
+          // applies. Seeded with one already-nonced element — the same stand-in for a real SSR
+          // response's own `<style nonce>`/`<script nonce>` that file's own `fakeServerRenderedNoncedElement`
+          // establishes — so this end-to-end chain also proves the CSP-nonce fix (`__spaceGetCspNonce`)
+          // survives real Vite-generated CSS-transform output, not just an isolated unit call.
+          // deno-lint-ignore no-explicit-any
+          const headChildren: any[] = [
+            { tagName: 'SCRIPT', attributes: {}, textContent: '', nonce: 'e2e-real-nonce' },
+          ]
+          const fakeDocument = {
+            head: {
+              children: headChildren,
+              appendChild: (el: unknown) => headChildren.push(el),
+            },
+            createElement: (tagName: string) => {
+              // deno-lint-ignore no-explicit-any
+              const el: any = { tagName: tagName.toUpperCase(), attributes: {}, textContent: '' }
+              el.setAttribute = (name: string, value: string) => (el.attributes[name] = value)
+              return el
+            },
+            querySelector: (selector: string) => {
+              if (selector !== '[nonce]') throw new Error(`unexpected selector: ${selector}`)
+              // deno-lint-ignore no-explicit-any
+              return headChildren.find((el: any) => el.nonce) ?? null
+            },
+          }
+          const globals = globalThis as unknown as { document?: unknown; window?: unknown }
+          globals.document = fakeDocument
+          // The hot-client script's own `createHotContext`/`__spaceApplyClientUpdate` machinery
+          // reads/writes `window.__spaceHotAccept` unconditionally at module top level — same fake
+          // global `dev-vite-hot-client.test.ts` already installs for the identical reason.
+          globals.window = {}
+          try {
+            // The hot-client script's own real HTTP response body — never re-derived, the exact
+            // bytes a real browser's `import '/@vite/client'` request receives.
+            // deno-lint-ignore no-non-null-assertion
+            const hotClientScript = await createViteHotClientHandler()(
+              new Request('http://localhost/@vite/client'),
+            )!.text()
+            const hotClientPath = join(root, `.tmp-vite-client-${crypto.randomUUID()}.mjs`)
+            await Deno.writeTextFile(hotClientPath, hotClientScript)
+
+            // Vite's own generated code names the ABSOLUTE `/@vite/client` specifier TWICE — once
+            // for the generic `createHotContext` `importAnalysis` injection every `import.meta.hot`-
+            // referencing module gets, once for the CSS-specific `updateStyle`/`removeStyle` pair —
+            // `replaceAll` rewrites both to the real hot-client file's own url, the same
+            // substitution a real browser's import map (Vite's own `base`-relative resolution)
+            // performs transparently; this test has no HTTP server in the loop, so it does the
+            // equivalent by hand.
+            const executable = css.code.replaceAll(
+              '"/@vite/client"',
+              JSON.stringify(new URL(`file://${hotClientPath}`).href),
+            )
+            const executablePath = join(root, `.tmp-css-transform-${crypto.randomUUID()}.mjs`)
+            await Deno.writeTextFile(executablePath, executable)
+            try {
+              await import(new URL(`file://${executablePath}`).href)
+            } finally {
+              await Deno.remove(executablePath)
+            }
+
+            // Index 1 — index 0 is the seeded server-rendered nonced element itself, already in
+            // `head` before the CSS transform ever ran; the real style Vite's own generated code
+            // creates is appended after it.
+            assertEquals(headChildren.length, 2)
+            assertEquals(headChildren[1].tagName, 'STYLE')
+            assert(headChildren[1].textContent.includes('color: red'), headChildren[1].textContent)
+            // The CSP-nonce fix, proven end to end: the real nonce a real SSR response already
+            // rendered reached this dynamically-created `<style>` too, not just an isolated unit
+            // call — real evidence the fix survives Vite's own generated CSS-transform code intact.
+            assertEquals(headChildren[1].nonce, 'e2e-real-nonce')
+            await Deno.remove(hotClientPath)
+          } finally {
+            delete globals.document
+            delete globals.window
+          }
+        } finally {
+          await engine.close()
+        }
+      },
+    )
+  },
+)
+
 Deno.test(
   "createSpaceDevEngine: transformClientAsset rejects a 'server-only' module even with no known " +
     'Comet importer yet — merely being requested through the CLIENT environment at all is ' +

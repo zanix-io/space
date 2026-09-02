@@ -13,7 +13,7 @@ import { renderPageResponse, resolvePageChrome } from './render-page-response.ts
 import { computeEtag } from './etag.ts'
 import { ORBIT_FRAGMENT_HEADER } from './orbit-protocol.ts'
 import { getPageRenderer } from './page-renderer-registry.ts'
-import type { CspDirectives } from '../middleware/csp-guard.ts'
+import { CSP_NONCE_LOCALS_KEY, type CspDirectives } from '../middleware/csp-guard.ts'
 import type { SecurityHeadersOptions } from '../middleware/security-headers-guard.ts'
 import { CSRF_TOKEN_LOCALS_KEY } from '../middleware/csrf-guard.ts'
 import { POPULATION_LOCALS_KEY } from '../middleware/population-guard.ts'
@@ -68,6 +68,7 @@ function toPageContext<Params>(ctx: HandlerContext): PageContext<Params> {
     url: ctx.url,
     csrfToken: ctx.locals[CSRF_TOKEN_LOCALS_KEY] as string | undefined,
     population: ctx.locals[POPULATION_LOCALS_KEY] as string | undefined,
+    cspNonce: ctx.locals[CSP_NONCE_LOCALS_KEY] as string | undefined,
     // `ctx.locals.session` wins: it's what a page-level `@Guard` (e.g. `@zanix/auth`'s
     // `jwtValidationGuard`) writes when it resolves a session for THIS route, which runs AFTER
     // `@zanix/server`'s own request-setup pipe already merged whatever session existed earlier onto
@@ -322,6 +323,16 @@ export abstract class SpacePageController<
     // Security headers, CSP nonce and theme overrides, resolved in one place shared with the
     // failed-action re-render so the two can never drift — see `resolvePageChrome`'s own doc.
     const { applySecurity, nonce, themeStyle } = await resolvePageChrome(ctx, Ctor.headers, pageCtx)
+    // `pageCtx.cspNonce` above was snapshotted from `ctx.locals[CSP_NONCE_LOCALS_KEY]` BEFORE
+    // `resolvePageChrome` (via `applySecurityGuards` → `cspGuard`) ever wrote it for this request —
+    // always `undefined` at that point, real value or not, since that's the ONE place this request's
+    // nonce is ever generated. Reassigned here with the freshly-resolved `nonce` above (the exact
+    // same value `cspGuard` just wrote to `ctx.locals`, per `resolvePageChrome`'s own doc) — a real,
+    // confirmed regression otherwise: `loader` below always saw `cspNonce: undefined`, silently
+    // dropping the nonce from `data-comet-props`/component props even though the response's own CSP
+    // header carried a real one, confirmed via a live browser CSP violation on a Comet's own
+    // `<style nonce>` rendered with no nonce attribute at all.
+    pageCtx.cspNonce = nonce
 
     const { redirect } = Ctor
     if (
@@ -479,6 +490,12 @@ export abstract class SpacePageController<
     const pageCtx: PageContext<Params> = { ...actionCtx, fieldErrors, submitted }
 
     const { applySecurity, nonce, themeStyle } = await resolvePageChrome(ctx, Ctor.headers, pageCtx)
+    // Same reassignment `handleGet` performs, for the identical reason — see that call site's own
+    // doc. `actionCtx.cspNonce` (spread into `pageCtx` above) was ALSO snapshotted before this
+    // request's `cspGuard` ever ran, whether `actionCtx` came from `handlePost`'s own `toPageContext`
+    // call or anywhere else — a plain object spread copies a stale value, it does not defer reading
+    // it, so reassigning after `resolvePageChrome` resolves is required here too, not optional.
+    pageCtx.cspNonce = nonce
 
     try {
       // `loader` runs exactly as it does for a GET — the page renders with its real data, plus the

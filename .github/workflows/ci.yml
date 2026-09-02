@@ -52,6 +52,10 @@ jobs:
       # - name: Check for circular-import hazards
       #   run: deno run -A jsr:@zanix/cli check-cycles
 
+      # Temporarily disabled: @zanix/cli check-duplicates has not been published yet.
+      # - name: Check for duplicate '@zanix/*' dependencies
+      #   run: deno run -A jsr:@zanix/cli check-duplicates
+
       # Required by the audio/video functional suite (`voice-upload-s3.test.ts`,
       # `video-upload-s3.test.ts`, `system-ffmpeg-transcoder.calibration.test.ts`, and every other
       # `probeFfmpegAvailability`-gated test) — confirmed NOT part of the `ubuntu-latest` runner's

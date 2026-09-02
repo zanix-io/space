@@ -125,6 +125,69 @@ export function looksLikeViteHotClientRequest(pathname: string): boolean {
 export function buildViteHotClientScript(): string {
   return `
 window.__spaceHotAccept = window.__spaceHotAccept || {};
+window.__spaceStyleSheets = window.__spaceStyleSheets || new Map();
+// Vite's own CSS transform (\`cssPlugin\`'s dev-serve handler, \`vite@8.2.1\`'s own
+// \`dist/node/chunks/node.js\`) unconditionally rewrites EVERY real CSS/CSS-Modules import a
+// CLIENT-environment module reaches (a Comet's own \`*.module.css\`, a plain \`*.css\` side-effect
+// import, ...) into generated JS that imports exactly these two names from \`/@vite/client\` and
+// calls the first one at module top level, on every load, first load included -- not only on a
+// later HMR update. Never optional, never behind a config flag: this is dev-serve mode's ONLY
+// mechanism for actually applying a CSS Modules import's styles to the page (a real \`<link>\` tag
+// is a PRODUCTION build's job, via \`cssPlugin\`'s own manifest -- see that file's own doc). Without
+// these two exports, the browser's own native ES module loader rejects the whole generated module
+// outright (\`SyntaxError: ... does not provide an export named 'removeStyle'\`), which aborts
+// hydration for every Comet reachable from it -- confirmed as a real, previously unexercised gap:
+// no Comet in this ecosystem imported a real CSS/CSS-Modules file until now, so this hand-written
+// replacement's own doc never needed to account for Vite's CSS-specific rewrite, only its generic
+// \`import.meta.hot\` one. Implemented the same way Vite's own real client does: a single
+// \`<style data-vite-dev-id>\` element per module id, created once and its \`textContent\` replaced
+// in place on every later call (never a second element per id) -- \`removeStyle\` (registered via
+// \`import.meta.hot.prune\` below, never called by this file itself) is what a real HMR update to a
+// CSS Modules file uses to drop a NO-LONGER-imported module's own leftover element.
+// Reads the CURRENT page's real CSP nonce off an element the server actually rendered with one --
+// never a value this script invents or caches at module-eval time. Every Space page under a
+// nonce-based CSP renders at least one nonced element before ANY module import can even start
+// running (\`BUILTIN_CSS\`'s own \`<style nonce>\` in \`<head>\`, this app's own bootstrap
+// \`<script nonce>\`, ...) -- \`[nonce]\` (not \`script[nonce]\`) matches either shape, renderer-
+// agnostic, same as this whole file. Real browsers deliberately hide a nonce's CONTENT ATTRIBUTE
+// from \`getAttribute\`/\`outerHTML\` for security once the element is inserted -- only the element's
+// own \`.nonce\` IDL property still returns the real value, and only for an element the PARSER
+// actually inserted from real HTML (never one built via \`createElement\`, which starts with an
+// empty nonce until explicitly assigned) -- confirmed against real Chromium/Firefox nonce
+// semantics, not assumed. Queried fresh on every call rather than cached once: computing it lazily
+// is self-healing if this ever somehow runs before any nonced element exists yet, at no real cost
+// (this is not a hot path -- once per unique CSS Modules id, plus rare HMR updates).
+function __spaceGetCspNonce() {
+  var nonced = document.querySelector('[nonce]');
+  return nonced ? nonced.nonce : '';
+}
+function __spaceUpdateStyle(id, css) {
+  var style = window.__spaceStyleSheets.get(id);
+  if (!style) {
+    style = document.createElement('style');
+    style.setAttribute('type', 'text/css');
+    style.setAttribute('data-vite-dev-id', id);
+    // Assigned BEFORE \`appendChild\` below, deliberately -- a nonce-based CSP evaluates a \`<style>\`
+    // element the INSTANT it enters the document; setting \`.nonce\` any later (even synchronously
+    // right after) is already too late and the browser blocks it regardless of what the nonce
+    // value eventually becomes. Confirmed as a real, reported failure: without this, EVERY style
+    // this function ever inserted was blocked outright (\`Applying inline style violates ... 'style-
+    // src'\`), reported against the SHA-256 hash of an EMPTY string -- proof CSP evaluated the
+    // element right at \`appendChild\`, before \`textContent\` below ever ran, not evidence the CSS
+    // content itself was the problem.
+    style.nonce = __spaceGetCspNonce();
+    document.head.appendChild(style);
+    window.__spaceStyleSheets.set(id, style);
+  }
+  style.textContent = css;
+}
+function __spaceRemoveStyle(id) {
+  var style = window.__spaceStyleSheets.get(id);
+  if (!style) return;
+  style.remove();
+  window.__spaceStyleSheets.delete(id);
+}
+export { __spaceUpdateStyle as updateStyle, __spaceRemoveStyle as removeStyle };
 let __spaceLastHmrTimestamp = 0;
 function __spaceNextHmrTimestamp() {
   const now = Date.now();

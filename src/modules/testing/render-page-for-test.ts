@@ -1,4 +1,4 @@
-import type { ClassConstructor, HandlerContext } from '@zanix/server'
+import type { ClassConstructor, HandlerContext, ZanixInteractorGeneric } from '@zanix/server'
 import type { SpacePageController } from 'modules/router/space-page-controller.ts'
 import { mockHandlerContext } from './mock-handler-context.ts'
 
@@ -13,6 +13,10 @@ export type RenderPageForTestResult = { response: Response; html: string }
  *
  * @template Params - The route's dynamic segments, inferred from `Controller`'s own `Params`
  * generic — never needs naming explicitly.
+ * @template Interactor - The page's own `Interactor` type, inferred from `Controller`'s own
+ * `Interactor` generic — never needs naming explicitly. Defaults to `never`, matching
+ * {@linkcode SpacePageController}'s own default, so a page declared with no `Interactor` at all
+ * still satisfies this constraint without one.
  * @template TComponent - The real component type `Controller`'s own `component` field must
  * satisfy, matching {@linkcode SpacePageController}'s own `TComponent` template param. Defaults to
  * `any` and is never inferred from `Controller` (see the `NoInfer` wrapper below): every renderer's
@@ -36,18 +40,25 @@ export type RenderPageForTestResult = { response: Response; html: string }
  */
 export async function renderPageForTest<
   Params = Record<string, string>,
+  Interactor extends ZanixInteractorGeneric = never,
   // deno-lint-ignore no-explicit-any
   TComponent = any,
 >(
+  // `Interactor` IS inferred from `Controller` (unlike `TComponent` below) — a page declaring a
+  // real `Interactor` (e.g. `SpacePageController<Params, DlqInteractor>`) must structurally match
+  // here too, or it would be rejected the same way `TComponent` would be without the `NoInfer`
+  // wrapper below. Defaulting to `never` (matching `SpacePageController`'s own default) keeps a
+  // page declared with no `Interactor` at all unaffected.
+  //
   // `NoInfer` keeps `TComponent` from ever being inferred from `Controller` itself — every
   // concrete page's own `component = X` field narrows to `typeof X` rather than the class's
   // declared `TComponent` default, and inferring `TComponent` from that narrowed type here would
-  // make the resulting `SpacePageController<Params, never, TComponent>` a structurally different
-  // (invariant, through `HandlerBaseClass`'s index signature) type from `Controller`'s own —
-  // rejecting the page regardless of its renderer. `NoInfer` leaves `TComponent` at its `any`
+  // make the resulting `SpacePageController<Params, Interactor, TComponent>` a structurally
+  // different (invariant, through `HandlerBaseClass`'s index signature) type from `Controller`'s
+  // own — rejecting the page regardless of its renderer. `NoInfer` leaves `TComponent` at its `any`
   // default unless a caller names it explicitly, which stays validated against `Controller` like
   // any other explicit type argument.
-  Controller: ClassConstructor<SpacePageController<Params, never, NoInfer<TComponent>>>,
+  Controller: ClassConstructor<SpacePageController<Params, Interactor, NoInfer<TComponent>>>,
   params: Params = {} as Params,
   ctxOverrides: Partial<HandlerContext> = {},
 ): Promise<RenderPageForTestResult> {

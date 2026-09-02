@@ -10,10 +10,87 @@ type FakeModule = {
   // deno-lint-ignore no-explicit-any
   createHotContext: (id: string) => any
   injectQuery: (url: string) => string
+  updateStyle: (id: string, css: string) => void
+  removeStyle: (id: string) => void
 }
 // deno-lint-ignore no-explicit-any
 type FakeWindow = Record<string, any>
 type FakeLocation = { reload: () => void }
+type FakeStyleElement = {
+  tagName: 'STYLE'
+  attributes: Record<string, string>
+  textContent: string
+  /** `undefined` until explicitly assigned — real browsers start a `createElement`d element's own
+   * `nonce` IDL property empty, never inherited from anywhere, exactly what `__spaceGetCspNonce`'s
+   * own doc relies on being true. */
+  nonce?: string
+  setAttribute: (name: string, value: string) => void
+  remove: () => void
+}
+type FakeDocument = {
+  head: { children: FakeStyleElement[]; appendChild: (el: FakeStyleElement) => void }
+  createElement: (tagName: string) => FakeStyleElement
+  /** Only ever asked for `'[nonce]'` by the real script — a real, minimal stand-in for that one
+   * selector, not a general CSS selector engine. Searches `head.children` for the first element
+   * carrying a truthy `.nonce`, matching `document.querySelector('[nonce]')`'s own real semantics
+   * (the first element in document order with the attribute present). */
+  querySelector: (selector: '[nonce]') => FakeStyleElement | null
+}
+
+/** A minimal fake DOM — just enough surface for `updateStyle`/`removeStyle` (`createElement`,
+ * `head.appendChild`, `setAttribute`, `textContent`, `remove()`, `querySelector('[nonce]')`) to run
+ * for real, the same "run the real script as a real module" discipline this file's own
+ * `withViteHotClientScript` already applies to `window`/`location`. Deno's own global scope has no
+ * real `document` either (same reasoning as `window`/`location` above).
+ *
+ * @param serverRenderedElements - Simulates whatever nonced element(s) a real SSR response already
+ * rendered into `<head>`/`<body>` BEFORE any client script ever runs (`BUILTIN_CSS`'s own
+ * `<style nonce>`, this app's own bootstrap `<script nonce>`, ...) — `__spaceGetCspNonce`'s own
+ * doc explains why only a PARSER-inserted element's `.nonce` is ever real, never one this test
+ * itself calls `createElement` for. Defaults to none, for the tests that don't care about CSP at
+ * all.
+ */
+function createFakeDocument(serverRenderedElements: FakeStyleElement[] = []): FakeDocument {
+  const headChildren: FakeStyleElement[] = [...serverRenderedElements]
+  return {
+    head: {
+      children: headChildren,
+      appendChild: (el) => headChildren.push(el),
+    },
+    createElement: (tagName) => {
+      if (tagName !== 'style') throw new Error(`unexpected tagName: ${tagName}`)
+      const el: FakeStyleElement = {
+        tagName: 'STYLE',
+        attributes: {},
+        textContent: '',
+        setAttribute: (name, value) => (el.attributes[name] = value),
+        remove: () => {
+          const index = headChildren.indexOf(el)
+          if (index !== -1) headChildren.splice(index, 1)
+        },
+      }
+      return el
+    },
+    querySelector: (selector) => {
+      if (selector !== '[nonce]') throw new Error(`unexpected selector: ${selector}`)
+      return headChildren.find((el) => el.nonce) ?? null
+    },
+  }
+}
+
+/** A fake element already carrying a real `nonce`, exactly as a real parser-inserted
+ * `<style nonce>`/`<script nonce>` from a real SSR response would — see
+ * {@linkcode createFakeDocument}'s own `serverRenderedElements` param doc. */
+function fakeServerRenderedNoncedElement(nonce: string): FakeStyleElement {
+  return {
+    tagName: 'STYLE',
+    attributes: {},
+    textContent: '',
+    nonce,
+    setAttribute: () => {},
+    remove: () => {},
+  }
+}
 
 /**
  * Runs the real, unmodified `buildViteHotClientScript()` output as a real ES module (via a real
@@ -40,6 +117,7 @@ type FakeLocation = { reload: () => void }
 const globalWithGlobals = globalThis as unknown as {
   window?: FakeWindow
   location?: FakeLocation
+  document?: FakeDocument
 }
 
 let callCounter = 0
@@ -48,20 +126,25 @@ async function withViteHotClientScript<T>(
     mod: FakeModule,
     window: FakeWindow,
     location: FakeLocation,
+    document: FakeDocument,
   ) => T | Promise<T>,
+  serverRenderedElements: FakeStyleElement[] = [],
 ): Promise<T> {
   const fakeWindow: FakeWindow = {}
   const fakeLocation: FakeLocation = { reload: () => {} }
+  const fakeDocument = createFakeDocument(serverRenderedElements)
   globalWithGlobals.window = fakeWindow
   globalWithGlobals.location = fakeLocation
+  globalWithGlobals.document = fakeDocument
   try {
     const source = `${buildViteHotClientScript()}\n// cache-bust:${callCounter++}`
     const dataUrl = `data:text/javascript;base64,${btoa(source)}`
     const mod = await import(dataUrl) as FakeModule
-    return await fn(mod, fakeWindow, fakeLocation)
+    return await fn(mod, fakeWindow, fakeLocation, fakeDocument)
   } finally {
     delete globalWithGlobals.window
     delete globalWithGlobals.location
+    delete globalWithGlobals.document
   }
 }
 
@@ -137,6 +220,133 @@ Deno.test('buildViteHotClientScript: injectQuery is a real identity passthrough'
     assertEquals(mod.injectQuery('/comets/counter.tsx'), '/comets/counter.tsx')
   })
 })
+
+Deno.test(
+  'buildViteHotClientScript: updateStyle/removeStyle are real, named exports — required because ' +
+    "Vite's own CSS transform (`vite@8.2.2`, `dist/node/chunks/node.js`) unconditionally imports " +
+    'exactly these two names from `/@vite/client` for EVERY real CSS/CSS-Modules import a ' +
+    'client-environment module reaches, first load included. Without both exports, the browser ' +
+    'rejects the generated module outright (`SyntaxError: ... does not provide an export named ' +
+    "'removeStyle'`), aborting hydration for a Comet importing a real `.module.css` file",
+  async () => {
+    await withViteHotClientScript((mod) => {
+      assertEquals(typeof mod.updateStyle, 'function')
+      assertEquals(typeof mod.removeStyle, 'function')
+    })
+  },
+)
+
+Deno.test(
+  'updateStyle: creates a single real <style data-vite-dev-id> element in <head>, with the given ' +
+    "CSS as its textContent — the same shape Vite's own real client uses to actually apply a CSS " +
+    "Modules import's styles in dev-serve mode (there is no <link> tag for this; a real " +
+    'production build is the only place one exists)',
+  async () => {
+    await withViteHotClientScript((mod, _window, _location, document) => {
+      mod.updateStyle('/comets/counter.module.css', '.button{color:red}')
+
+      assertEquals(document.head.children.length, 1)
+      const [style] = document.head.children
+      assertEquals(style.tagName, 'STYLE')
+      assertEquals(style.attributes['data-vite-dev-id'], '/comets/counter.module.css')
+      assertEquals(style.textContent, '.button{color:red}')
+    })
+  },
+)
+
+Deno.test(
+  'updateStyle: a SECOND call for the SAME id updates the existing element in place — never a ' +
+    "second <style> tag, matching Vite's own real client behavior for a later CSS edit",
+  async () => {
+    await withViteHotClientScript((mod, _window, _location, document) => {
+      mod.updateStyle('/comets/counter.module.css', '.button{color:red}')
+      mod.updateStyle('/comets/counter.module.css', '.button{color:blue}')
+
+      assertEquals(document.head.children.length, 1)
+      assertEquals(document.head.children[0].textContent, '.button{color:blue}')
+    })
+  },
+)
+
+Deno.test(
+  "updateStyle: assigns the CURRENT page's real CSP nonce to the style element BEFORE it enters " +
+    'the document — real gap found and fixed: a nonce-based CSP evaluates a <style> element the ' +
+    'instant it is inserted, so assigning .nonce any later (even synchronously right after ' +
+    'appendChild) is already too late and the browser blocks it regardless of content, reported ' +
+    'against the SHA-256 hash of an EMPTY string (proof CSP saw the element before textContent ' +
+    'ever ran, not that the CSS itself was invalid)',
+  async () => {
+    await withViteHotClientScript(
+      (mod, _window, _location, document) => {
+        mod.updateStyle('/comets/counter.module.css', '.button{color:red}')
+
+        // Index 1 — index 0 is the seeded server-rendered element itself, already in `head`
+        // before `updateStyle` ever runs; the style THIS call creates is appended after it.
+        assertEquals(document.head.children[1].nonce, 'xloCDdR/fvXGionAi3e3Wg==')
+      },
+      [fakeServerRenderedNoncedElement('xloCDdR/fvXGionAi3e3Wg==')],
+    )
+  },
+)
+
+Deno.test(
+  'updateStyle: reads the nonce off ANY server-rendered nonced element, not a specific tag — ' +
+    'renderer-agnostic, same as this whole file: a real Space response always renders at least ' +
+    "one such element before any client script can even start running (BUILTIN_CSS's own " +
+    "<style nonce>, this app's own bootstrap <script nonce>, ...) — never a value this script " +
+    'invents, hardcodes, or caches across calls',
+  async () => {
+    const serverRenderedScript: FakeStyleElement = {
+      ...fakeServerRenderedNoncedElement('a-real-per-request-nonce'),
+      tagName: 'STYLE', // stand-in; the real element would be a <script>, irrelevant to matching
+    }
+    await withViteHotClientScript(
+      (mod, _window, _location, document) => {
+        mod.updateStyle('/comets/counter.module.css', '.button{color:red}')
+
+        assertEquals(document.head.children[1].nonce, 'a-real-per-request-nonce')
+      },
+      [serverRenderedScript],
+    )
+  },
+)
+
+Deno.test(
+  'updateStyle: assigns an empty nonce, never throws, when no server-rendered nonced element ' +
+    'exists at all — a page with no CSP in effect must still apply real styles',
+  async () => {
+    await withViteHotClientScript((mod, _window, _location, document) => {
+      mod.updateStyle('/comets/counter.module.css', '.button{color:red}')
+
+      assertEquals(document.head.children[0].nonce, '')
+    })
+  },
+)
+
+Deno.test(
+  "removeStyle: removes the real element updateStyle created for that id — the callback Vite's " +
+    'own generated code registers via `import.meta.hot.prune()` for a CSS Modules file that stops ' +
+    'being imported',
+  async () => {
+    await withViteHotClientScript((mod, _window, _location, document) => {
+      mod.updateStyle('/comets/counter.module.css', '.button{color:red}')
+      mod.removeStyle('/comets/counter.module.css')
+
+      assertEquals(document.head.children.length, 0)
+    })
+  },
+)
+
+Deno.test(
+  'removeStyle: a real no-op for an id updateStyle never created — never throws',
+  async () => {
+    await withViteHotClientScript((mod, _window, _location, document) => {
+      mod.removeStyle('/never/updated.module.css')
+
+      assertEquals(document.head.children.length, 0)
+    })
+  },
+)
 
 Deno.test(
   'window.__spaceApplyClientUpdate: re-imports the changed module cache-busted and invokes its accept callback, real round trip',

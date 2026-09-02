@@ -5,6 +5,64 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-09-01
+
+### Added
+
+- **`PageContext.cspNonce`** (`typings/page.ts`) — carries this request's own CSP nonce into a
+  page's `loader`/`action`, when `cspGuard` generated one (the default, zero-config `Page()`
+  policy); `undefined` only when CSP is explicitly disabled for the page (`csp: false`). The same
+  value `style-src`/`script-src` carry in the response's own `Content-Security-Policy` header — hand
+  it straight through to `@zanix/space-ui`'s `Modal`/`Drawer`/`Toast`/`Tooltip`/`Popover` as their
+  own `nonce` prop, since a CSP nonce never applies to a `style="..."` attribute, only to a
+  `<style>` element, which is exactly what those components render for their functional positioning.
+- **`BuildSpaceClientOptions.importModule`** (`modules/bundler/build-client.ts`) — overrides how
+  `discoverPages` imports each page/layout module, forwarded to it unchanged. Needed when
+  `buildSpaceClient` runs from OUTSIDE the consuming project's own process — `zanix space build`
+  runs it from inside `@zanix/cli`'s own process, where a project-local import-map alias (declared
+  only in the project's own `deno.json(c)`) would otherwise fail to resolve against `@zanix/cli`'s
+  own configuration.
+- **`renderPageForTest`'s new `Interactor` generic** (`modules/testing/render-page-for-test.ts`) — a
+  page declaring a real `Interactor` (e.g. `SpacePageController<Params, DlqInteractor>`) now
+  type-checks against `renderPageForTest`'s `Controller` parameter without a cast. Defaults to
+  `never`, matching `SpacePageController`'s own default, and is inferred from `Controller` — never
+  needs naming explicitly.
+- **`@zanix/auth` added to `NATIVE_RUNTIME_MODULES`** (`modules/bundler/native-runtime-modules.ts`)
+  — `zanix space dev`'s `ssrLoadModule` now resolves `@zanix/auth` to the exact same, native module
+  instance the running dev process already holds, the same identity guarantee this list already
+  gives `@zanix/space`/`@zanix/server`/`react`/`react-dom`/`preact`.
+
+### Fixed
+
+- **`SpacePageController.handleGet` and the 422 re-render path (`#renderInvalidAction`, reached
+  through `handlePost`) now carry this request's real CSP nonce off `pageCtx.cspNonce`, not
+  `undefined`.** `toPageContext` snapshots `ctx.locals[CSP_NONCE_LOCALS_KEY]` before
+  `resolvePageChrome` ever runs `cspGuard` for the request, so a naive read of `pageCtx.cspNonce`
+  always returned `undefined` regardless of the real nonce the response's own CSP header carried.
+  Both call sites now reassign `pageCtx.cspNonce` from the resolved `nonce` after
+  `resolvePageChrome` returns.
+- **A `@Guard` resolving `@zanix/auth`'s `ZanixAuthProvider` by class reference
+  (`ctx.providers.get(ZanixAuthProvider)`) no longer throws
+  `[BaseInstancesContainer]: Target is
+  not a constructor`.** A `@Guard` file reached through
+  `ssrLoadModule` (never `space.app.ts` itself) that bare-imports `'@zanix/auth'` got a separate,
+  Vite-transformed evaluation of `ZanixAuthProvider`, carrying none of the DI decorator metadata the
+  native side's own `import '@zanix/auth/core'` registered — while a string-keyed
+  `ctx.providers.get('auth')` lookup kept resolving the same underlying provider with no error,
+  since it never depended on which JS object reference the caller held. `@zanix/auth` now resolves
+  through this package's own native-runtime-module mechanism instead, closing the split.
+- **A Comet's real `*.module.css`/CSS import no longer crashes hydration in dev mode.**
+  `buildViteHotClientScript`'s hand-written `/@vite/client` replacement never exported the
+  `updateStyle`/`removeStyle` names Vite's own CSS transform unconditionally imports for every real
+  CSS/CSS-Modules import a client-environment module reaches, first load included — the browser's
+  native ES module loader rejected the whole generated module outright
+  (`SyntaxError: ... does not
+  provide an export named 'removeStyle'`). Both are now real named
+  exports, applying/removing a real `<style data-vite-dev-id>` element per module id, with the
+  current page's own CSP nonce read and assigned before the element is inserted into the document (a
+  nonce-based CSP evaluates a `<style>` element the instant it enters the document, so assigning it
+  any later is already too late).
+
 ## [1.0.0] - 2026-08-31
 
 ### Added

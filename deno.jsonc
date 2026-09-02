@@ -1,6 +1,6 @@
 {
   "name": "@zanix/space",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "zanix": {
     "project": "library"
   },
@@ -222,7 +222,14 @@
       "@zanix/app/runtime": "jsr:@zanix/app@^0.2.1/runtime",
       "@zanix/auth": "jsr:@zanix/auth@^1.0.0",
       "@zanix/datamaster/storage": "jsr:@zanix/datamaster@^1.9.0/storage",
-      "@zanix/datamaster/core": "jsr:@zanix/datamaster@^1.9.0/core"
+      "@zanix/datamaster/core": "jsr:@zanix/datamaster@^1.9.0/core",
+      // Resolves `native-runtime-modules-datamaster.test.ts`'s own top-level `@zanix/datamaster/
+      // dlq` import for `deno check`/normal test runs — same role `/storage`/`/core` above already
+      // play. Does NOT, on its own, make that file's gated identity test actually pass at runtime:
+      // `RealImportEvaluator.runExternalModule`'s own native `import()` (`ssr-module-
+      // evaluator.ts`) is issued from a location outside `src/@tests/`, so it needs a separate,
+      // TEMPORARY top-level entry too — see that test's own doc.
+      "@zanix/datamaster/dlq": "jsr:@zanix/datamaster@^1.9.0/dlq"
     }
   },
   "exports": {

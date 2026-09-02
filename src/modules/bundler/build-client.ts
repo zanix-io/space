@@ -14,7 +14,7 @@ import { ASSETS_PLUGIN_SPECIFIER, MEDIA_PLUGIN_SPECIFIER } from './build-plugin-
 import { createAssetManifestRegistry } from 'modules/assets/asset-manifest-registry.ts'
 import { resolvePwaPluginOptions } from './resolve-pwa-plugin-options.ts'
 import { discoverComets } from './discover-comets.ts'
-import { collectPageStyles, discoverPages } from './discover-pages.ts'
+import { collectPageStyles, discoverPages, type ModuleImporter } from './discover-pages.ts'
 import { scanPageFiles } from 'modules/router/scan-page-files.ts'
 import {
   DEFAULT_ERROR_VIEW_PREACT_URL,
@@ -156,6 +156,18 @@ export interface BuildSpaceClientOptions {
    * `space.app.ts` at all).
    */
   renderer?: RendererKind
+  /**
+   * Overrides how {@linkcode discoverPages} imports each page/layout module — forwarded to it
+   * unchanged. Defaults to `discoverPages`'s own native `import()`, which is only correct when
+   * this function runs inside the CONSUMING project's own process (a build script that `deno run`s
+   * from within the project). `zanix space build` runs `buildSpaceClient` from inside `@zanix/cli`'s
+   * own process instead — a bare specifier a page/layout imports through a project-local import-map
+   * alias (declared only in the project's own `deno.json(c)`, e.g. `"auth/": "./src/auth/"`) would
+   * otherwise resolve against `@zanix/cli`'s OWN configuration and fail with "not a dependency and
+   * not in import map", exactly the failure `@zanix/cli`'s own `importProjectModule` exists to fix
+   * — this option is `zanix space build`'s hook for passing that in.
+   */
+  importModule?: ModuleImporter
 }
 
 /** What {@linkcode buildSpaceClient} returns. */
@@ -263,6 +275,7 @@ export async function buildSpaceClient(
     renderer = getActiveRenderer(),
     validation = getValidationConfig(),
     sitemapLocations: explicitSitemapLocations,
+    importModule,
   } = options
 
   const comets = await discoverComets(root)
@@ -380,7 +393,7 @@ export async function buildSpaceClient(
   // ONE pass over every page, shared by CSS entry construction here and by document validation
   // below — see `discoverPages`'s own doc: importing each page module once serves both `styles`
   // and `head`/`redirect`, instead of a separate scan+import per concern.
-  const discoveredPages = await discoverPages(routesDir)
+  const discoveredPages = await discoverPages(routesDir, importModule)
 
   // `defineSpaceApp({ sitemap: 'auto' })` derives its own entries from THIS SAME discovery pass —
   // no second scan, no per-page declaration beyond what routing already captured. A literal array

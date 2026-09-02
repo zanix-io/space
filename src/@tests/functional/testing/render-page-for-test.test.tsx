@@ -4,6 +4,7 @@ import '../../../../mod-react.ts'
 import { assert, assertEquals } from '@std/assert'
 import { createElement as preactElement } from 'preact'
 import type { ComponentType as PreactComponentType } from 'preact'
+import type { ZanixInteractor } from '@zanix/server'
 import { SpacePageController } from 'modules/router/mod.ts'
 import { renderPageForTest } from 'modules/testing/mod.ts'
 import { setActiveRenderer } from 'modules/router/active-renderer.ts'
@@ -94,5 +95,22 @@ Deno.test(
       setPageRenderer(previousRenderer)
       setActiveRenderer('react')
     }
+  },
+)
+
+class InteractorProductPage extends SpacePageController<ProductParams, ZanixInteractor> {
+  public override loader = (ctx: { params: ProductParams }) => ({ id: ctx.params.id })
+  public override component = ProductView
+}
+
+Deno.test(
+  'renderPageForTest: accepts a page declaring a real Interactor generic — no cast needed',
+  async () => {
+    // No cast on `InteractorProductPage` — that is the regression this pins.
+    const { response, html } = await renderPageForTest(InteractorProductPage, { id: '99' })
+
+    assertEquals(response.status, 200)
+    assert(html.includes('data-testid="product-id"'), html)
+    assert(html.includes('99'), html)
   },
 )

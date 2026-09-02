@@ -58,6 +58,22 @@ export type PageContext<Params = Record<string, string>> = {
    * right content override; see `populationGuard`'s own doc for the resolution order. */
   population?: string
   /**
+   * This request's own CSP nonce, if `cspGuard` ran and generated one (the default, zero-config
+   * `Page()` policy — `undefined` only when CSP was explicitly disabled for this page, `csp: false`
+   * in `PageHeaderOptions`). The same value `style-src`/`script-src` carry in this response's own
+   * `Content-Security-Policy` header — hand it straight through to `@zanix/space-ui`'s
+   * `Modal`/`Drawer`/`Toast`/`Tooltip`/`Popover` as their own `nonce` prop (see each component's own
+   * doc, and `space-styling-and-theming`'s "Functional positioning under a strict CSP" section) so
+   * their functional `position`/`z-index` styling isn't blocked outright — a CSP nonce never applies
+   * to a `style="..."` attribute, only to a `<style>` element, which is exactly what those
+   * components render for this.
+   *
+   * A curated snapshot, same shape as `csrfToken`/`population` above — never `ctx.locals` itself,
+   * which `loader`'s own `PageContext` deliberately does not expose (only `PageActionContext.locals`
+   * does, as a narrower escape hatch for mutating session state mid-action).
+   */
+  cspNonce?: string
+  /**
    * This request's resolved `Session` (`@zanix/server`), if one was resolved for it by the time
    * this context is built — `undefined` for an anonymous route, or one whose guards never resolve
    * a session at all. A read-only SNAPSHOT, same lifetime as `csrfToken`/`population` above:
@@ -174,8 +190,9 @@ export type PageActionContext<Params = Record<string, string>, Body = unknown> =
     body?: Body
     /**
      * The real, underlying request's `locals` — the SAME object `@zanix/server` itself reads/
-     * writes throughout the request pipeline, not a copy (unlike `csrfToken`/`population` above,
-     * which are one-way SNAPSHOTS read out of it at context-build time). Exposed specifically for
+     * writes throughout the request pipeline, not a copy (unlike `csrfToken`/`population`/`cspNonce`
+     * above, which are one-way SNAPSHOTS read out of it at context-build time). Exposed specifically
+     * for
      * an action that needs to issue or mutate a session mid-request (a login/OTP/OAuth2 callback
      * page calling `@zanix/auth`'s `generateSessionTokens(ctx, ...)`/`refreshSessionTokens`/etc.,
      * all of which write onto `ctx.locals.session` and expect `sessionHeadersInterceptor` —

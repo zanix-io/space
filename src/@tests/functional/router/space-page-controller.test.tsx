@@ -32,6 +32,21 @@ class SessionPage extends SpacePageController {
   })
 }
 
+class CspNoncePage extends SpacePageController {
+  public override component = Greeting
+  public override loader = (ctx: { cspNonce?: string }) => ({
+    name: ctx.cspNonce,
+  })
+}
+
+class CspDisabledPage extends SpacePageController {
+  public static override headers = { csp: false as const }
+  public override component = Greeting
+  public override loader = (ctx: { cspNonce?: string }) => ({
+    name: ctx.cspNonce,
+  })
+}
+
 class ActionPage extends SpacePageController {
   public override component = Greeting
   public override action = async (
@@ -113,6 +128,51 @@ Deno.test(
 
     const html = await response.text()
     assertMatch(stripHydrationComments(html), /Hello, guard-user/)
+  },
+)
+
+Deno.test(
+  "SpacePageController.handleGet: loader receives this request's own REAL CSP nonce off " +
+    "ctx.cspNonce — the exact same value this response's own <style nonce>/<script nonce> carry, " +
+    'not a stale snapshot taken before cspGuard ever ran. Real, confirmed regression this pins: ' +
+    'toPageContext() builds pageCtx (snapshotting ctx.locals[CSP_NONCE_LOCALS_KEY]) BEFORE ' +
+    'resolvePageChrome ever calls cspGuard for this request, so a naive read always saw undefined ' +
+    "here — caught live in a real browser as a Comet's own <style nonce> rendered with no nonce " +
+    'attribute at all, blocked outright by CSP. handleGet must reassign pageCtx.cspNonce AFTER ' +
+    'resolvePageChrome resolves, from the SAME nonce it already returns — never a second, ' +
+    'independent read.',
+  async () => {
+    const ctx = mockHandlerContext()
+    const page = new CspNoncePage(ctx)
+
+    const response = await page.handleGet(ctx)
+
+    const html = await response.text()
+    // Zero-config CSP generates a fresh nonce per request — nothing to hardcode. Pulled from the
+    // SAME response's own <style nonce="..."> (BUILTIN_CSS, always rendered) as the independent
+    // source of truth for "what nonce did this request actually get".
+    const [, realNonce] = html.match(/<style nonce="([^"]+)"/) ?? []
+    assert(realNonce, html)
+    // A real nonce is base64 (`+`/`/` included) — escaped before building a RegExp from it, or
+    // those characters would be read as regex quantifiers/alternation instead of literal text.
+    const escapedNonce = realNonce.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    assertMatch(stripHydrationComments(html), new RegExp(`Hello, ${escapedNonce}`))
+  },
+)
+
+Deno.test(
+  'SpacePageController.handleGet: ctx.cspNonce is undefined when a page disables CSP via ' +
+    "headers: { csp: false } — never a crash, never a stray '', and no nonce attribute anywhere " +
+    'in the document at all',
+  async () => {
+    const ctx = mockHandlerContext()
+    const page = new CspDisabledPage(ctx)
+
+    const response = await page.handleGet(ctx)
+
+    const html = await response.text()
+    assertMatch(stripHydrationComments(html), /Hello, stranger/)
+    assert(!html.includes('nonce='), html)
   },
 )
 

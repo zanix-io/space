@@ -189,6 +189,13 @@ import type { Plugin } from 'vite'
  * `cli` added matching entries for them (mirroring the one `@zanix/auth` already had). See `cli`'s
  * own `cli-dependency-compatibility` skill, "cli's own deno.jsonc — native-runtime-module
  * declarations" section, for the checklist this implies on that side.
+ *
+ * Exported (`./dev`, `modules/dev/mod.ts`) specifically so `cli`'s own regression guard
+ * (`native-runtime-module-imports.test.ts`) can import this REAL array instead of hand-keeping its
+ * own copy in sync — once `cli`'s `@zanix/space` range picks up the version that first exports
+ * this, that test should switch to it (see its own module doc for the exact TODO); until then, a
+ * package added here still needs its `cli`-side `deno.jsonc` entry AND that test's hardcoded copy
+ * updated by hand, the same as always.
  */
 export const NATIVE_RUNTIME_MODULES = [
   '@zanix/space',

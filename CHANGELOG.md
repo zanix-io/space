@@ -9,6 +9,15 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`NATIVE_RUNTIME_MODULES`** (`@zanix/space/dev`) — the exact list of bare specifiers
+  `RealImportEvaluator.runExternalModule` resolves via a plain native `import()` against whatever
+  process governs `zanix space dev` (`@zanix/cli`'s own config, never a consuming project's — see
+  `native-runtime-modules.ts`'s own doc for the full module-identity mechanism). Previously internal
+  only; exported so `@zanix/cli`'s own regression guard for this mechanism
+  (`native-runtime-module-imports.test.ts`) can check against the REAL list instead of hand-keeping
+  its own copy in sync — closing a real gap this array's own history left open
+  (`@zanix/notifications`/ `@zanix/datamaster` silently missing their required `cli`-side
+  `deno.jsonc` entry until a companion fix there added them).
 - **`isCometPersisted(key)`** (`@zanix/space/client`, `@zanix/space/client/preact`) — a read-only,
   side-effect-free way to ask whether a `persist` key currently has a retained (detached but not yet
   reused) Comet instance. Before this, the only way to find out was navigating to a page that

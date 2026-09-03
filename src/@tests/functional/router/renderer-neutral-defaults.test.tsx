@@ -9,6 +9,7 @@ import { setActiveRenderer } from 'modules/router/active-renderer.ts'
 import { renderPageResponse as renderReact } from 'modules/router/render-page-react.tsx'
 import { renderPageResponse as renderPreact } from 'modules/router/render-page-preact.ts'
 import { extractDocumentSemantics } from 'modules/render/document-semantics.ts'
+import { CSP_SIGNATURE_NONE } from 'modules/router/csp-signature.ts'
 
 /**
  * The two renderer-neutral defaults, exercised end to end through the REAL page renderers.
@@ -99,6 +100,7 @@ Deno.test(
       false,
       undefined,
       undefined,
+      CSP_SIGNATURE_NONE,
     )
     const html = await response.text()
 
@@ -130,6 +132,7 @@ Deno.test(
         false,
         undefined,
         undefined,
+        CSP_SIGNATURE_NONE,
       )
       const html = await response.text()
 
@@ -160,6 +163,7 @@ Deno.test(
       false,
       undefined,
       undefined,
+      CSP_SIGNATURE_NONE,
     )).text()
 
     setActiveRenderer('preact')
@@ -177,6 +181,7 @@ Deno.test(
         false,
         undefined,
         undefined,
+        CSP_SIGNATURE_NONE,
       )).text()
     } finally {
       setActiveRenderer('react')

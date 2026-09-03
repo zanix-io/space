@@ -26,8 +26,8 @@ Deno.test(
       schedulePrefetch(href)
       schedulePrefetch(href) // same href, still fresh — must NOT trigger a second fetch
 
-      const html = await getPrefetchedFragment(href)
-      assertEquals(html, 'fragment for /dedup')
+      const fragment = await getPrefetchedFragment(href)
+      assertEquals(fragment, { html: 'fragment for /dedup', cspHeader: null })
       assertEquals(requestCount, 1)
     } finally {
       await server.shutdown()
@@ -174,8 +174,8 @@ Deno.test(
       // Exactly what swapOutlet itself would do next: getPrefetchedFragment returned undefined,
       // so a real click falls through to its own normal fetch — simulated here directly.
       schedulePrefetch(href)
-      const html = await getPrefetchedFragment(href)
-      assertEquals(html, 'fragment for real this time')
+      const fragment = await getPrefetchedFragment(href)
+      assertEquals(fragment, { html: 'fragment for real this time', cspHeader: null })
       assertEquals(requestCount, 2)
     } finally {
       await server.shutdown()

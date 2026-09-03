@@ -7,6 +7,7 @@ import { renderPageResponse } from 'modules/router/render-page-preact.ts'
 import { buildCanonicalLink } from 'modules/seo/canonical.ts'
 import { buildHreflangLinks } from 'modules/seo/hreflang.ts'
 import type { HeadLinkTag } from 'modules/router/mod.ts'
+import { CSP_SIGNATURE_NONE } from 'modules/router/csp-signature.ts'
 
 console.error = () => {}
 
@@ -68,6 +69,7 @@ Deno.test(
       false,
       undefined,
       undefined,
+      CSP_SIGNATURE_NONE,
     )
     const html = await response.text()
 

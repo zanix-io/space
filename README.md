@@ -245,6 +245,21 @@ updating the URL (`history.pushState`) and re-hydrating any comets in the new co
 safely (still a real `<a href>`, works with JS disabled or before this script loads) and warms links
 ahead of a click via hover/viewport prefetch, on by default for hover.
 
+For a navigation with no click to intercept — a Comet's own event handler navigating once a
+`fetch()` it made resolves — call `navigate()` directly:
+
+```ts
+import { navigate } from '@zanix/space/client'
+
+await navigate(`/products/${id}`)
+await navigate('/checkout', { replace: true }) // replaceState instead of pushState
+```
+
+Runs through the exact same swap a real click does, byte-for-byte: prefetch reuse, the CSP-signature
+check, stylesheet loading, `persist`-tagged Comet retention, and the same fallback to a real
+navigation on any failure. A cross-origin `href` or a same-document hash link gets a real navigation
+too, exactly like the equivalent `<a>` would.
+
 See [`docs/orbit.md`](./docs/orbit.md) for the full contract: escape hatches, prefetch eligibility,
 `Vary` caching, and the lower-level `renderToResponse`/`useRequestCache`/`readInitialState` surface
 for rendering an element manually.

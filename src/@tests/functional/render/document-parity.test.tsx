@@ -12,6 +12,7 @@ import { comparableSemantics, withoutPwaContribution } from '../../support/docum
 import type { HeadDescriptor } from 'modules/router/head-descriptor.ts'
 import { renderPageResponse as renderReact } from 'modules/router/render-page-react.tsx'
 import { renderPageResponse as renderPreact } from 'modules/router/render-page-preact.ts'
+import { CSP_SIGNATURE_NONE } from 'modules/router/csp-signature.ts'
 
 console.error = () => {}
 
@@ -127,6 +128,7 @@ async function renderWith(
       false,
       undefined,
       undefined,
+      CSP_SIGNATURE_NONE,
     )
     return extractDocumentSemantics(await response.text())
   } finally {

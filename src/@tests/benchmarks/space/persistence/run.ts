@@ -91,6 +91,7 @@ import { setActiveRenderer } from 'modules/router/active-renderer.ts'
 import { setExtendedSerialization } from 'modules/render/serialization-registry.ts'
 import { mockPageContext } from 'modules/testing/mod.ts'
 import { ORBIT_FRAGMENT_HEADER } from 'modules/router/orbit-protocol.ts'
+import { CSP_SIGNATURE_NONE } from 'modules/router/csp-signature.ts'
 
 const REPO_ROOT = Deno.cwd()
 const DIR = 'src/@tests/benchmarks/space/persistence'
@@ -201,6 +202,7 @@ async function runRenderer(renderer: Renderer): Promise<Result> {
       fragmentOnly,
       undefined,
       undefined,
+      CSP_SIGNATURE_NONE,
     )
     let html = await response.text()
     if (!fragmentOnly) {

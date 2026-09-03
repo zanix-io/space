@@ -7,6 +7,7 @@ import { setPageTree } from 'modules/router/page-tree-registry.ts'
 import { mockPageContext } from 'modules/testing/mod.ts'
 import { setActiveRenderer } from 'modules/router/active-renderer.ts'
 import { renderPageResponse } from 'modules/router/render-page-preact.ts'
+import { CSP_SIGNATURE_NONE } from 'modules/router/csp-signature.ts'
 import {
   ERROR_BOUNDARY_MODULE_ATTR,
   ERROR_BOUNDARY_MSG_ATTR,
@@ -65,6 +66,7 @@ Deno.test(
       false,
       undefined,
       undefined,
+      CSP_SIGNATURE_NONE,
     )
     const html = await response.text()
 
@@ -93,6 +95,7 @@ Deno.test(
       false,
       undefined,
       undefined,
+      CSP_SIGNATURE_NONE,
     )
     const html = await response.text()
 

@@ -55,7 +55,7 @@ export type { LogApiControllerOptions, LogApiRateLimitOptions }
  * {@linkcode resolveDefaultGuard}'s own doc for why this package is reached this way instead of a
  * normal top-level `import`. Kept in sync with `deno.jsonc`'s own doc comment marking why
  * `@zanix/auth` is deliberately absent from its `imports`. */
-const AUTH_SPECIFIER = 'jsr:@zanix/auth@^0.8.0'
+const AUTH_SPECIFIER = 'jsr:@zanix/auth@^1.0.0'
 
 /** Narrow, hand-declared shape for exactly the one `@zanix/auth` export this module calls —
  * deliberately NOT `typeof import('@zanix/auth')`, which would force resolving that package's

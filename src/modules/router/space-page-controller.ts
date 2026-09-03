@@ -322,7 +322,11 @@ export abstract class SpacePageController<
     const fragmentOnly = ctx.req.headers.has(ORBIT_FRAGMENT_HEADER)
     // Security headers, CSP nonce and theme overrides, resolved in one place shared with the
     // failed-action re-render so the two can never drift — see `resolvePageChrome`'s own doc.
-    const { applySecurity, nonce, themeStyle } = await resolvePageChrome(ctx, Ctor.headers, pageCtx)
+    const { applySecurity, nonce, themeStyle, cspSignature } = await resolvePageChrome(
+      ctx,
+      Ctor.headers,
+      pageCtx,
+    )
     // `pageCtx.cspNonce` above was snapshotted from `ctx.locals[CSP_NONCE_LOCALS_KEY]` BEFORE
     // `resolvePageChrome` (via `applySecurityGuards` → `cspGuard`) ever wrote it for this request —
     // always `undefined` at that point, real value or not, since that's the ONE place this request's
@@ -375,6 +379,7 @@ export abstract class SpacePageController<
           fragmentOnly,
           nonce,
           themeStyle,
+          cspSignature,
         )
         for (const [key, value] of Object.entries(headers)) {
           response.headers.set(key, value)
@@ -390,6 +395,7 @@ export abstract class SpacePageController<
         fragmentOnly,
         nonce,
         themeStyle,
+        cspSignature,
         applySecurity,
       )
     } catch (error) {
@@ -489,7 +495,11 @@ export abstract class SpacePageController<
 
     const pageCtx: PageContext<Params> = { ...actionCtx, fieldErrors, submitted }
 
-    const { applySecurity, nonce, themeStyle } = await resolvePageChrome(ctx, Ctor.headers, pageCtx)
+    const { applySecurity, nonce, themeStyle, cspSignature } = await resolvePageChrome(
+      ctx,
+      Ctor.headers,
+      pageCtx,
+    )
     // Same reassignment `handleGet` performs, for the identical reason — see that call site's own
     // doc. `actionCtx.cspNonce` (spread into `pageCtx` above) was ALSO snapshotted before this
     // request's `cspGuard` ever ran, whether `actionCtx` came from `handlePost`'s own `toPageContext`
@@ -510,6 +520,7 @@ export abstract class SpacePageController<
         false,
         nonce,
         themeStyle,
+        cspSignature,
         applySecurity,
         422,
       )

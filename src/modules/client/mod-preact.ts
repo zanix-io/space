@@ -37,8 +37,15 @@ export {
   extractFragmentTitle,
   /** Turns on Orbit: intercepts same-origin `<a>` clicks and swaps just the page's own outlet. */
   initOrbit,
+  /** Programmatically triggers the same client-side navigation a real `<a>` click does — for a
+   * destination only known once client-side async work resolves, with no click to intercept. */
+  navigate,
   /** Whether a given link click should be intercepted by Orbit instead of navigating normally. */
   shouldInterceptNavigation,
+} from './orbit.ts'
+export type {
+  /** `navigate(href, options)`'s own option shape. */
+  NavigateOptions,
 } from './orbit.ts'
 // `prefetch.ts` is DOM-only and imports neither renderer (its whole dependency set is
 // `orbit-protocol.ts` + `link-info.ts`, both plain data/DOM helpers) — it was simply missed here

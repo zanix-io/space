@@ -28,6 +28,7 @@ import type { SpacePageController } from './space-page-controller.ts'
 import { resolveHead } from './head-descriptor.ts'
 import type { HeadDescriptor, ResolvedHead } from './head-descriptor.ts'
 import type { StylesheetRef } from '../render/css-manifest.ts'
+import { withCspSignatureMeta } from './csp-signature.ts'
 
 /**
  * Preact-core counterpart to `render-page-react.tsx` — the `PageRenderer`
@@ -275,6 +276,7 @@ export async function renderPageResponse<Params>(
   fragmentOnly: boolean,
   nonce: string | undefined,
   themeStyle: string | undefined,
+  cspSignature: string,
 ): Promise<Response> {
   // Same cast reasoning as `rawPageHead` below (`ClassConstructor<T>` exposes no static members) —
   // read here, before `cssHrefs`, since it needs to feed into that same computation.
@@ -318,8 +320,16 @@ export async function renderPageResponse<Params>(
   // `client-entry.ts`'s own doc. `undefined` only if a production response is served before its
   // own `loadClientEntryManifest()` call ever ran.
   const clientEntryUrl = resolveClientEntryUrl()
+  // This page's own resolved `head`, plus ONE meta tag this framework itself owns — see
+  // `withCspSignatureMeta`'s own doc (`csp-signature.ts`) for the full "why." Shared with
+  // `render-page-react.tsx`'s own identical call, from the exact same `cspSignature` input, so this
+  // stays true to `DocumentModel`'s own contract: the same page produces the same document semantics
+  // under either renderer.
+  const headWithCspSignature: ResolvedHead = fragmentOnly
+    ? head
+    : withCspSignatureMeta(head, cspSignature)
   const document: DocumentModel | undefined = fragmentOnly ? undefined : {
-    head,
+    head: headWithCspSignature,
     cssHrefs: cssHrefs ?? [],
     themeStyle: resolvedThemeStyle,
     pwa: pwaHead,

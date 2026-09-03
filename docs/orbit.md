@@ -46,6 +46,28 @@ in the page.
 event re-fetches and swaps the outlet for the URL the browser navigated back/forward to, so the
 back/forward buttons stay instant too, not just forward navigation via clicks.
 
+### Programmatic navigation (`navigate`)
+
+`initOrbit()`'s click interception covers a real `<a>` click, and `popstate` covers back/forward —
+neither covers a navigation with no click involved at all, e.g. a Comet's own event handler
+navigating once a `fetch()` it made resolves and the destination is only known then. `navigate()` is
+the public counterpart for exactly that case:
+
+```ts
+import { navigate } from '@zanix/space/client'
+
+await navigate(`/products/${id}`) // pushes a new history entry, same as a real click
+await navigate('/checkout', { replace: true }) // replaceState instead
+```
+
+`href` is resolved against the current page the same way a real link's own `href` is. A same-origin
+destination runs through the exact same swap a real click uses — prefetch reuse, the CSP-signature
+comparison, stylesheet loading, `persist`-tagged Comet retention, and the same graceful degradation
+to a full navigation on any failure (a non-2xx fragment response, a network error, a CSP mismatch, a
+missing outlet). A cross-origin `href`, or a same-document hash-only link, gets a real navigation
+(`location.href = href`) instead — the same outcome an `<a>` pointing there would already produce on
+its own, never Orbit's fragment swap.
+
 **Caching**: every response `SpacePageController`/`createNotFoundHandler` produce sets
 `Vary: X-Znx-Space-Navigate` unconditionally (whether or not the page also declares `cacheControl`)
 — the response body genuinely differs (full document vs. bare outlet fragment) depending on that

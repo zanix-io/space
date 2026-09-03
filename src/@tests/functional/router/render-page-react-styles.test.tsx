@@ -11,6 +11,7 @@ import { setDevClientEnabled } from 'modules/dev/dev-client-registry.ts'
 import { renderPageResponse } from 'modules/router/render-page-react.tsx'
 import { defineComet } from 'modules/comets/define-comet.ts'
 import { stripHydrationComments } from '../../support/strip-hydration-comments.ts'
+import { CSP_SIGNATURE_NONE } from 'modules/router/csp-signature.ts'
 
 console.error = () => {}
 
@@ -65,6 +66,7 @@ Deno.test(
         false,
         undefined,
         undefined,
+        CSP_SIGNATURE_NONE,
       )
       const htmlA = await responseA.text()
       assert(htmlA.includes('href="/assets/app-hash.css"'), htmlA)
@@ -79,6 +81,7 @@ Deno.test(
         false,
         undefined,
         undefined,
+        CSP_SIGNATURE_NONE,
       )
       const htmlB = await responseB.text()
       assert(htmlB.includes('href="/assets/app-hash.css"'), htmlB)
@@ -115,6 +118,7 @@ Deno.test(
         false,
         undefined,
         undefined,
+        CSP_SIGNATURE_NONE,
       )
       const html = await response.text()
       const headContent = html.slice(html.indexOf('<head'), html.indexOf('</head>'))
@@ -161,6 +165,7 @@ Deno.test(
         false,
         undefined,
         undefined,
+        CSP_SIGNATURE_NONE,
       )
       const html = await response.text()
       assert(html.includes('href="/assets/app-hash.css"'), html)
@@ -205,6 +210,7 @@ Deno.test(
         false,
         undefined,
         undefined,
+        CSP_SIGNATURE_NONE,
       )
       const html = await response.text()
 
@@ -258,6 +264,7 @@ Deno.test(
         false,
         undefined,
         undefined,
+        CSP_SIGNATURE_NONE,
       )
       const html = stripHydrationComments(await response.text())
 

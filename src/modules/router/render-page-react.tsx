@@ -33,6 +33,7 @@ import { resolveHead } from './head-descriptor.ts'
 import type { DocumentModel } from '../render/document-model.ts'
 import type { HeadDescriptor, ResolvedHead } from './head-descriptor.ts'
 import type { StylesheetRef } from '../render/css-manifest.ts'
+import { withCspSignatureMeta } from './csp-signature.ts'
 
 /**
  * React's own page-composition + render implementation — the `PageRenderer` registered by default
@@ -348,6 +349,7 @@ export async function renderPageResponse<Params>(
   fragmentOnly: boolean,
   nonce: string | undefined,
   themeStyle: string | undefined,
+  cspSignature: string,
 ): Promise<Response> {
   // `SpacePageController.component`'s own declared type is `unknown` too (an author only ever
   // WRITES to it, never reads it back — see that class's own doc) — this is the one place that
@@ -392,8 +394,15 @@ export async function renderPageResponse<Params>(
   // `client-entry.ts`'s own doc. `undefined` only if a production response is served before its
   // own `loadClientEntryManifest()` call ever ran.
   const clientEntryUrl = resolveClientEntryUrl()
+  // This page's own resolved `head`, plus ONE meta tag this framework itself owns — see
+  // `withCspSignatureMeta`'s own doc (`csp-signature.ts`) for the full "why," and why it lives in
+  // that shared module rather than being built separately here and in `render-page-preact.ts`. Read
+  // back by `orbit.ts` before every fragment swap.
+  const headWithCspSignature: ResolvedHead = fragmentOnly
+    ? head
+    : withCspSignatureMeta(head, cspSignature)
   const document: DocumentModel | undefined = fragmentOnly ? undefined : {
-    head,
+    head: headWithCspSignature,
     // Global first, then this page's own — preserves cascade order (global → page → comet; a
     // Comet's own CSS never appears in this list at all, resolved separately at its own render
     // position — see `define-comet.ts`'s own doc). Both `undefined`-safe on their own; the

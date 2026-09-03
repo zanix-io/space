@@ -7,6 +7,7 @@ import { mockPageContext } from 'modules/testing/mod.ts'
 import { setCssManifest } from 'modules/render/css-manifest.ts'
 import { setPwaConfig } from 'modules/pwa/mod.ts'
 import { renderPageResponse } from 'modules/router/render-page-react.tsx'
+import { CSP_SIGNATURE_NONE } from 'modules/router/csp-signature.ts'
 
 console.error = () => {}
 
@@ -75,6 +76,7 @@ Deno.test('render-page-react head: only a page head — no layout declares one',
     false,
     undefined,
     undefined,
+    CSP_SIGNATURE_NONE,
   )
   const html = await response.text()
 
@@ -99,6 +101,7 @@ Deno.test(
       false,
       undefined,
       undefined,
+      CSP_SIGNATURE_NONE,
     )
     const html = await response.text()
 
@@ -129,6 +132,7 @@ Deno.test(
       false,
       undefined,
       undefined,
+      CSP_SIGNATURE_NONE,
     )
     const html = await response.text()
 
@@ -161,6 +165,7 @@ Deno.test(
       false,
       undefined,
       undefined,
+      CSP_SIGNATURE_NONE,
     )
     const html = await response.text()
 
@@ -190,6 +195,7 @@ Deno.test(
       false,
       undefined,
       undefined,
+      CSP_SIGNATURE_NONE,
     )
     const html = await response.text()
 
@@ -231,6 +237,7 @@ Deno.test(
       false,
       undefined,
       undefined,
+      CSP_SIGNATURE_NONE,
     )
     const html = await response.text()
 
@@ -281,6 +288,7 @@ Deno.test(
       false,
       undefined,
       undefined,
+      CSP_SIGNATURE_NONE,
     )
     const html = await response.text()
 
@@ -310,6 +318,7 @@ Deno.test(
         false,
         undefined,
         undefined,
+        CSP_SIGNATURE_NONE,
       )
       const html = await response.text()
 
@@ -342,6 +351,7 @@ Deno.test(
       true,
       undefined,
       undefined,
+      CSP_SIGNATURE_NONE,
     )
     const html = await response.text()
 
@@ -366,6 +376,7 @@ Deno.test('render-page-react head: a page with no head at all renders no <title>
     false,
     undefined,
     undefined,
+    CSP_SIGNATURE_NONE,
   )
   const html = await response.text()
 

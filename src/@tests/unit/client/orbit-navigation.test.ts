@@ -1,7 +1,8 @@
 import { assert, assertEquals, assertFalse } from '@std/assert'
 import { installTimerMock, resetDom } from './dom-test-setup.ts'
-import { initOrbit, retryOutlet } from 'modules/client/orbit.ts'
+import { getActiveCspSignature, initOrbit, navigate, retryOutlet } from 'modules/client/orbit.ts'
 import { ORBIT_FRAGMENT_HEADER, ORBIT_OUTLET_ATTR } from 'modules/router/orbit-protocol.ts'
+import { CSP_SIGNATURE_META_NAME, CSP_SIGNATURE_NONE } from 'modules/router/csp-signature.ts'
 import { setCometHydrator, setErrorBoundaryHydrator } from 'modules/client/hydrator-registry.ts'
 
 // `swapOutlet`/`onClick`/`onPopState` — the orchestration half of this module `orbit.test.ts`
@@ -60,6 +61,26 @@ function outletHtml(bodyHtml: string, title?: string): string {
 
 function okResponse(html: string): Response {
   return new Response(html, { status: 200 })
+}
+
+/** Same as {@linkcode okResponse}, plus a `Content-Security-Policy` header — the shape
+ * `applySecurityGuards` actually produces server-side, needed for every CSP-mismatch scenario
+ * below. */
+function okResponseWithCsp(html: string, csp: string): Response {
+  return new Response(html, { status: 200, headers: { 'content-security-policy': csp } })
+}
+
+/** Embeds the CURRENTLY ACTIVE document's own CSP signature — the same `<meta>` a real
+ * full-document render leaves behind (`csp-signature.ts`'s own module doc) — so
+ * `getActiveCspSignature()`/`swapOutlet`'s own mismatch check has something real to compare
+ * against. Never called at all in a scenario that doesn't care about CSP — `getActiveCspSignature()`
+ * already reports {@linkcode CSP_SIGNATURE_NONE} for a document with no such meta tag, which is
+ * exactly what every OTHER test in this file (none of which sets one) relies on implicitly. */
+function setActiveCspSignature(signature: string): void {
+  const meta = view.document.createElement('meta')
+  meta.setAttribute('name', CSP_SIGNATURE_META_NAME)
+  meta.setAttribute('content', signature)
+  view.document.head.appendChild(meta)
 }
 
 // Reading `document.defaultView`/bridging BOM globals only ever happens from INSIDE a `Deno.test`
@@ -263,6 +284,93 @@ Deno.test(
   },
 )
 
+Deno.test(
+  'onClick: a fragment whose own CSP differs from the currently active document degrades to a ' +
+    'real navigation instead of swapping it in under the WRONG, still-active policy — the real ' +
+    "bug this exists to fix: a document's active CSP is fixed at the navigation that created it, " +
+    "so applying the destination's own (correct) header via a client-side swap was never possible " +
+    'in the first place',
+  async () => {
+    const { anchor, outlet } = setUp()
+    setActiveCspSignature("default-src 'self'")
+    fetchImpl = () =>
+      Promise.resolve(
+        okResponseWithCsp(
+          outletHtml('<p>new content</p>'),
+          "default-src 'self'; script-src 'self' 'unsafe-eval'",
+        ),
+      )
+
+    click(anchor)
+    await flush()
+
+    assertEquals(globals.location.href, 'https://example.com/checkout')
+    assertEquals(outlet.innerHTML, '<p>old content</p>', 'the outlet must be left untouched')
+    assertEquals(historyCalls.length, 0)
+  },
+)
+
+Deno.test(
+  'onClick: a fragment whose CSP matches the active document — MODULO its own per-request nonce ' +
+    '— swaps in normally, the overwhelming common case',
+  async () => {
+    const { anchor, outlet } = setUp()
+    // Set to the ALREADY-NORMALIZED form — exactly what a real full-document render's own
+    // `<meta>` carries (`applySecurityGuards` normalizes before embedding it), never a literal
+    // nonce value.
+    setActiveCspSignature("default-src 'self'; script-src 'self' 'nonce-*'")
+    // A real destination request always mints its own, fresh nonce — this must normalize to the
+    // SAME `'nonce-*'` placeholder above, never be read as "a different policy".
+    fetchImpl = () =>
+      Promise.resolve(
+        okResponseWithCsp(
+          outletHtml('<p>new content</p>'),
+          "default-src 'self'; script-src 'self' 'nonce-ZZZZZZZZZZZZZZZZZZZZZZ=='",
+        ),
+      )
+
+    click(anchor)
+    await flush()
+
+    assertEquals(outlet.innerHTML, '<p>new content</p>')
+    assertEquals(historyCalls, [{ method: 'pushState', url: 'https://example.com/checkout' }])
+  },
+)
+
+Deno.test(
+  'onClick: a fragment response with no Content-Security-Policy header at all, swapped into a ' +
+    'page that ALSO has none, is never treated as a mismatch',
+  async () => {
+    const { anchor, outlet } = setUp()
+    // No setActiveCspSignature() call — getActiveCspSignature() already reports CSP_SIGNATURE_NONE
+    // for a document with no such meta tag, exactly like every other, CSP-agnostic test in this file.
+    fetchImpl = () => Promise.resolve(okResponse(outletHtml('<p>new content</p>')))
+
+    click(anchor)
+    await flush()
+
+    assertEquals(outlet.innerHTML, '<p>new content</p>')
+  },
+)
+
+Deno.test(
+  'getActiveCspSignature: CSP_SIGNATURE_NONE for a document with no signature meta tag at all',
+  () => {
+    setUp()
+    assertEquals(getActiveCspSignature(), CSP_SIGNATURE_NONE)
+  },
+)
+
+Deno.test(
+  "getActiveCspSignature: reads back exactly whatever a full-document render's own meta tag " +
+    'carries',
+  () => {
+    setUp()
+    setActiveCspSignature("default-src 'self'")
+    assertEquals(getActiveCspSignature(), "default-src 'self'")
+  },
+)
+
 Deno.test('onClick: startViewTransition is used when the browser supports it', async () => {
   const { anchor, outlet } = setUp()
   fetchImpl = () => Promise.resolve(okResponse(outletHtml('<p>new content</p>')))
@@ -370,6 +478,83 @@ Deno.test(
     } finally {
       setErrorBoundaryHydrator(() => {})
     }
+  },
+)
+
+Deno.test(
+  'navigate: a same-origin destination runs through the same swap a real click uses — fetch ' +
+    'carries the Orbit header, the outlet is swapped, and history is pushed (not replaced) by ' +
+    'default',
+  async () => {
+    const { outlet } = setUp()
+    fetchImpl = () => Promise.resolve(okResponse(outletHtml('<p>new content</p>', 'New title')))
+
+    await navigate('/checkout')
+
+    assertEquals(fetchCalls.length, 1)
+    assertEquals(fetchCalls[0].url, 'https://example.com/checkout')
+    assertEquals(fetchCalls[0].headers.get(ORBIT_FRAGMENT_HEADER), '1')
+    assertEquals(outlet.innerHTML, '<p>new content</p>')
+    assertEquals(view.document.title, 'New title')
+    assertEquals(historyCalls, [{ method: 'pushState', url: 'https://example.com/checkout' }])
+  },
+)
+
+Deno.test(
+  'navigate: options.replace runs the same swap but REPLACES history instead of pushing',
+  async () => {
+    setUp()
+    fetchImpl = () => Promise.resolve(okResponse(outletHtml('<p>new content</p>')))
+
+    await navigate('/checkout', { replace: true })
+
+    assertEquals(historyCalls, [{ method: 'replaceState', url: 'https://example.com/checkout' }])
+  },
+)
+
+Deno.test(
+  'navigate: a cross-origin destination is never swapped — it gets a real navigation, exactly ' +
+    'like a cross-origin link click already does',
+  async () => {
+    setUp()
+
+    await navigate('https://other.example/checkout')
+
+    assertEquals(fetchCalls.length, 0)
+    assertEquals(historyCalls.length, 0)
+    assertEquals(globals.location.href, 'https://other.example/checkout')
+  },
+)
+
+Deno.test(
+  'navigate: a same-document hash-only link is never swapped either — a real navigation lets the ' +
+    "browser's own native scroll-to-element behavior run, the same escape hatch onClick already " +
+    'has for this exact case',
+  async () => {
+    setUp()
+    globals.location.href = 'https://example.com/products'
+    globals.location.pathname = '/products'
+    globals.location.search = ''
+
+    await navigate('#details')
+
+    assertEquals(fetchCalls.length, 0)
+    assertEquals(historyCalls.length, 0)
+    assertEquals(globals.location.href, 'https://example.com/products#details')
+  },
+)
+
+Deno.test(
+  'navigate: a non-ok fragment response degrades to a real navigation too, same as a real click',
+  async () => {
+    const { outlet } = setUp()
+    fetchImpl = () => Promise.resolve(new Response('Internal Server Error', { status: 500 }))
+
+    await navigate('/checkout')
+
+    assertEquals(globals.location.href, 'https://example.com/checkout')
+    assertEquals(outlet.innerHTML, '<p>old content</p>', 'the outlet must be left untouched')
+    assertEquals(historyCalls.length, 0)
   },
 )
 

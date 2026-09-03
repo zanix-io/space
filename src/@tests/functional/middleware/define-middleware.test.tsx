@@ -12,6 +12,7 @@ import {
 } from '@zanix/server'
 import { Page, SpacePageController } from 'modules/router/mod.ts'
 import { cspGuard, defineMiddleware, securityHeadersGuard } from 'modules/middleware/mod.ts'
+import { CSP_SIGNATURE_META_NAME, normalizeCspSignature } from 'modules/router/csp-signature.ts'
 
 function View() {
   return <div>ok</div>
@@ -200,7 +201,26 @@ Deno.test(
       )
       assertEquals(noHeadersAtAll.headers.get('X-Frame-Options'), 'DENY')
       assertEquals(noHeadersAtAll.headers.get('X-Content-Type-Options'), 'nosniff')
-      await noHeadersAtAll.body?.cancel()
+      // The trickiest of `applySecurityGuards`' three tiers for `cspSignature`: this page configured
+      // NOTHING of its own, so the guard's CSP never even reaches `merged` (see that function's own
+      // doc) — its real value is read directly off `guardHeaders` instead, at the exact same time
+      // `applySecurityGuards` runs, not re-derived from this finished response afterward. This is the
+      // one real end-to-end proof that the embedded `<meta>` (read by Orbit's own
+      // `getActiveCspSignature`, `orbit.ts`) actually reflects a GUARD-supplied CSP, not just a
+      // page-level or zero-config one — both already covered by `csp-signature.test.ts`'s own pure
+      // unit tests and `page-default-security.test.tsx`'s header-only checks.
+      const html = await noHeadersAtAll.text()
+      // `'` renders as the real HTML entity `&#x27;` in an attribute value (React's own SSR
+      // serialization, spec-compliant) — never the literal character this string otherwise has.
+      const escapedSignature = normalizeCspSignature("default-src 'self'").replace(
+        /'/g,
+        '&#x27;',
+      )
+      assertEquals(
+        html.includes(`name="${CSP_SIGNATURE_META_NAME}" content="${escapedSignature}"`),
+        true,
+        html,
+      )
 
       const normal = await fetch(
         'http://localhost:20401/middleware/guarded-page',

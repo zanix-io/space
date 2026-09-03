@@ -465,3 +465,101 @@ Deno.test(
     )
   },
 )
+
+// ================================================================================================
+// The real PRODUCTION cap — every test above exercises `RetainedCometCache`'s own generic LRU
+// logic (arbitrary limits: 2, 5, -1) or `detachPersistedComets`/`reuseRetainedComets`'s
+// orchestration against it, never the actual limit `orbit.ts` runs with in a real app:
+// `MAX_RETAINED_COMETS = 5`, applied to the single module-level `liveCache` these two exported
+// functions share (neither the constant nor `liveCache` itself is exported — by design, see that
+// constant's own doc — so this drives the real singleton through the same public functions a real
+// navigation does, rather than reaching in to assert the number directly). A real regression here
+// — someone loosening the cap, or breaking eviction order — would go completely undetected by the
+// generic-class tests above, since those construct their OWN fresh `RetainedCometCache` instance
+// with whatever limit they pass in, never `liveCache`. Unique key prefix (`lru-cap-`) so this
+// never collides with another test's own key in this same shared, never-reset singleton.
+// ================================================================================================
+
+Deno.test(
+  'production liveCache: detaching a 6th distinct persist key evicts the 1st (LRU, oldest first) ' +
+    "— proving the real cap really is 5, not just RetainedCometCache's own generic default",
+  () => {
+    const keys = ['lru-cap-1', 'lru-cap-2', 'lru-cap-3', 'lru-cap-4', 'lru-cap-5', 'lru-cap-6']
+    const spies = keys.map(() => handleSpy())
+    const boundaries = keys.map((key, i) => {
+      const boundary = new MockElement({
+        [COMET_PERSIST_ATTR]: key,
+        [COMET_MODULE_ATTR]: '/comets/lru-cap-widget.tsx',
+        [COMET_EXPORT_ATTR]: 'default',
+      })
+      registerPersistHandle(boundary as unknown as Element, spies[i].handle)
+      return boundary
+    })
+
+    // Detached ONE AT A TIME, in order — the same shape a real app produces: one persist-tagged
+    // boundary detaching per navigation away from its own page, never several at once.
+    boundaries.forEach((boundary) => detachPersistedComets(mockOutlet([boundary])))
+
+    assertEquals(
+      spies[0].state.disposed,
+      1,
+      'lru-cap-1, the least-recently-touched entry once a 6th key pushed the real cache over its ' +
+        '5-slot cap, must be evicted+disposed for real',
+    )
+    for (let i = 1; i < keys.length; i++) {
+      assertEquals(spies[i].state.disposed, 0, `${keys[i]} is newer than lru-cap-1, must survive`)
+    }
+  },
+)
+
+Deno.test(
+  'production liveCache: the evicted key mounts fresh on return; a still-retained key reuses — ' +
+    'the end-to-end, author-visible proof of the same 5-slot cap',
+  () => {
+    const keys = [
+      'lru-cap2-1',
+      'lru-cap2-2',
+      'lru-cap2-3',
+      'lru-cap2-4',
+      'lru-cap2-5',
+      'lru-cap2-6',
+    ]
+    keys.forEach((key) => {
+      const boundary = new MockElement({
+        [COMET_PERSIST_ATTR]: key,
+        [COMET_MODULE_ATTR]: '/comets/lru-cap-widget.tsx',
+        [COMET_EXPORT_ATTR]: 'default',
+      })
+      registerPersistHandle(boundary as unknown as Element, handleSpy().handle)
+      detachPersistedComets(mockOutlet([boundary]))
+    })
+
+    // Evicted (lru-cap2-1, the 1st of 6): a placeholder for it finds nothing retained — the
+    // caller's own normal fresh-mount path, exactly what an author sees as "state reset to 0".
+    const evictedPlaceholder = new MockElement({
+      [COMET_PERSIST_ATTR]: 'lru-cap2-1',
+      [COMET_MODULE_ATTR]: '/comets/lru-cap-widget.tsx',
+      [COMET_EXPORT_ATTR]: 'default',
+    })
+    reuseRetainedComets(mockOutlet([evictedPlaceholder]))
+    assertEquals(
+      evictedPlaceholder.calls.replaceWith,
+      [],
+      'the evicted key (1st of 6) must fall through to a fresh mount, never reused',
+    )
+
+    // Still retained (lru-cap2-2, one of the 5 most-recently-touched): a placeholder for it DOES
+    // find and splice in the retained live node — the author-visible "state survived" case.
+    const retainedPlaceholder = new MockElement({
+      [COMET_PERSIST_ATTR]: 'lru-cap2-2',
+      [COMET_MODULE_ATTR]: '/comets/lru-cap-widget.tsx',
+      [COMET_EXPORT_ATTR]: 'default',
+    })
+    reuseRetainedComets(mockOutlet([retainedPlaceholder]))
+    assertEquals(
+      retainedPlaceholder.calls.replaceWith.length,
+      1,
+      'a key within the real 5-slot cap must still be reused, not fresh-mounted',
+    )
+  },
+)

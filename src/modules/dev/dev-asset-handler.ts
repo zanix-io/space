@@ -29,6 +29,19 @@ const VITE_SPECIAL_PREFIXES = ['/@vite/', '/@fs/', '/@id/', '/.vite/']
  * `spacePlugin()`'s own `react()` wired in imports it by this exact specifier. */
 const VITE_EXACT_VIRTUAL_MODULES = ['/@react-refresh']
 
+/** The Fetch Metadata request header a real browser sets to `'document'` for a top-level
+ * navigation (typing a URL, clicking a link, `location.href`) — distinct from `'script'`/`'style'`/
+ * etc. for a resource a page's own markup requested (`<script src>`, `<link rel="stylesheet">`).
+ * {@linkcode createDevAssetHandler} reads this to tell apart a person navigating directly to a URL
+ * {@linkcode looksLikeDevAssetRequest} misclassified as an asset (a page route happening to end in
+ * one of {@linkcode ASSET_EXTENSIONS} — never how a real `@zanix/space` route looks by convention,
+ * but nothing stops a person from typing one) from a genuinely broken asset reference a page's own
+ * script/stylesheet tag requested. Not sent by every client (an older browser, a same-origin
+ * `fetch()` that never sets it) — absent, or any value other than `'document'`, is treated the same
+ * as today, never a regression from the header simply not being there. */
+const SEC_FETCH_DEST_HEADER = 'sec-fetch-dest'
+const DOCUMENT_FETCH_DEST = 'document'
+
 /**
  * Whether `pathname` looks like something {@linkcode createDevAssetHandler}'s handler should
  * transform through Vite, as opposed to a real page route or an unrelated request. A heuristic,
@@ -60,6 +73,17 @@ export function looksLikeDevAssetRequest(pathname: string): boolean {
  * runs in `znx space dev`, where surfacing exactly what broke is more useful than a generic
  * message, the same reasoning `deno doc`/Vite's own dev server already apply to their own error
  * output.
+ *
+ * A request Vite can't resolve to a real asset (`transformClientAsset` returns `null`) responds
+ * `404` directly UNLESS it's a real top-level document navigation ({@linkcode DOCUMENT_FETCH_DEST}
+ * via {@linkcode SEC_FETCH_DEST_HEADER}) — that one case falls through to the real route table
+ * instead, so a person who ends up at a URL {@linkcode looksLikeDevAssetRequest} misclassified as an
+ * asset (e.g. `/page.tsx` — real page routes never carry an extension, but nothing stops a person
+ * from typing one) sees this app's own `not-found.tsx` like any other unmatched route, rather than a
+ * bare, unstyled 404. A page's own `<script src>`/`<link rel="stylesheet">` requesting a genuinely
+ * broken asset never sets `Sec-Fetch-Dest: document`, so it keeps getting the immediate, plain 404
+ * above — never the full `not-found.tsx` document body, which the browser would otherwise try to
+ * parse as the JS/CSS it actually asked for.
  */
 export function createDevAssetHandler(
   engine: Pick<SpaceDevEngine, 'transformClientAsset'>,
@@ -79,7 +103,10 @@ export function createDevAssetHandler(
       })
     }
 
-    if (!asset) return new Response('Not found', { status: 404 })
+    if (!asset) {
+      if (req.headers.get(SEC_FETCH_DEST_HEADER) === DOCUMENT_FETCH_DEST) return null
+      return new Response('Not found', { status: 404 })
+    }
 
     const headers: Record<string, string> = {
       'content-type': asset.contentType,

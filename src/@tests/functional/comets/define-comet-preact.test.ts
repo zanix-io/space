@@ -23,6 +23,7 @@ import { SpacePageController } from 'modules/router/mod.ts'
 import { setPageTree } from 'modules/router/page-tree-registry.ts'
 import { mockPageContext } from 'modules/testing/mod.ts'
 import { stripHydrationComments } from '../../support/strip-hydration-comments.ts'
+import { CSP_SIGNATURE_NONE } from 'modules/router/csp-signature.ts'
 
 /**
  * Regression suite for the one defect that made Comets a no-op under Preact: `defineComet` used to
@@ -372,6 +373,7 @@ Deno.test(
         false,
         undefined,
         undefined,
+        CSP_SIGNATURE_NONE,
       )
       const html = await response.text()
 

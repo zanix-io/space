@@ -8,6 +8,7 @@ import {
   securityHeadersGuard,
 } from '../middleware/security-headers-guard.ts'
 import type { PageHeaderOptions } from './space-page-controller.ts'
+import { normalizeCspSignature } from './csp-signature.ts'
 
 /**
  * Resolving a page's response security headers — the default CSP, and the three-tier merge between
@@ -70,21 +71,38 @@ const DEFAULT_CSP_DIRECTIVES = (nonce: string): CspDirectives => ({
  *   absent header is exactly what the merge already reads as "please fill this from the guard," so
  *   silence alone can't communicate "and don't you dare fill it either."
  *
- * Returns the headers to merge into the response, and the nonce (if any) to forward to
- * `renderToResponse`. `headers: false` skips everything (CSP included) for this page.
+ * Returns the headers to merge into the response, the nonce (if any) to forward to
+ * `renderToResponse`, and this response's own normalized CSP signature — see
+ * {@linkcode normalizeCspSignature}'s own doc (`csp-signature.ts`) for what that's for.
+ * `headers: false` skips everything (CSP included) for this page.
  */
 export async function applySecurityGuards(
   ctx: HandlerContext,
   headers: PageHeaderOptions | false | undefined,
-): Promise<{ headers: Record<string, string>; nonce: string | undefined }> {
-  if (headers === false) return { headers: {}, nonce: undefined }
+): Promise<
+  { headers: Record<string, string>; nonce: string | undefined; cspSignature: string }
+> {
+  if (headers === false) {
+    return { headers: {}, nonce: undefined, cspSignature: normalizeCspSignature(null) }
+  }
 
   const { csp, ...securityHeaderOptions } = headers ?? {}
   const merged: Record<string, string> = {}
   const blocked = new Set<string>()
 
   const guardHeaders = ctx.locals[GUARD_HEADERS_LOCALS_KEY] as Headers | undefined
-  const guardHasCsp = guardHeaders?.has('content-security-policy') ?? false
+  const guardCsp = guardHeaders?.get('content-security-policy') ?? undefined
+  const guardHasCsp = guardCsp !== undefined
+
+  // The exact `Content-Security-Policy` value THIS response ends up carrying, resolved through the
+  // same three tiers as `merged` below — tracked directly here rather than re-derived from `merged`/
+  // `blocked` afterward, because the `csp === undefined && guardHasCsp` branch never populates
+  // `merged` with a CSP key at all (see that branch's own comment): `guardCsp`, already read above,
+  // is the only place that branch's real value ever exists. Normalized once, here — via
+  // {@linkcode normalizeCspSignature} — and threaded through `resolvePageChrome`/the render pipeline
+  // as `cspSignature`, so nothing downstream, all the way to Orbit's own client runtime, needs its
+  // own copy of this per-request nonce-stripping logic.
+  let effectiveCsp: string | undefined
 
   // `cspGuard` only ever reads `ctx.locals` — a plain `HandlerContext` already satisfies that, the
   // extra `GuardContext` fields (interactors/providers/connectors) are never touched. It's actually
@@ -96,7 +114,8 @@ export async function applySecurityGuards(
     // see this function's own doc for why silence alone (no CSP key in `merged`) isn't enough.
     // Skipped entirely when no guard has a CSP to begin with (nothing to block), which is exactly
     // why the existing `{ csp: false }` unit tests — none of which run through a real guard
-    // pipeline — still see a fully absent header, unaffected by any of this.
+    // pipeline — still see a fully absent header, unaffected by any of this. `effectiveCsp` stays
+    // `undefined` either way — this page genuinely ends up with no CSP at all.
     if (guardHasCsp) blocked.add('content-security-policy')
   } else if (csp !== undefined) {
     // Explicitly configured — by this page's own `Page({ headers })`, or by `defineSpaceApp`'s own
@@ -104,15 +123,23 @@ export async function applySecurityGuards(
     // function ever runs) — always wins outright, unconditionally, same as before this change.
     const { headers: cspHeaders } = await cspGuard(csp)(ctx as GuardContext)
     Object.assign(merged, cspHeaders)
+    // Read back off `merged` (a concretely-typed `Record<string, string>`), not off `cspHeaders`
+    // itself — `MiddlewareGuard`'s own return type leaves `headers` optional for guards in general
+    // that never set one, even though `cspGuard`'s real implementation always does.
+    effectiveCsp = merged['Content-Security-Policy']
   } else if (!guardHasCsp) {
     // Nothing configured anywhere, AND no guard has an answer either — this page's own zero-config
     // default is the last resort, same as before this change.
     const { headers: cspHeaders } = await cspGuard(DEFAULT_CSP_DIRECTIVES)(ctx as GuardContext)
     Object.assign(merged, cspHeaders)
+    effectiveCsp = merged['Content-Security-Policy']
+  } else {
+    // csp === undefined && guardHasCsp: deliberately sets nothing on `merged` here — `mainInterceptor`'s
+    // own merge fills it in from the SAME guard headers this function just read, once this response
+    // reaches it. `effectiveCsp` still gets the real value directly from `guardCsp`, since that's
+    // already known now, not only once `mainInterceptor` runs later.
+    effectiveCsp = guardCsp
   }
-  // else (csp === undefined && guardHasCsp): deliberately sets nothing here — `merged` simply has
-  // no CSP key, so `mainInterceptor`'s own merge fills it in from the SAME guard headers this
-  // function just read, once this response reaches it.
 
   // Every OTHER security header `securityHeadersGuard` can produce goes through the exact same
   // three-tier chain, generalized: for a field this page didn't mention at all, suppress this
@@ -149,5 +176,6 @@ export async function applySecurityGuards(
   return {
     headers: merged,
     nonce: ctx.locals[CSP_NONCE_LOCALS_KEY] as string | undefined,
+    cspSignature: normalizeCspSignature(effectiveCsp ?? null),
   }
 }

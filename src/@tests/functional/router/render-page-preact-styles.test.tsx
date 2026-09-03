@@ -7,6 +7,7 @@ import { setDevClientEnabled } from 'modules/dev/dev-client-registry.ts'
 import { setCssManifest } from 'modules/render/css-manifest.ts'
 import { renderPageResponse } from 'modules/router/render-page-preact.ts'
 import { setActiveRenderer } from 'modules/router/active-renderer.ts'
+import { CSP_SIGNATURE_NONE } from 'modules/router/csp-signature.ts'
 
 console.error = () => {}
 
@@ -67,6 +68,7 @@ Deno.test(
         false,
         undefined,
         undefined,
+        CSP_SIGNATURE_NONE,
       )
       const htmlA = await responseA.text()
       assert(htmlA.includes('href="/assets/app-hash.css"'), htmlA)
@@ -81,6 +83,7 @@ Deno.test(
         false,
         undefined,
         undefined,
+        CSP_SIGNATURE_NONE,
       )
       const htmlB = await responseB.text()
       assert(htmlB.includes('href="/assets/app-hash.css"'), htmlB)
@@ -117,6 +120,7 @@ Deno.test(
         false,
         undefined,
         undefined,
+        CSP_SIGNATURE_NONE,
       )
       const html = await response.text()
 
@@ -162,6 +166,7 @@ Deno.test(
         false,
         undefined,
         undefined,
+        CSP_SIGNATURE_NONE,
       )
       const html = await response.text()
       assert(html.includes('href="/assets/app-hash.css"'), html)
@@ -228,6 +233,7 @@ Deno.test(
         false,
         undefined,
         undefined,
+        CSP_SIGNATURE_NONE,
       )
       const html = await response.text()
 
@@ -276,6 +282,7 @@ Deno.test(
         false,
         undefined,
         undefined,
+        CSP_SIGNATURE_NONE,
       )
       const html = await response.text()
 

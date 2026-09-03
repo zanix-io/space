@@ -30,6 +30,7 @@ export type PageRenderer = <Params>(
   fragmentOnly: boolean,
   nonce: string | undefined,
   themeStyle: string | undefined,
+  cspSignature: string,
 ) => Promise<Response>
 
 // No default. This module — and every module `@zanix/space` itself reaches — must be free of any

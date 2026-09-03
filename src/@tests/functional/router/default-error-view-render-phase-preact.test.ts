@@ -6,6 +6,7 @@ import { mockPageContext } from 'modules/testing/mod.ts'
 import { setActiveRenderer } from 'modules/router/active-renderer.ts'
 import { renderPageResponse } from 'modules/router/render-page-preact.ts'
 import { ERROR_BOUNDARY_MODULE_ATTR } from 'modules/router/error-boundary-marker.ts'
+import { CSP_SIGNATURE_NONE } from 'modules/router/csp-signature.ts'
 
 // See `default-error-view-render-phase.test.tsx`'s own module doc (React's counterpart) for the
 // full reasoning — split into its own file for the same reason every other renderer-specific test
@@ -38,6 +39,7 @@ Deno.test(
       false,
       undefined,
       undefined,
+      CSP_SIGNATURE_NONE,
     )
     const html = await response.text()
 

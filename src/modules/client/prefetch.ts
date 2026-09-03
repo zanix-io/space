@@ -80,8 +80,14 @@ export function shouldPrefetch(input: {
 // ever change what a real navigation does — `swapOutlet` (orbit.ts) only ever CONSULTS this cache
 // before falling back to its own existing, uncached fetch path, unchanged.
 
+/** A prefetched fragment's own resolved HTML, plus the SAME `Content-Security-Policy` header its
+ * response carried — never discarded the way it used to be (a plain `response.text()`), since
+ * `swapOutlet` (`orbit.ts`) needs it for the exact same CSP-mismatch check a live, uncached fetch
+ * already runs. See `csp-signature.ts`'s own module doc for the full "why". */
+type PrefetchedFragment = { html: string; cspHeader: string | null }
+
 type PrefetchEntry = {
-  promise: Promise<string>
+  promise: Promise<PrefetchedFragment>
   controller: AbortController
   expiresAt: number
 }
@@ -111,17 +117,17 @@ function isFresh(entry: PrefetchEntry): boolean {
 }
 
 /**
- * Consumed by `orbit.ts`'s own `swapOutlet` — a fresh prefetched fragment's own promise for
- * `href`, or `undefined` when there's nothing usable (never prefetched, expired, already replaced,
- * or already failed — see {@linkcode schedulePrefetch}'s own doc on immediate eviction). Never
- * throws itself; the returned promise MAY still reject if it's STILL in flight and fails after
- * being handed back (a real click arriving while the SAME prefetch is still pending, which then
- * turns out to fail) — `swapOutlet` already has a real-navigation fallback for exactly that case,
- * the same one an uncached fetch failure degrades to today. An ALREADY-failed prefetch, by
- * contrast, is never returned at all — `swapOutlet` gets `undefined` and performs its own normal,
+ * Consumed by `orbit.ts`'s own `swapOutlet` — a fresh prefetched fragment's own `{ html, cspHeader }`
+ * promise for `href`, or `undefined` when there's nothing usable (never prefetched, expired,
+ * already replaced, or already failed — see {@linkcode schedulePrefetch}'s own doc on immediate
+ * eviction). Never throws itself; the returned promise MAY still reject if it's STILL in flight and
+ * fails after being handed back (a real click arriving while the SAME prefetch is still pending,
+ * which then turns out to fail) — `swapOutlet` already has a real-navigation fallback for exactly
+ * that case, the same one an uncached fetch failure degrades to today. An ALREADY-failed prefetch,
+ * by contrast, is never returned at all — `swapOutlet` gets `undefined` and performs its own normal,
  * live fetch instead, never a guaranteed replay of a failure that may have been transient.
  */
-export function getPrefetchedFragment(href: string): Promise<string> | undefined {
+export function getPrefetchedFragment(href: string): Promise<PrefetchedFragment> | undefined {
   const entry = cache.get(href)
   return entry && isFresh(entry) ? entry.promise : undefined
 }
@@ -147,9 +153,14 @@ export function schedulePrefetch(href: string): void {
     headers: { [ORBIT_FRAGMENT_HEADER]: '1' },
     signal: controller.signal,
   })
-    .then((response) => {
+    .then(async (response) => {
       if (!response.ok) throw new Error(`Prefetch failed with ${response.status}`)
-      return response.text()
+      // Captured here, off the real response, rather than re-derived later — a fragment's own
+      // `Content-Security-Policy` header is exactly what `swapOutlet` (`orbit.ts`) compares against
+      // the currently active document's own signature before ever using this prefetch, the same
+      // check a live, uncached fetch already runs. See `csp-signature.ts`'s own module doc.
+      const cspHeader = response.headers.get('content-security-policy')
+      return { html: await response.text(), cspHeader }
     })
     .catch((error) => {
       // A failed prefetch must never be replayed to a real click later — evict it immediately

@@ -1,4 +1,5 @@
 import { ORBIT_FRAGMENT_HEADER, ORBIT_OUTLET_ATTR } from '../router/orbit-protocol.ts'
+import { CSP_SIGNATURE_META_NAME, normalizeCspSignature } from '../router/csp-signature.ts'
 import { getCometHydrator, getErrorBoundaryHydrator } from './hydrator-registry.ts'
 import { findAnchor, resolveLinkInfo } from './link-info.ts'
 import { getPrefetchedFragment, initPrefetch, rescanPrefetchTargets } from './prefetch.ts'
@@ -186,8 +187,28 @@ export async function ensureStylesheetsLoaded(html: string): Promise<string> {
   return body
 }
 
+/**
+ * The CURRENTLY ACTIVE document's own resolved CSP signature — embedded once, at full-document
+ * render time, as a `<meta>` tag (see `csp-signature.ts`'s own module doc for the full "why").
+ * Read fresh off the DOM on every call rather than cached: this never actually changes for the
+ * lifetime of a document (any real CSP difference always goes through a real navigation, which
+ * re-evaluates this whole module from scratch), so a plain, uncached read costs nothing extra while
+ * staying trivially correct — no cache-invalidation story is needed at all.
+ *
+ * Exported so `swapOutlet`'s own CSP-mismatch fallback (`orbit-navigation.test.ts`) can be exercised
+ * against a real `<meta>` tag inserted into the test's own `happy-dom` document, the same way every
+ * other DOM-touching piece of this module is tested.
+ */
+export function getActiveCspSignature(): string {
+  return normalizeCspSignature(
+    document.querySelector(`meta[name="${CSP_SIGNATURE_META_NAME}"]`)?.getAttribute('content') ??
+      null,
+  )
+}
+
 async function swapOutlet(href: string, replace: boolean): Promise<void> {
   let html: string
+  let cspHeader: string | null
   try {
     // A fresh prefetched fragment (if any) is consumed first. A prefetch that's already KNOWN to
     // have failed is never handed back at all (see `getPrefetchedFragment`'s own doc) — this click
@@ -198,7 +219,7 @@ async function swapOutlet(href: string, replace: boolean): Promise<void> {
     // already-evicted-as-failed, or fail while in flight, without changing anything below.
     const prefetched = getPrefetchedFragment(href)
     if (prefetched) {
-      html = await prefetched
+      ;({ html, cspHeader } = await prefetched)
     } else {
       const response = await fetch(href, {
         headers: { [ORBIT_FRAGMENT_HEADER]: '1' },
@@ -209,9 +230,24 @@ async function swapOutlet(href: string, replace: boolean): Promise<void> {
       if (!response.ok) {
         throw new Error(`Orbit fragment request failed with ${response.status}`)
       }
+      cspHeader = response.headers.get('content-security-policy')
       html = await response.text()
     }
   } catch {
+    location.href = href
+    return
+  }
+
+  // A document's active CSP is fixed at the navigation that created it — no later `fetch()`
+  // response, regardless of its own headers, is ever consulted by the browser to update it (see
+  // `csp-signature.ts`'s own module doc for the full "why"). This fragment's own resolved CSP
+  // (`cspHeader`, straight off the same response `mainInterceptor` applied it to server-side) is
+  // compared against the CURRENTLY active document's own signature — normalized so a per-request
+  // nonce alone never counts as a real difference — and, whenever they genuinely differ, this
+  // degrades to a real navigation exactly like a non-ok/failed fetch already does above: the
+  // destination is fetched again, for real, by the browser itself this time, which is the one thing
+  // that can actually apply its own CSP correctly.
+  if (normalizeCspSignature(cspHeader) !== getActiveCspSignature()) {
     location.href = href
     return
   }
@@ -290,6 +326,39 @@ export function retryOutlet(): Promise<void> {
   return swapOutlet(location.href, true)
 }
 
+/** Options for {@linkcode navigate}. */
+export type NavigateOptions = {
+  /** `true` replaces the current history entry (`history.replaceState`) instead of pushing a new
+   * one (`history.pushState`, the default) — the same distinction `onClick` (a new entry) and
+   * `onPopState` (replace) already make for their own two triggers. */
+  replace?: boolean
+}
+
+/**
+ * Programmatically triggers the same client-side navigation a real, same-origin `<a>` click already
+ * does — the one case a click can't cover: a destination only known once some client-side async
+ * work resolves, with no anchor involved at all (e.g. a Comet's own event handler navigating after
+ * a `fetch()` it made completes).
+ *
+ * `href` is resolved against the current page exactly like a real link's own `href`
+ * ({@linkcode resolveLinkInfo}, the same resolution `onClick` and prefetch's own eligibility check
+ * already share). A cross-origin destination, or a same-document hash-only link, gets the same real
+ * navigation (`location.href = href`) a plain `<a>` pointing there would already produce on its
+ * own — Orbit's fragment swap only ever applies to a same-origin, different-document destination.
+ * Every other call runs through the exact same {@linkcode swapOutlet} a real click uses: prefetch
+ * reuse, the CSP-signature comparison, stylesheet loading, `persist`-tagged Comet retention, and the
+ * same graceful degradation to a full navigation on any failure (a non-2xx fragment response, a
+ * network error, a CSP mismatch, or a missing outlet).
+ */
+export function navigate(href: string, options: NavigateOptions = {}): Promise<void> {
+  const { resolved, isSameOrigin, isSameDocumentHashLink } = resolveLinkInfo(href)
+  if (!resolved || !isSameOrigin || isSameDocumentHashLink) {
+    location.href = resolved?.href ?? href
+    return Promise.resolve()
+  }
+  return swapOutlet(resolved.href, options.replace ?? false)
+}
+
 function onClick(event: MouseEvent): void {
   const anchor = findAnchor(event.target)
   if (!anchor) return
@@ -324,7 +393,8 @@ function onPopState(): void {
  * Progressive enhancement, not a requirement: every internal `<a>` already works as a normal link
  * before this runs (and still works if a click falls through any of `shouldInterceptNavigation`'s
  * escape hatches, or if the fetch itself fails) — this only ever upgrades that same click, it's
- * never the only way a link works. Opt a specific link out entirely with `data-orbit-hard`.
+ * never the only way a link works. Opt a specific link out entirely with `data-orbit-hard`. For a
+ * navigation with no click to intercept at all, call {@linkcode navigate} directly.
  *
  * `options.prefetch` enables/configures Orbit's own prefetch triggers — see
  * {@linkcode PrefetchOptions}'s own doc for the exact defaults (hover/focus on, viewport opt-in)

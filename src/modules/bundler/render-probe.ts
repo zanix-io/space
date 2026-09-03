@@ -48,6 +48,7 @@ import { mockPageContext } from 'modules/testing/mock-page-context.ts'
 import { getPageRenderer } from 'modules/router/page-renderer-registry.ts'
 import type { PageRenderer } from 'modules/router/page-renderer-registry.ts'
 import type { SpacePageController } from 'modules/router/space-page-controller.ts'
+import { CSP_SIGNATURE_NONE } from 'modules/router/csp-signature.ts'
 import type { DiscoveredPage } from './discover-pages.ts'
 
 /**
@@ -171,6 +172,9 @@ export async function runRenderProbe(
         false,
         undefined,
         undefined,
+        // This probe never runs a real request through `applySecurityGuards` — there is no CSP to
+        // report, so the literal "no header" signature is the accurate value, not a stand-in.
+        CSP_SIGNATURE_NONE,
       )
       // deno-lint-ignore no-await-in-loop
       html = await response.text()

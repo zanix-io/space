@@ -33,6 +33,10 @@ import type { SpacePageController } from './space-page-controller.ts'
  * @param fragmentOnly - `true` for an Orbit fragment request.
  * @param nonce - The CSP nonce, or `undefined` when this page has CSP disabled.
  * @param themeStyle - The serialized `theme.resolve` overrides, if any.
+ * @param cspSignature - This response's own normalized CSP signature — see
+ * `normalizeCspSignature`'s own doc (`csp-signature.ts`) for what it's for. Embedded into a full
+ * document's own `<head>` by the active renderer; never used for a fragment response, whose real
+ * signature Orbit reads directly off this SAME response's `Content-Security-Policy` header.
  * @param applySecurity - Applies this page's resolved security headers to the finished response.
  * @param status - `422` for a failed action re-render; omit for whatever the renderer produced.
  * @returns The finished response.
@@ -45,6 +49,7 @@ export async function renderPageResponse<Params>(
   fragmentOnly: boolean,
   nonce: string | undefined,
   themeStyle: string | undefined,
+  cspSignature: string,
   applySecurity: (response: Response) => Response,
   status?: number,
 ): Promise<Response> {
@@ -56,6 +61,7 @@ export async function renderPageResponse<Params>(
     fragmentOnly,
     nonce,
     themeStyle,
+    cspSignature,
   )
   // A full document and an Orbit fragment never share a body even though they share a URL, so
   // `Vary` has to be set unconditionally — not only when this page also opts into
@@ -76,6 +82,9 @@ export type PageChrome = {
   nonce: string | undefined
   /** Serialized `theme.resolve` overrides for this request, or `undefined` when none apply. */
   themeStyle: string | undefined
+  /** This response's own normalized CSP signature — see `normalizeCspSignature`'s own doc
+   * (`csp-signature.ts`) for what it's for and how it's normalized. */
+  cspSignature: string
 }
 
 /**
@@ -95,7 +104,7 @@ export async function resolvePageChrome<Params>(
   pageHeaders: PageHeaderOptions | false | undefined,
   pageCtx: PageContext<Params>,
 ): Promise<PageChrome> {
-  const { headers: securityHeaders, nonce } = await applySecurityGuards(
+  const { headers: securityHeaders, nonce, cspSignature } = await applySecurityGuards(
     ctx,
     resolvePageHeaders(pageHeaders),
   )
@@ -106,6 +115,7 @@ export async function resolvePageChrome<Params>(
   })
   return {
     nonce,
+    cspSignature,
     themeStyle: resolvedTokens ? serializeThemeStyle(resolvedTokens) : undefined,
     applySecurity: (response: Response): Response => {
       for (const [key, value] of Object.entries(securityHeaders)) {

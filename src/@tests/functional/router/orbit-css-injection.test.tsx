@@ -15,6 +15,7 @@ import { defineComet } from 'modules/comets/define-comet.ts'
 import { setActiveRenderer } from 'modules/router/active-renderer.ts'
 import { extractStylesheetLinks } from 'modules/client/orbit.ts'
 import { stripHydrationComments } from '../../support/strip-hydration-comments.ts'
+import { CSP_SIGNATURE_NONE } from 'modules/router/csp-signature.ts'
 
 console.error = () => {}
 
@@ -69,6 +70,7 @@ Deno.test(
         true,
         undefined,
         undefined,
+        CSP_SIGNATURE_NONE,
       )
       const html = await response.text()
 
@@ -113,6 +115,7 @@ Deno.test(
         true,
         undefined,
         undefined,
+        CSP_SIGNATURE_NONE,
       )
       const html = await response.text()
 
@@ -161,6 +164,7 @@ Deno.test(
         true,
         undefined,
         undefined,
+        CSP_SIGNATURE_NONE,
       )
       const html = await response.text()
 
@@ -190,6 +194,7 @@ Deno.test(
         true,
         undefined,
         undefined,
+        CSP_SIGNATURE_NONE,
       )
       const html = stripHydrationComments(await response.text())
 
@@ -224,6 +229,7 @@ Deno.test(
         false, // full document
         undefined,
         undefined,
+        CSP_SIGNATURE_NONE,
       )
       const html = await response.text()
 
@@ -268,6 +274,7 @@ Deno.test(
         true,
         undefined,
         undefined,
+        CSP_SIGNATURE_NONE,
       )
       const html = await response.text()
 
@@ -313,6 +320,7 @@ Deno.test(
         true,
         undefined,
         undefined,
+        CSP_SIGNATURE_NONE,
       )
       const html = await response.text()
 
@@ -355,6 +363,7 @@ Deno.test(
         true,
         undefined,
         undefined,
+        CSP_SIGNATURE_NONE,
       )
       const html = await response.text()
       const { refs } = extractStylesheetLinks(html)
@@ -382,6 +391,7 @@ Deno.test(
         true,
         undefined,
         undefined,
+        CSP_SIGNATURE_NONE,
       )
       const html = await response.text()
 
@@ -415,6 +425,7 @@ Deno.test(
         false, // full document
         undefined,
         undefined,
+        CSP_SIGNATURE_NONE,
       )
       const html = await response.text()
 

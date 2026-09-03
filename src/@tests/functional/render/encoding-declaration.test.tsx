@@ -7,6 +7,7 @@ import { mockPageContext } from 'modules/testing/mod.ts'
 import { extractDocumentSemantics } from 'modules/render/document-semantics.ts'
 import { renderPageResponse as renderReact } from 'modules/router/render-page-react.tsx'
 import { renderPageResponse as renderPreact } from 'modules/router/render-page-preact.ts'
+import { CSP_SIGNATURE_NONE } from 'modules/router/csp-signature.ts'
 
 console.error = () => {}
 
@@ -96,6 +97,7 @@ async function render(renderer: 'react' | 'preact'): Promise<Response> {
     false,
     undefined,
     undefined,
+    CSP_SIGNATURE_NONE,
   )
 }
 

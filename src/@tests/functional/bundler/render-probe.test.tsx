@@ -11,6 +11,7 @@ import { runRenderProbe } from 'modules/bundler/render-probe.ts'
 import type { DiscoveredPage } from 'modules/bundler/discover-pages.ts'
 import type { DocumentSemantics } from 'modules/render/document-model.ts'
 import { comparableSemantics, withoutPwaContribution } from '../../support/document-parity.ts'
+import { CSP_SIGNATURE_NONE } from 'modules/router/csp-signature.ts'
 
 console.error = () => {}
 
@@ -150,6 +151,7 @@ async function semanticsFor(
       false,
       undefined,
       undefined,
+      CSP_SIGNATURE_NONE,
     )
     return extractDocumentSemantics(await response.text())
   } finally {

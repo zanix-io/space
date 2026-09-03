@@ -7,6 +7,7 @@ import { setDevClientEnabled } from 'modules/dev/dev-client-registry.ts'
 import { setCssManifest } from 'modules/render/css-manifest.ts'
 import { setPwaConfig } from 'modules/pwa/mod.ts'
 import { renderPageResponse } from 'modules/router/render-page-preact.ts'
+import { CSP_SIGNATURE_NONE } from 'modules/router/csp-signature.ts'
 
 console.error = () => {}
 
@@ -77,6 +78,7 @@ Deno.test(
       false,
       undefined,
       undefined,
+      CSP_SIGNATURE_NONE,
     )
 
     // Unlike the React version (`page-composition.test.tsx`'s own equivalent test, which can only
@@ -115,6 +117,7 @@ Deno.test(
       false,
       undefined,
       undefined,
+      CSP_SIGNATURE_NONE,
     )
 
     assertEquals(response.status, 200)
@@ -151,6 +154,7 @@ Deno.test(
         false,
         undefined,
         undefined,
+        CSP_SIGNATURE_NONE,
       )
       const html = await response.text()
 
@@ -188,6 +192,7 @@ Deno.test(
         false,
         undefined,
         undefined,
+        CSP_SIGNATURE_NONE,
       )
       const html = await response.text()
 
@@ -227,6 +232,7 @@ Deno.test(
         false,
         undefined,
         undefined,
+        CSP_SIGNATURE_NONE,
       )
       const html = await response.text()
 
@@ -265,6 +271,7 @@ Deno.test(
         false,
         undefined,
         undefined,
+        CSP_SIGNATURE_NONE,
       )
       const html = await response.text()
 
@@ -293,6 +300,7 @@ Deno.test(
       true,
       undefined,
       undefined,
+      CSP_SIGNATURE_NONE,
     )
 
     const html = await response.text()
@@ -324,6 +332,7 @@ Deno.test(
         false,
         undefined,
         undefined,
+        CSP_SIGNATURE_NONE,
       )
       const html = await response.text()
 
@@ -355,6 +364,7 @@ Deno.test(
       false,
       undefined,
       undefined,
+      CSP_SIGNATURE_NONE,
     )
     const html = await response.text()
 
@@ -407,6 +417,7 @@ Deno.test('render-page-preact head: only a page head — no layout declares one'
     false,
     undefined,
     undefined,
+    CSP_SIGNATURE_NONE,
   )
   const html = await response.text()
 
@@ -431,6 +442,7 @@ Deno.test(
       false,
       undefined,
       undefined,
+      CSP_SIGNATURE_NONE,
     )
     const html = await response.text()
 
@@ -462,6 +474,7 @@ Deno.test(
       false,
       undefined,
       undefined,
+      CSP_SIGNATURE_NONE,
     )
     const html = await response.text()
 
@@ -496,6 +509,7 @@ Deno.test(
       false,
       undefined,
       undefined,
+      CSP_SIGNATURE_NONE,
     )
     const html = await response.text()
 
@@ -525,6 +539,7 @@ Deno.test(
       false,
       undefined,
       undefined,
+      CSP_SIGNATURE_NONE,
     )
     const html = await response.text()
 
@@ -560,6 +575,7 @@ Deno.test(
       false,
       undefined,
       undefined,
+      CSP_SIGNATURE_NONE,
     )
     const html = await response.text()
 
@@ -596,6 +612,7 @@ Deno.test(
       false,
       undefined,
       undefined,
+      CSP_SIGNATURE_NONE,
     )
     const html = await response.text()
 
@@ -624,6 +641,7 @@ Deno.test(
         false,
         undefined,
         undefined,
+        CSP_SIGNATURE_NONE,
       )
       const html = await response.text()
 
@@ -656,6 +674,7 @@ Deno.test(
       true,
       undefined,
       undefined,
+      CSP_SIGNATURE_NONE,
     )
     const html = await response.text()
 

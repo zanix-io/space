@@ -5,6 +5,63 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-09-03
+
+### Added
+
+- **`navigate(href, options?)`** (`@zanix/space/client`, `@zanix/space/client/preact`) — the public
+  programmatic counterpart to Orbit's click interception, for a navigation with no `<a>` click to
+  intercept at all (e.g. a Comet's own event handler navigating once a `fetch()` it made resolves).
+  Runs through the exact same fragment swap a real click uses (`modules/client/orbit.ts`): prefetch
+  reuse, the CSP-signature comparison, stylesheet loading, `persist`-tagged Comet retention, and the
+  same graceful degradation to a real navigation on any failure. `options.replace` selects
+  `history.replaceState` over the default `history.pushState`, mirroring the same distinction
+  `onClick`/`onPopState` already make for their own two triggers. A cross-origin `href` or a
+  same-document hash-only link gets a real navigation instead, exactly like the equivalent `<a>`
+  would.
+
+### Fixed
+
+- **`zanix space dev`'s dev-only asset handler no longer swallows a real page navigation to a URL it
+  misclassifies as a source-file request.** `createDevAssetHandler` (`dev-asset-handler.ts`)
+  recognizes an asset request by its own path's extension alone (`.ts`/`.tsx`/`.js`/`.jsx`/`.css`/
+  `.mjs`/`.json`) — a real `@zanix/space` page route never carries one by convention, but nothing
+  stops a person from typing/clicking their way to a URL that happens to (e.g. `/page.tsx`). Before
+  this fix, that request got a bare, unstyled `404` straight from this handler, short-circuiting
+  before the app's own route table — and its `not-found.tsx` — ever ran. It now falls through to the
+  real route table instead, but ONLY for a genuine top-level document navigation
+  (`Sec-Fetch-Dest: document`) — a page's own `<script src>`/`<link rel="stylesheet">` requesting a
+  genuinely broken asset never sets that header, so it still gets the immediate, plain `404` it
+  always did, never the full `not-found.tsx` document body a browser would otherwise try (and fail)
+  to parse as the JS/CSS it actually asked for.
+
+- **Orbit's client-side navigation no longer applies a fragment under the WRONG, still-active
+  `Content-Security-Policy`.** A document's active CSP is fixed at the navigation that created it —
+  no later `fetch()` response, regardless of its own headers, is ever consulted by the browser to
+  update it. Before this fix, navigating (via an in-app link click, never a hard reload/direct URL)
+  from a page to another whose own resolved CSP genuinely differed — a stricter or looser per-page
+  `Page({ headers: { csp } })`, or a guard-registered `cspGuard()` varying the policy per request —
+  still swapped the destination's fragment into the DOM under the ORIGIN page's policy, even though
+  the fragment's own response carried the correct header for its own page. Every full-document
+  render now embeds its own resolved, nonce-normalized CSP signature as a `<meta>` tag
+  (`modules/router/csp-signature.ts`); Orbit compares that against each fragment response's own
+  `Content-Security-Policy` header (`modules/client/orbit.ts`, `modules/client/prefetch.ts`) before
+  swapping, and degrades to a real, full navigation — the one thing that can actually apply a
+  different CSP correctly — exactly when the two genuinely differ. Automatic, no configuration
+  needed; a page with no CSP configured, or navigating between pages sharing the same resolved
+  policy (the common case — only the per-request nonce differs, which is normalized away), is
+  unaffected. Identical under both renderers (`--renderer=react`/`--renderer=preact`) and in both
+  `zanix space dev` and production, since CSP resolution has never depended on either.
+
+### Changed
+
+- **Dependency floors bumped to match already-published sibling versions** — no code behavior
+  change, purely widening the version ranges this package declares (`deno.jsonc`'s `imports`/
+  `scopes` maps) and the lazy-loaded specifier string that mirrors them (`log.controller.ts`'s
+  `AUTH_SPECIFIER`):
+  - `@zanix/app`/`@zanix/app/runtime` (test-only `scopes` entry): `^0.2.1` → `^1.0.0`
+  - `@zanix/auth` (lazy specifier only, not in `deno.jsonc`'s `imports`): `^0.8.0` → `^1.0.0`
+
 ## [1.1.0] - 2026-09-01
 
 ### Added

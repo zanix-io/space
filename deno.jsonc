@@ -1,6 +1,6 @@
 {
   "name": "@zanix/space",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "zanix": {
     "project": "library"
   },
@@ -76,7 +76,7 @@
     // `deactivateApps`, resolved via `scopes` below). See the doc comment further down (next to
     // `@zanix/auth`'s own removal) for why a merely-declared, never-shipped-code alias still costs
     // real `node_modules/.deno` materialization on its own.
-    "@zanix/app": "jsr:@zanix/app@^0.2.1",
+    "@zanix/app": "jsr:@zanix/app@^1.0.0",
     "@zanix/server": "jsr:@zanix/server@^4.1.0",
     "@zanix/errors": "jsr:@zanix/utils@^4.1.0/errors",
     "@zanix/logger": "jsr:@zanix/utils@^4.1.0/logger",
@@ -219,7 +219,7 @@
       // events) is a small, distinct slice of what `space-ui`'s components need (focus/keyboard/
       // resize) — not the same abstraction wearing two names.
       "happy-dom": "npm:happy-dom@^20.11.2",
-      "@zanix/app/runtime": "jsr:@zanix/app@^0.2.1/runtime",
+      "@zanix/app/runtime": "jsr:@zanix/app@^1.0.0/runtime",
       "@zanix/auth": "jsr:@zanix/auth@^1.0.0",
       "@zanix/datamaster/storage": "jsr:@zanix/datamaster@^1.9.0/storage",
       "@zanix/datamaster/core": "jsr:@zanix/datamaster@^1.9.0/core",

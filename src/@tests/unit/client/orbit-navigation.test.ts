@@ -1,9 +1,17 @@
-import { assert, assertEquals, assertFalse } from '@std/assert'
+import { assert, assertEquals, assertFalse, assertStrictEquals } from '@std/assert'
 import { installTimerMock, resetDom } from './dom-test-setup.ts'
 import { getActiveCspSignature, initOrbit, navigate, retryOutlet } from 'modules/client/orbit.ts'
 import { ORBIT_FRAGMENT_HEADER, ORBIT_OUTLET_ATTR } from 'modules/router/orbit-protocol.ts'
 import { CSP_SIGNATURE_META_NAME, CSP_SIGNATURE_NONE } from 'modules/router/csp-signature.ts'
 import { setCometHydrator, setErrorBoundaryHydrator } from 'modules/client/hydrator-registry.ts'
+import { registerPersistHandle } from 'modules/client/comet-persistence.ts'
+import {
+  COMET_EXPORT_ATTR,
+  COMET_MODULE_ATTR,
+  COMET_PERSIST_ATTR,
+  COMET_PERSIST_VT_ATTR,
+  COMET_PROPS_ATTR,
+} from 'modules/comets/marker.ts'
 
 // `swapOutlet`/`onClick`/`onPopState` — the orchestration half of this module `orbit.test.ts`
 // deliberately leaves out (see that file's own doc): a real click/popstate, a real fetch, a real
@@ -390,6 +398,100 @@ Deno.test('onClick: startViewTransition is used when the browser supports it', a
     delete view.document.startViewTransition
   }
 })
+
+Deno.test(
+  'onClick: a persist-tagged boundary reused across the swap carries its own ' +
+    'view-transition-name attribute already, BEFORE startViewTransition even mutates the DOM — ' +
+    'the real bug this fix closes: detachPersistedComets used to run before startViewTransition ' +
+    'was ever called, so the transition\'s "old state" snapshot never saw the boundary at all by ' +
+    'the time it was captured, and a persisted Comet visibly flashed/crossfaded with the rest of ' +
+    'the outlet even though its own state genuinely survived',
+  async () => {
+    const { anchor, outlet } = setUp()
+
+    // A persist-tagged boundary already live in the CURRENT outlet, with a registered handle —
+    // exactly what `detachPersistedComets` needs to actually retain it instead of discarding it
+    // (see comet-persistence.ts's own doc: a boundary with no registered handle is left in place,
+    // never retained).
+    const boundary = view.document.createElement('div')
+    boundary.setAttribute(COMET_PERSIST_ATTR, 'sidebar')
+    boundary.setAttribute(COMET_MODULE_ATTR, '/comets/sidebar.tsx')
+    boundary.setAttribute(COMET_EXPORT_ATTR, 'Sidebar')
+    outlet.appendChild(boundary)
+    let disposed = false
+    registerPersistHandle(boundary, { reuse: () => {}, dispose: () => void (disposed = true) })
+
+    // The destination fragment's own placeholder for the SAME persist key/module/export — what
+    // makes `reuseRetainedComets` splice the RETAINED node back in, rather than leaving a fresh
+    // placeholder to hydrate from scratch.
+    fetchImpl = () =>
+      Promise.resolve(
+        okResponse(
+          outletHtml(
+            `<div ${COMET_PERSIST_ATTR}="sidebar" ${COMET_MODULE_ATTR}="/comets/sidebar.tsx" ` +
+              `${COMET_EXPORT_ATTR}="Sidebar" ${COMET_PROPS_ATTR}="{}"></div><p>new content</p>`,
+          ),
+        ),
+      )
+
+    let nameAtOldSnapshot: string | null | undefined
+    let attachedAtOldSnapshot = false
+    view.document.startViewTransition = (callback: () => void) => {
+      // This runs the instant `startViewTransition` is called — BEFORE `callback` (`swap`) has
+      // mutated anything. A real browser's own "old state" snapshot is captured at this exact
+      // point, synchronously, before `callback` ever runs — so whatever the boundary's own
+      // view-transition-name attribute reads as RIGHT HERE is exactly what the real transition
+      // would (or wouldn't) have captured for it. Attachment matters just as much as the
+      // attribute's own value: a DETACHED node contributes nothing to a real old-state snapshot
+      // even if it already carries a `view-transition-name` — only checking the attribute's
+      // value here would pass even for a boundary already ripped out of the outlet before this
+      // point (`registerPersistTransitionNames` running AFTER `detachPersistedComets` would still
+      // leave the name attribute set on the very same JS object, detached or not).
+      nameAtOldSnapshot = boundary.getAttribute(COMET_PERSIST_VT_ATTR)
+      attachedAtOldSnapshot = boundary.parentNode === outlet
+      callback()
+      return {
+        finished: Promise.resolve(),
+        ready: Promise.resolve(),
+        updateCallbackDone: Promise.resolve(),
+      }
+    }
+
+    try {
+      click(anchor)
+      await flush()
+
+      assert(
+        nameAtOldSnapshot,
+        'the boundary must already carry its own view-transition-name BEFORE startViewTransition ' +
+          'mutates the DOM — a name assigned any later contributes nothing to the old-state snapshot',
+      )
+      assert(
+        attachedAtOldSnapshot,
+        'the boundary must still be ATTACHED to the outlet at old-snapshot time — detaching it ' +
+          '(even with its view-transition-name already set) means a real browser captures nothing ' +
+          'for it at all, the exact bug this fix closes',
+      )
+      assertFalse(disposed, 'a boundary reused on the destination page must never be disposed')
+
+      const reused = outlet.querySelector(`[${COMET_PERSIST_ATTR}="sidebar"]`)
+      assertStrictEquals(
+        reused,
+        boundary,
+        'the exact SAME node must be spliced back in — a real morph needs identity, not just a ' +
+          'matching selector',
+      )
+      assertEquals(
+        reused?.getAttribute(COMET_PERSIST_VT_ATTR),
+        nameAtOldSnapshot,
+        "the SAME view-transition-name must still be present once the transition's new-state " +
+          'snapshot is captured — proving it survives the detach-then-reattach round trip intact',
+      )
+    } finally {
+      delete view.document.startViewTransition
+    }
+  },
+)
 
 Deno.test(
   'onPopState: back/forward swaps the outlet and REPLACES history, never pushes',

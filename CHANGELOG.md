@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-09-03
+
+### Added
+
+- **`isCometPersisted(key)`** (`@zanix/space/client`, `@zanix/space/client/preact`) — a read-only,
+  side-effect-free way to ask whether a `persist` key currently has a retained (detached but not yet
+  reused) Comet instance. Before this, the only way to find out was navigating to a page that
+  renders the key — itself a mutating operation that can touch/evict other entries in the bounded
+  5-slot cache. Backed by `RetainedCometCache`'s existing `has()` (already unit-tested,
+  never-consuming), just newly reachable from outside `comet-persistence.ts` — useful for debugging
+  `persist` behavior or building persist-aware dev UI (e.g. a "this widget's state IS/ ISN'T
+  currently preserved" badge).
+
+### Fixed
+
+- **A `persist`-tagged Comet no longer visibly flashes/jumps as part of Orbit's whole-page View
+  Transition, even though its own DOM node and state genuinely survive the navigation.** With no
+  element anywhere carrying its own `view-transition-name`, the View Transitions API captures the
+  entire transitioning outlet as a single before/after image pair and crossfades one into the other
+  — there was no per-element distinction to make, so a retained `persist` boundary still went
+  through the same crossfade as every genuinely-replaced part of the page. `swapOutlet`
+  (`modules/client/orbit.ts`) now calls the new `registerPersistTransitionNames`
+  (`modules/client/comet-persist-transition.ts`) BEFORE `document.startViewTransition` runs, while
+  the outgoing boundary is still attached: it gives every `persist`-tagged boundary, on either side
+  of the navigation, a stable `view-transition-name` (a CSS-safe hash of the raw `persist` key,
+  applied via a new `COMET_PERSIST_VT_ATTR` attribute and a CSP-nonce-respecting CSSOM rule, never
+  an inline `style`) so the browser morphs the retained instance in place instead of folding it into
+  the region-wide crossfade. `detachPersistedComets`/`reuseRetainedComets` themselves now run from
+  inside the `swap()` callback rather than before it, so the SAME node carries that name in both the
+  transition's old-state and new-state snapshots. A no-op on a browser with no View Transitions
+  support at all, and for any boundary with no `persist` key.
+
 ## [1.2.0] - 2026-09-03
 
 ### Added

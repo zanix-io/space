@@ -17,3 +17,4 @@ export { extractFragmentTitle, initOrbit, navigate, shouldInterceptNavigation } 
 export type { NavigateOptions } from './orbit.ts'
 export { isConnectionSlow, shouldPrefetch } from './prefetch.ts'
 export type { ConnectionInfo, PrefetchOptions } from './prefetch.ts'
+export { isCometPersisted } from './comet-persistence.ts'

@@ -206,6 +206,7 @@
     "@zanix/auth@1.1.1": {
       "integrity": "1963fb4255079808831e1046eedab88c79e21fda6a5de5e3fd20f0780bb4a1cc",
       "dependencies": [
+        "jsr:@zanix/datamaster@^1.9.0",
         "jsr:@zanix/server@4",
         "jsr:@zanix/utils@4"
       ]

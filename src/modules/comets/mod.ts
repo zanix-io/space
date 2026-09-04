@@ -24,3 +24,14 @@ export { loadCometManifest, resolveCometModuleUrl } from './comet-manifest.ts'
 export type { CometManifest } from './comet-manifest.ts'
 export { createReloader } from './reloader.ts'
 export type { ReloadDescriptor } from './reloader.ts'
+export {
+  attachFormDraftPersistence,
+  DEFAULT_DRAFT_DEBOUNCE_MS,
+  persistDraftValue,
+  restoreDraftValue,
+} from './form-draft-persistence.ts'
+export type {
+  DraftStorageKind,
+  DraftValueOptions,
+  FormDraftPersistenceOptions,
+} from './form-draft-persistence.ts'

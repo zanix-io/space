@@ -159,6 +159,83 @@ manifest, so it can resolve its own className/style via `@zanix/app`'s `resolveB
 presentation," for the full pattern and its one real precondition (the Comet's own author has to opt
 in by adding that call; it's not retroactive).
 
+### Form draft persistence
+
+A ready-made Comet restoring unsaved `<form>` input after an accidental refresh or a
+navigate-away-and-back, with no server-side state to recover it from — a plain, no-JS-required
+`<form>` still works without it; this only adds recovery on top for a browser that has JS:
+
+```tsx
+// used from any page's component — a page's own loader passes hasServerValues, never computed
+// ad hoc elsewhere: `ctx.submitted` is `undefined` on a GET and on any successful action, present
+// only on a `422` validation re-render, exactly the signal that should win over a stale draft
+import FormDraftPersistence from '@zanix/space/comet/react' // or '@zanix/space/comet/preact'
+
+<form id='new-trigger' method='post'>{/* ... */}</form>
+<FormDraftPersistence
+  formId='new-trigger'
+  storageKey='triggers/new'
+  hasServerValues={ctx.submitted !== undefined}
+/>
+```
+
+Restores a saved draft on attach (unless `hasServerValues`), saves the whole form — generically, via
+`form.elements`, covering a field added later with zero per-field wiring — debounced on every
+`input`/`change`, and clears the draft on `submit`. `storageKey` is required, never derived from
+`location.pathname`: this framework's own `[lang]`-segment routing renders the SAME logical form at
+different pathnames per language, so a pathname-derived key would fragment one operator's own draft
+across a language switch mid-form.
+
+**Always excluded, not configurable**: the `_csrf` field (this framework's own CSRF form field —
+restoring a stale token here produces nothing worse than a confusing 403), any `type="password"`
+field, and any `type="file"` field (never `JSON.stringify`-able). A form author's own field-level
+opt-out for anything else sensitive (an API secret typed into a plain `type="text"` input, say):
+
+```tsx
+<input name='webhookSecret' data-no-persist />
+```
+
+`storage` defaults to `'session'` (scoped to the tab's lifetime — the safe default for config an
+operator types in, like webhook URLs) and accepts `'local'` as an explicit, visible opt-in for a
+draft genuinely meant to survive a browser restart.
+
+**A React/Preact-controlled field can't be restored by this Comet** — writing `.value` directly on a
+controlled field's DOM node never notifies the framework's own tracked setter, and gets fought or
+clobbered on the next render. Exclude it via `excludeFields`, and persist it separately with the
+narrower, value-level primitives both ready-made Comets are themselves built on:
+
+```tsx
+'use comet'
+import { useEffect, useState } from 'react'
+import { defineComet, persistDraftValue, restoreDraftValue } from '@zanix/space/comet'
+
+function TriggerConfigEditor({ storageKey, hasServerValues, initial }: Props) {
+  const [config, setConfig] = useState(initial)
+
+  // Restore once — deps are the option VALUES, never `config` itself, so this never re-fires on
+  // a keystroke and never races a stale saved value back over what was just typed.
+  useEffect(
+    () => restoreDraftValue(setConfig, { storageKey, hasServerValues }),
+    [storageKey, hasServerValues],
+  )
+  // Persist, debounced, on every change — `config` IS the dependency here; each re-run's cleanup
+  // cancels the previous pending write before scheduling the next one. That re-run is the debounce
+  // mechanism itself, not something to work around.
+  useEffect(() => persistDraftValue(config, { storageKey }), [config, storageKey])
+
+  // ...renders its own real widget over `config`/`setConfig`
+}
+export default defineComet(TriggerConfigEditor, import.meta.url)
+```
+
+`restoreDraftValue` and `persistDraftValue` are kept as two separate functions rather than one
+combined read-and-write primitive precisely because they need different effect dependencies to
+behave correctly — see the comments above.
+
+`attachFormDraftPersistence` (`@zanix/space/comet`) is the hook-free primitive both
+`FormDraftPersistence` Comets wire into their own `useEffect` — reach for it directly only when
+composing a custom comet that needs more than the ready-made one provides.
+
 ## See also
 
 - [`README.md`](../README.md#selective-hydration-comets) — the "Selective hydration" section this

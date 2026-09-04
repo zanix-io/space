@@ -225,7 +225,9 @@ import Counter from '../comets/counter.tsx'
 ```
 
 See [`docs/comets.md`](./docs/comets.md) for the full contract: wiring, mount modes,
-cross-navigation state persistence (`persist`), and the build-time `'server-only'` boundary.
+cross-navigation state persistence (`persist`), the build-time `'server-only'` boundary, and the
+ready-made `FormDraftPersistence` Comet (`@zanix/space/comet/react` / `@zanix/space/comet/preact`)
+for session/local-scoped form draft recovery.
 
 ### Client-side navigation ("Orbit")
 

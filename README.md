@@ -226,8 +226,11 @@ import Counter from '../comets/counter.tsx'
 
 See [`docs/comets.md`](./docs/comets.md) for the full contract: wiring, mount modes,
 cross-navigation state persistence (`persist`), the build-time `'server-only'` boundary, and the
-ready-made `FormDraftPersistence` Comet (`@zanix/space/comet/react` / `@zanix/space/comet/preact`)
-for session/local-scoped form draft recovery.
+ready-made Comets under `@zanix/space/comet/react` / `@zanix/space/comet/preact` —
+`FormDraftPersistence` (session/local-scoped form draft recovery), `SubmitGuard` (double-submit
+prevention), `ScrollRestoration` (scroll-position recovery across a refresh or an Orbit navigation),
+`UnsavedChangesGuard` (a native "leave site?" warning before an unsaved form is discarded), and
+`NetworkStatus` (live online/offline as a `data-*` attribute).
 
 ### Client-side navigation ("Orbit")
 

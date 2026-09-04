@@ -24,7 +24,8 @@ export function FormDraftPersistence(props: FormDraftPersistenceOptions): null {
 
 /**
  * {@linkcode FormDraftPersistence}, wrapped as a real Comet boundary — import this directly:
- * `import FormDraftPersistence from '@zanix/space/comet/preact'`. See
+ * `import { FormDraftPersistence } from '@zanix/space/comet/preact'` (a NAMED import — see
+ * `mod-react.ts`'s own module doc for why this subpath has no single default). See
  * `form-draft-persistence-react.tsx`'s own comment on this same `as` clause — identical
  * no-slow-types reasoning, not a Preact-specific concern.
  */

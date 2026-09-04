@@ -35,3 +35,11 @@ export type {
   DraftValueOptions,
   FormDraftPersistenceOptions,
 } from './form-draft-persistence.ts'
+export { attachSubmitGuard } from './submit-guard.ts'
+export type { SubmitGuardOptions } from './submit-guard.ts'
+export { attachScrollRestoration } from './scroll-restoration.ts'
+export type { ScrollRestorationOptions } from './scroll-restoration.ts'
+export { attachUnsavedChangesGuard } from './unsaved-changes-guard.ts'
+export type { UnsavedChangesGuardOptions } from './unsaved-changes-guard.ts'
+export { attachNetworkStatus, DEFAULT_NETWORK_STATUS_ATTRIBUTE } from './network-status.ts'
+export type { NetworkStatusOptions } from './network-status.ts'

@@ -13,7 +13,7 @@ import type { CometBoundaryComponent, CometProps } from 'typings/comet.ts'
  * JSON-serializable value, so it crosses the Comet boundary as ordinary props like any other.
  *
  * ```tsx
- * import FormDraftPersistence from '@zanix/space/comet/react'
+ * import { FormDraftPersistence } from '@zanix/space/comet/react'
  *
  * <FormDraftPersistence
  *   formId="new-trigger"
@@ -36,7 +36,9 @@ export function FormDraftPersistence(props: FormDraftPersistenceOptions): null {
 
 /**
  * {@linkcode FormDraftPersistence}, wrapped as a real Comet boundary — import this directly:
- * `import FormDraftPersistence from '@zanix/space/comet/react'`.
+ * `import { FormDraftPersistence } from '@zanix/space/comet/react'` (a NAMED import: this
+ * subpath's own barrel carries more than one ready-made Comet, so it has no single default of its
+ * own — see `mod-react.ts`'s own module doc).
  *
  * `as`-annotated, not left to inference: `defineComet`'s own generic return type is too complex
  * for JSR's fast-check publish step to infer through a bare default-export expression (the same

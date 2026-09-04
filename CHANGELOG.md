@@ -26,6 +26,41 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
   `csrfGuard` itself reads a submitted token back from, now exported so `attachFormDraftPersistence`
   (and any other consumer) can import the real constant instead of re-declaring `'_csrf'` as a bare
   string.
+- **`attachFormDraftPersistence`'s restore step now dispatches a real, bubbling `input`/`change`
+  event** after writing a field's `.value`/`.checked` — the raw DOM write alone is invisible to any
+  React/Preact-controlled wrapper around that field (e.g. `@zanix/space-ui`'s own `Input`/`Select`/
+  `RadioGroup`, which always track a `value` internally even when the page author never passes one),
+  so a restored draft could get silently reverted on the field's next re-render. The dispatched
+  event is what makes such a field's own `onChange`/`onInput` handler fire and sync its state to
+  match, the same path a genuine keystroke/click already takes.
+- **`attachSubmitGuard`/`SubmitGuard` Comets** (`@zanix/space/comet`, `@zanix/space/comet/react`,
+  `@zanix/space/comet/preact`) — stops a second real `<form>` submission (an impatient double-click,
+  or a slow first response) from ever reaching the server. Disables every submit-triggering control
+  on the form's first real `submit` and rejects any further `submit` while still in flight outright.
+  Relies on this framework's own "Real HTTP, not an RPC" contract: a submission that goes through
+  always ends in a real navigation, so there is deliberately no reset/timeout path.
+- **`attachScrollRestoration`/`ScrollRestoration` Comets** — session/local-scoped scroll-position
+  restoration for the window or a single scrollable container, across a refresh or an Orbit
+  navigation (Orbit never manages scroll position itself). `storageKey` defaults to
+  `location.pathname + location.search` — unlike `FormDraftPersistence`'s own `storageKey`
+  (deliberately required, never derived), a scroll position's real identity genuinely IS the page
+  being viewed. Skips restoring when the current URL already carries a `#fragment` — an explicit
+  anchor wins over a remembered position.
+- **`attachUnsavedChangesGuard`/`UnsavedChangesGuard` Comets** — warns via the browser's own native
+  "leave site?" prompt (`beforeunload`) before a real page unload discards an unsaved `<form>`.
+  Composes naturally alongside `FormDraftPersistence` on the same form. Known gap: only intercepts a
+  real full-page unload — Orbit's own same-origin `<a>` click interception has no exposed "confirm
+  before navigating" hook yet, so an in-app link away from a dirty form still navigates unprompted.
+- **`attachNetworkStatus`/`NetworkStatus` Comets** — live `navigator.onLine` plus real
+  `online`/`offline` transitions, exposed as a `data-network-status="online"|"offline"` attribute (a
+  Comet's own props must be plain JSON, so there's no callback to hand it) on
+  `document.documentElement` by default. `attachNetworkStatus` itself is callback-based, for a
+  consumer's own composite comet wanting real `useState` instead.
+- **`draft-storage.ts`** (`@zanix/space`, internal) — the `sessionStorage`/`localStorage`
+  read/write/namespacing plumbing `FormDraftPersistence` and `ScrollRestoration` both build on,
+  extracted so the fail-soft try/catch discipline and storage-key namespace (now `zn-space:`,
+  previously `zn-space-draft:` — never published, so no migration needed) can't drift out of sync
+  between them.
 
 ### Fixed
 

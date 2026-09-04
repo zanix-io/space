@@ -1,4 +1,16 @@
 import { CSRF_FORM_FIELD } from '../middleware/csrf-guard.ts'
+import {
+  clearFromStorage,
+  DEFAULT_DRAFT_DEBOUNCE_MS,
+  type DraftStorageKind,
+  namespacedStorageKey,
+  readFromStorage,
+  resolveStorageBackend,
+  writeToStorage,
+} from './draft-storage.ts'
+
+export { DEFAULT_DRAFT_DEBOUNCE_MS }
+export type { DraftStorageKind }
 
 /**
  * Session/local-scoped draft persistence for a plain `<form>` — restores unsaved input after an
@@ -13,63 +25,6 @@ import { CSRF_FORM_FIELD } from '../middleware/csrf-guard.ts'
  *
  * @module
  */
-
-/** How long to wait after the last change before persisting. */
-export const DEFAULT_DRAFT_DEBOUNCE_MS = 500
-
-/** Storage backend a draft is persisted to. `'session'` (the default everywhere in this module) is
- * scoped to the current tab's session lifetime; `'local'` survives a browser restart — an explicit,
- * visible opt-in for a draft an operator genuinely wants to resume tomorrow, the same
- * "safe-by-default, opt-out is one visible field" shape this framework already applies to its CSP
- * nonce default. */
-export type DraftStorageKind = 'session' | 'local'
-
-/** Namespaces every key this module writes under one fixed internal prefix, so an author-chosen
- * `storageKey` (`'draft'`, say) can never collide with an unrelated key some other script on the
- * same page writes to the same storage object. */
-const STORAGE_PREFIX = 'zn-space-draft:'
-
-function draftStorageKey(storageKey: string): string {
-  return `${STORAGE_PREFIX}${storageKey}`
-}
-
-function resolveBackend(kind: DraftStorageKind | undefined): Storage | undefined {
-  try {
-    return kind === 'local' ? globalThis.localStorage : globalThis.sessionStorage
-  } catch {
-    // A storage object can throw just by being READ (private-browsing/quota policies in some
-    // browsers) — fail soft, same as every read/write below, never break the form over this.
-    return undefined
-  }
-}
-
-/** Parses whatever this module previously wrote under `key` — `unknown` on purpose: a form draft
- * (`restoreForm`) and an arbitrary value draft ({@linkcode restoreDraftValue}) shape-check the
- * result differently, so neither shape is assumed here. */
-function readDraft(backend: Storage, key: string): unknown {
-  try {
-    const raw = backend.getItem(key)
-    return raw ? JSON.parse(raw) : undefined
-  } catch {
-    return undefined
-  }
-}
-
-function writeDraft(backend: Storage, key: string, data: unknown): void {
-  try {
-    backend.setItem(key, JSON.stringify(data))
-  } catch {
-    // Fail soft — a full/disabled storage object never breaks the form/value it's backing.
-  }
-}
-
-function clearDraft(backend: Storage, key: string): void {
-  try {
-    backend.removeItem(key)
-  } catch {
-    // Nothing to clean up if this throws.
-  }
-}
 
 /** Options for {@linkcode attachFormDraftPersistence}. */
 export type FormDraftPersistenceOptions = {
@@ -161,7 +116,21 @@ function saveForm(
     if (typeof value !== 'string' || excludedNames.has(name)) continue
     draft[name] = value
   }
-  writeDraft(backend, key, draft)
+  writeToStorage(backend, key, draft)
+}
+
+/** The real, bubbling DOM event a React/Preact-controlled field's own `onChange`/`onInput` handler
+ * actually listens for — `checkbox`/`radio`/`<select>` map to `change` in both renderers; every
+ * other `<input>` type and `<textarea>` map to `input` (React remaps its own `onChange` prop to
+ * the native `input` event specifically for live-per-keystroke text fields; Preact's `onChange`
+ * means the literal native event, which is why a live-typing Preact field is wired to `onInput`
+ * instead — see `@zanix/space-ui`'s own `Input/render.ts` doc for the fully worked-out reasoning).
+ * A raw DOM write alone never reaches either renderer's own tracked state. */
+function fieldChangeEventType(el: PersistableElement): 'input' | 'change' {
+  return el instanceof HTMLInputElement && (el.type === 'checkbox' || el.type === 'radio') ||
+      el instanceof HTMLSelectElement
+    ? 'change'
+    : 'input'
 }
 
 function restoreForm(
@@ -170,17 +139,27 @@ function restoreForm(
   key: string,
   excludeFields: readonly string[],
 ): void {
-  const draft = readDraft(backend, key)
+  const draft = readFromStorage(backend, key)
   if (!draft || typeof draft !== 'object') return
   const record = draft as Record<string, unknown>
   eachPersistableField(form, excludeFields, (el) => {
     const value = record[el.name]
     if (typeof value !== 'string') return
     if (el instanceof HTMLInputElement && (el.type === 'checkbox' || el.type === 'radio')) {
-      el.checked = el.value === value
-      return
+      const next = el.value === value
+      if (el.checked === next) return
+      el.checked = next
+    } else {
+      if (el.value === value) return
+      el.value = value
     }
-    el.value = value
+    // Dispatched AFTER the raw write, same field this write just landed on — the write alone is
+    // invisible to any React/Preact-controlled wrapper around this field (e.g. `@zanix/space-ui`'s
+    // `Input`/`Select`/`RadioGroup`, which always render a tracked `value` even when the CONSUMER
+    // never passed one — see this function's own doc). A real, bubbling event is what makes such a
+    // field's own `onChange`/`onInput` handler fire and sync its internal state to match, the same
+    // path a genuine keystroke/click already takes — not a special restore-only code path.
+    el.dispatchEvent(new Event(fieldChangeEventType(el), { bubbles: true }))
   })
 }
 
@@ -211,10 +190,10 @@ export function attachFormDraftPersistence(options: FormDraftPersistenceOptions)
   } = options
 
   const form = globalThis.document?.getElementById(formId)
-  const backend = resolveBackend(storage)
+  const backend = resolveStorageBackend(storage)
   if (!(form instanceof HTMLFormElement) || !backend) return () => {}
 
-  const key = draftStorageKey(storageKey)
+  const key = namespacedStorageKey(storageKey)
   if (!hasServerValues) restoreForm(form, backend, key, excludeFields)
 
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -224,7 +203,7 @@ export function attachFormDraftPersistence(options: FormDraftPersistenceOptions)
   }
   const handleSubmit = () => {
     if (timer !== undefined) clearTimeout(timer)
-    clearDraft(backend, key)
+    clearFromStorage(backend, key)
   }
 
   form.addEventListener('input', handleChange)
@@ -264,9 +243,9 @@ export function restoreDraftValue<T>(
   options: DraftValueOptions & { hasServerValues: boolean },
 ): void {
   if (options.hasServerValues) return
-  const backend = resolveBackend(options.storage)
+  const backend = resolveStorageBackend(options.storage)
   if (!backend) return
-  const raw = readDraft(backend, draftStorageKey(options.storageKey))
+  const raw = readFromStorage(backend, namespacedStorageKey(options.storageKey))
   if (raw === undefined) return
   onRestore(raw as T)
 }
@@ -291,11 +270,11 @@ export function persistDraftValue<T>(
   value: T,
   options: DraftValueOptions & { debounceMs?: number },
 ): () => void {
-  const backend = resolveBackend(options.storage)
+  const backend = resolveStorageBackend(options.storage)
   if (!backend) return () => {}
 
-  const key = draftStorageKey(options.storageKey)
+  const key = namespacedStorageKey(options.storageKey)
   const debounceMs = options.debounceMs ?? DEFAULT_DRAFT_DEBOUNCE_MS
-  const timer = setTimeout(() => writeDraft(backend, key, value), debounceMs)
+  const timer = setTimeout(() => writeToStorage(backend, key, value), debounceMs)
   return () => clearTimeout(timer)
 }

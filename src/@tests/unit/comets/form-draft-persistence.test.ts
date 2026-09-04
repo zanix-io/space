@@ -55,7 +55,7 @@ Deno.test(
   () => {
     setUp()
     const form = buildForm('f1', [{ name: 'title', value: '' }])
-    globals.sessionStorage.setItem('zn-space-draft:f1', JSON.stringify({ title: 'saved value' }))
+    globals.sessionStorage.setItem('zn-space:f1', JSON.stringify({ title: 'saved value' }))
 
     const detach = attachFormDraftPersistence({
       formId: 'f1',
@@ -73,7 +73,7 @@ Deno.test(
   () => {
     setUp()
     const form = buildForm('f2', [{ name: 'title', value: 'from the server' }])
-    globals.sessionStorage.setItem('zn-space-draft:f2', JSON.stringify({ title: 'stale draft' }))
+    globals.sessionStorage.setItem('zn-space:f2', JSON.stringify({ title: 'stale draft' }))
 
     const detach = attachFormDraftPersistence({
       formId: 'f2',
@@ -101,12 +101,12 @@ Deno.test(
     ;(form.elements.namedItem('title') as HTMLInputElement).value = 'typed value'
     fireInput(form.elements.namedItem('title') as Element)
 
-    assertEquals(globals.sessionStorage.getItem('zn-space-draft:f3'), null)
+    assertEquals(globals.sessionStorage.getItem('zn-space:f3'), null)
     timers.advance(299)
-    assertEquals(globals.sessionStorage.getItem('zn-space-draft:f3'), null)
+    assertEquals(globals.sessionStorage.getItem('zn-space:f3'), null)
     timers.advance(1)
     assertEquals(
-      JSON.parse(globals.sessionStorage.getItem('zn-space-draft:f3')),
+      JSON.parse(globals.sessionStorage.getItem('zn-space:f3')),
       { title: 'typed value' },
     )
 
@@ -129,9 +129,9 @@ Deno.test(
 
     fireInput(form.elements.namedItem('title') as Element)
     timers.advance(DEFAULT_DRAFT_DEBOUNCE_MS - 1)
-    assertEquals(globals.sessionStorage.getItem('zn-space-draft:f4'), null)
+    assertEquals(globals.sessionStorage.getItem('zn-space:f4'), null)
     timers.advance(1)
-    assert(globals.sessionStorage.getItem('zn-space-draft:f4') !== null)
+    assert(globals.sessionStorage.getItem('zn-space:f4') !== null)
 
     detach()
     timers.restore()
@@ -144,7 +144,7 @@ Deno.test(
     setUp()
     const timers = installTimerMock()
     const form = buildForm('f5', [{ name: 'title', value: 'x' }])
-    globals.sessionStorage.setItem('zn-space-draft:f5', JSON.stringify({ title: 'old' }))
+    globals.sessionStorage.setItem('zn-space:f5', JSON.stringify({ title: 'old' }))
     const detach = attachFormDraftPersistence({
       formId: 'f5',
       storageKey: 'f5',
@@ -155,7 +155,7 @@ Deno.test(
     fireSubmit(form)
     timers.advance(DEFAULT_DRAFT_DEBOUNCE_MS)
 
-    assertEquals(globals.sessionStorage.getItem('zn-space-draft:f5'), null)
+    assertEquals(globals.sessionStorage.getItem('zn-space:f5'), null)
 
     detach()
     timers.restore()
@@ -172,7 +172,7 @@ Deno.test(
       { name: CSRF_FORM_FIELD, value: 'real-token' },
     ])
     globals.sessionStorage.setItem(
-      'zn-space-draft:f6',
+      'zn-space:f6',
       JSON.stringify({ title: 'saved', [CSRF_FORM_FIELD]: 'stale-token' }),
     )
     const detach = attachFormDraftPersistence({
@@ -189,7 +189,7 @@ Deno.test(
 
     fireInput(form.elements.namedItem('title') as Element)
     timers.advance(DEFAULT_DRAFT_DEBOUNCE_MS)
-    const saved = JSON.parse(globals.sessionStorage.getItem('zn-space-draft:f6'))
+    const saved = JSON.parse(globals.sessionStorage.getItem('zn-space:f6'))
     assertFalse(CSRF_FORM_FIELD in saved)
 
     detach()
@@ -208,7 +208,7 @@ Deno.test(
       { name: 'upload', type: 'file' },
     ])
     globals.sessionStorage.setItem(
-      'zn-space-draft:f7',
+      'zn-space:f7',
       JSON.stringify({ title: 'saved', secret: 'stale-secret' }),
     )
     const detach = attachFormDraftPersistence({
@@ -221,7 +221,7 @@ Deno.test(
 
     fireInput(form.elements.namedItem('title') as Element)
     timers.advance(DEFAULT_DRAFT_DEBOUNCE_MS)
-    const saved = JSON.parse(globals.sessionStorage.getItem('zn-space-draft:f7'))
+    const saved = JSON.parse(globals.sessionStorage.getItem('zn-space:f7'))
     assertFalse('secret' in saved)
     assertFalse('upload' in saved)
 
@@ -240,7 +240,7 @@ Deno.test(
       { name: 'apiKey', value: 'unset', attrs: { 'data-no-persist': '' } },
     ])
     globals.sessionStorage.setItem(
-      'zn-space-draft:f8',
+      'zn-space:f8',
       JSON.stringify({ title: 'saved', apiKey: 'stale-key' }),
     )
     const detach = attachFormDraftPersistence({
@@ -253,7 +253,7 @@ Deno.test(
 
     fireInput(form.elements.namedItem('title') as Element)
     timers.advance(DEFAULT_DRAFT_DEBOUNCE_MS)
-    const saved = JSON.parse(globals.sessionStorage.getItem('zn-space-draft:f8'))
+    const saved = JSON.parse(globals.sessionStorage.getItem('zn-space:f8'))
     assertFalse('apiKey' in saved)
 
     detach()
@@ -279,11 +279,80 @@ Deno.test(
 
     fireInput(form.elements.namedItem('title') as Element)
     timers.advance(DEFAULT_DRAFT_DEBOUNCE_MS)
-    const saved = JSON.parse(globals.sessionStorage.getItem('zn-space-draft:f9'))
+    const saved = JSON.parse(globals.sessionStorage.getItem('zn-space:f9'))
     assertFalse('controlled' in saved)
 
     detach()
     timers.restore()
+  },
+)
+
+Deno.test(
+  'attachFormDraftPersistence: restoring a text field dispatches a real, bubbling input event — ' +
+    'what a React/Preact-controlled wrapper around it needs to sync its own tracked state',
+  () => {
+    setUp()
+    const form = buildForm('f9a', [{ name: 'title', value: '' }])
+    globals.sessionStorage.setItem('zn-space:f9a', JSON.stringify({ title: 'restored' }))
+    const events: string[] = []
+    ;(form.elements.namedItem('title') as Element).addEventListener(
+      'input',
+      (event: Event) => events.push(`${event.type}:${event.bubbles}`),
+    )
+
+    const detach = attachFormDraftPersistence({
+      formId: 'f9a',
+      storageKey: 'f9a',
+      hasServerValues: false,
+    })
+
+    assertEquals(events, ['input:true'])
+    detach()
+  },
+)
+
+Deno.test(
+  'attachFormDraftPersistence: restoring a checkbox dispatches a real, bubbling change event',
+  () => {
+    setUp()
+    const form = buildForm('f9b', [
+      { name: 'agree', type: 'checkbox', value: 'yes', checked: false },
+    ])
+    globals.sessionStorage.setItem('zn-space:f9b', JSON.stringify({ agree: 'yes' }))
+    const events: string[] = []
+    ;(form.elements.namedItem('agree') as Element).addEventListener(
+      'change',
+      (event: Event) => events.push(`${event.type}:${event.bubbles}`),
+    )
+
+    const detach = attachFormDraftPersistence({
+      formId: 'f9b',
+      storageKey: 'f9b',
+      hasServerValues: false,
+    })
+
+    assertEquals(events, ['change:true'])
+    detach()
+  },
+)
+
+Deno.test(
+  'attachFormDraftPersistence: restoring a field already at the saved value dispatches nothing',
+  () => {
+    setUp()
+    const form = buildForm('f9c', [{ name: 'title', value: 'already this' }])
+    globals.sessionStorage.setItem('zn-space:f9c', JSON.stringify({ title: 'already this' }))
+    let fired = false
+    ;(form.elements.namedItem('title') as Element).addEventListener('input', () => fired = true)
+
+    const detach = attachFormDraftPersistence({
+      formId: 'f9c',
+      storageKey: 'f9c',
+      hasServerValues: false,
+    })
+
+    assertFalse(fired)
+    detach()
   },
 )
 
@@ -294,7 +363,7 @@ Deno.test(
     const form = buildForm('f10', [
       { name: 'agree', type: 'checkbox', value: 'yes', checked: false },
     ])
-    globals.sessionStorage.setItem('zn-space-draft:f10', JSON.stringify({ agree: 'yes' }))
+    globals.sessionStorage.setItem('zn-space:f10', JSON.stringify({ agree: 'yes' }))
 
     const detach = attachFormDraftPersistence({
       formId: 'f10',
@@ -323,8 +392,8 @@ Deno.test(
     fireInput(form.elements.namedItem('title') as Element)
     timers.advance(DEFAULT_DRAFT_DEBOUNCE_MS)
 
-    assertEquals(globals.sessionStorage.getItem('zn-space-draft:f11'), null)
-    assert(globals.localStorage.getItem('zn-space-draft:f11') !== null)
+    assertEquals(globals.sessionStorage.getItem('zn-space:f11'), null)
+    assert(globals.localStorage.getItem('zn-space:f11') !== null)
 
     detach()
     timers.restore()
@@ -360,7 +429,7 @@ Deno.test(
     detach()
     timers.advance(DEFAULT_DRAFT_DEBOUNCE_MS)
 
-    assertEquals(globals.sessionStorage.getItem('zn-space-draft:f12'), null)
+    assertEquals(globals.sessionStorage.getItem('zn-space:f12'), null)
     timers.restore()
   },
 )
@@ -415,9 +484,9 @@ Deno.test(
     persistDraftValue('typed', { storageKey: 'v3', debounceMs: 200 })
 
     timers.advance(199)
-    assertEquals(globals.sessionStorage.getItem('zn-space-draft:v3'), null)
+    assertEquals(globals.sessionStorage.getItem('zn-space:v3'), null)
     timers.advance(1)
-    assertEquals(JSON.parse(globals.sessionStorage.getItem('zn-space-draft:v3')), 'typed')
+    assertEquals(JSON.parse(globals.sessionStorage.getItem('zn-space:v3')), 'typed')
 
     timers.restore()
   },
@@ -433,7 +502,7 @@ Deno.test(
     persistDraftValue('second', { storageKey: 'v4' })
     timers.advance(DEFAULT_DRAFT_DEBOUNCE_MS)
 
-    assertEquals(JSON.parse(globals.sessionStorage.getItem('zn-space-draft:v4')), 'second')
+    assertEquals(JSON.parse(globals.sessionStorage.getItem('zn-space:v4')), 'second')
 
     timers.restore()
   },

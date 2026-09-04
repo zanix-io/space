@@ -107,6 +107,19 @@ export type {
   TransformedAsset,
 } from '../bundler/dev-engine.ts'
 export {
+  /** The exact bare specifiers `RealImportEvaluator.runExternalModule`
+   * (`ssr-module-evaluator.ts`) resolves via a plain native `import()` against whatever process
+   * governs `zanix space dev` — `@zanix/cli`'s own `deno.jsonc`, never a consuming project's. See
+   * `native-runtime-modules.ts`'s own header doc for the full module-identity mechanism, and its
+   * doc directly above this array for the paired change this list requires in `@zanix/cli`'s own
+   * `deno.jsonc` (plus that repo's `native-runtime-module-imports.test.ts` regression guard)
+   * whenever a package is added here. Exported specifically so that guard can import the REAL
+   * list instead of hand-keeping its own copy in sync — closing the loop this array's own history
+   * (`@zanix/notifications`/`@zanix/datamaster` silently missing their `cli`-side entry) left open.
+   */
+  NATIVE_RUNTIME_MODULES,
+} from '../bundler/native-runtime-modules.ts'
+export {
   /** Wires this app's CSS/Comet/React-Compiler pipeline into Vite. */
   spacePlugin,
 } from '../bundler/space-plugin.ts'

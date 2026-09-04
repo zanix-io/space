@@ -177,6 +177,25 @@ import type { Plugin } from 'vite'
  * A package earns an entry here only once its OWN identity-sensitive mechanism and a real (or
  * realistically reachable) import path through this engine's SSR graph are both confirmed, the
  * same bar every entry above already meets.
+ *
+ * **Adding a package here has a required, paired change in `@zanix/cli`, not just this file.**
+ * `RealImportEvaluator.runExternalModule` (`ssr-module-evaluator.ts`) does a plain native
+ * `import(specifier)` for every entry on this list, inside whatever process actually runs `zanix
+ * space dev` — that process's OWN governing `deno.json(c)` is `@zanix/cli`'s, never a consuming
+ * project's (one `deno run <entry>` invocation shares one governing resolver, rooted at the
+ * entry's own config). A package added here with no matching entry in `cli`'s own `deno.jsonc`
+ * `imports` fails that `import()` outright — `Import "<pkg>" not a dependency and not in import
+ * map` — the exact, real gap `@zanix/notifications`/`@zanix/datamaster` shipped with here before
+ * `cli` added matching entries for them (mirroring the one `@zanix/auth` already had). See `cli`'s
+ * own `cli-dependency-compatibility` skill, "cli's own deno.jsonc — native-runtime-module
+ * declarations" section, for the checklist this implies on that side.
+ *
+ * Exported (`./dev`, `modules/dev/mod.ts`) specifically so `cli`'s own regression guard
+ * (`native-runtime-module-imports.test.ts`) can import this REAL array instead of hand-keeping its
+ * own copy in sync — once `cli`'s `@zanix/space` range picks up the version that first exports
+ * this, that test should switch to it (see its own module doc for the exact TODO); until then, a
+ * package added here still needs its `cli`-side `deno.jsonc` entry AND that test's hardcoded copy
+ * updated by hand, the same as always.
  */
 export const NATIVE_RUNTIME_MODULES = [
   '@zanix/space',

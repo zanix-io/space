@@ -157,6 +157,15 @@ const MAX_RETAINED_COMETS = 5
 
 const liveCache = new RetainedCometCache<Element>(MAX_RETAINED_COMETS)
 
+/** Whether `key` currently has a retained (detached but not yet reused) instance — read-only,
+ * never mutates the cache, unlike navigating to the key's own page (which would `take()` it via
+ * {@linkcode reuseRetainedComets}). Exists so `persist` behavior can be inspected without a live
+ * browser round trip, and so a consuming app's own author-facing code (e.g. a dev-only "this
+ * widget's state IS/ISN'T currently preserved" badge) has a real way to ask. */
+export function isCometPersisted(key: string): boolean {
+  return liveCache.has(key)
+}
+
 /**
  * Pulls every `persist`-tagged boundary still live in `outlet` out of the DOM and into the
  * retained-comet cache — called by `swapOutlet` (`orbit.ts`) BEFORE the outlet's own contents are

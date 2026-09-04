@@ -8,6 +8,7 @@ import {
 } from 'modules/comets/marker.ts'
 import {
   detachPersistedComets,
+  isCometPersisted,
   registerPersistHandle,
   RetainedCometCache,
   reuseRetainedComets,
@@ -508,6 +509,54 @@ Deno.test(
     )
     for (let i = 1; i < keys.length; i++) {
       assertEquals(spies[i].state.disposed, 0, `${keys[i]} is newer than lru-cap-1, must survive`)
+    }
+  },
+)
+
+Deno.test(
+  'isCometPersisted: false for a key never detached, true once its boundary is retained — ' +
+    'read-only, unlike reuseRetainedComets it never consumes the entry',
+  () => {
+    assertFalse(isCometPersisted('is-persisted-solo'))
+
+    const boundary = new MockElement({
+      [COMET_PERSIST_ATTR]: 'is-persisted-solo',
+      [COMET_MODULE_ATTR]: '/comets/widget.tsx',
+      [COMET_EXPORT_ATTR]: 'default',
+    })
+    registerPersistHandle(boundary as unknown as Element, handleSpy().handle)
+    detachPersistedComets(mockOutlet([boundary]))
+
+    assert(isCometPersisted('is-persisted-solo'))
+    assert(isCometPersisted('is-persisted-solo'), 'checking twice must not consume it')
+  },
+)
+
+Deno.test(
+  'isCometPersisted: against the real production cap — false for the evicted 1st of 6, true for ' +
+    'the 5 still within MAX_RETAINED_COMETS',
+  () => {
+    const keys = [
+      'is-persisted-cap-1',
+      'is-persisted-cap-2',
+      'is-persisted-cap-3',
+      'is-persisted-cap-4',
+      'is-persisted-cap-5',
+      'is-persisted-cap-6',
+    ]
+    keys.forEach((key) => {
+      const boundary = new MockElement({
+        [COMET_PERSIST_ATTR]: key,
+        [COMET_MODULE_ATTR]: '/comets/is-persisted-cap-widget.tsx',
+        [COMET_EXPORT_ATTR]: 'default',
+      })
+      registerPersistHandle(boundary as unknown as Element, handleSpy().handle)
+      detachPersistedComets(mockOutlet([boundary]))
+    })
+
+    assertFalse(isCometPersisted(keys[0]), 'the 1st of 6 was evicted, no longer retained')
+    for (let i = 1; i < keys.length; i++) {
+      assert(isCometPersisted(keys[i]), `${keys[i]} is within the 5-slot cap, must be retained`)
     }
   },
 )

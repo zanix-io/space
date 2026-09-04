@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-09-04
+
+### Added
+
+- **`attachFormDraftPersistence`/`restoreDraftValue`/`persistDraftValue`** (`@zanix/space/comet`),
+  plus ready-made `FormDraftPersistence` Comets (`@zanix/space/comet/react`,
+  `@zanix/space/comet/preact`) — session/local-scoped draft persistence for a plain `<form>`,
+  restoring unsaved input after an accidental refresh or a navigate-away-and-back with no
+  server-side state to recover it from. Saves the whole form generically via `form.elements`
+  (debounced on `input`/`change`), clears on `submit`, and always excludes `_csrf`,
+  `type="password"`, and `type="file"` fields, plus any field marked `data-no-persist` — none of
+  these are configurable. `restoreDraftValue`/`persistDraftValue` are the narrower, value-level
+  counterpart for a React/Preact-controlled field (which the form-level primitive can never restore
+  into directly): kept as two separate functions, rather than one combined primitive, because
+  restoring must run exactly once while persisting must re-run on every value change — that re-run
+  IS the debounce mechanism, not something a single combined primitive could do without also
+  re-firing restore on every keystroke.
+- **`CSRF_FORM_FIELD`** (`@zanix/space`, from `csrf-guard.ts`) — the `_csrf` form field name
+  `csrfGuard` itself reads a submitted token back from, now exported so `attachFormDraftPersistence`
+  (and any other consumer) can import the real constant instead of re-declaring `'_csrf'` as a bare
+  string.
+
+### Fixed
+
+- **`zanix space dev`'s `'server-only'` boundary enforcement no longer silently misses a violation
+  reached through a module belonging to ANOTHER published JSR package** (e.g. `@zanix/space-ui`'s
+  `./runtime` entrypoint composing `Image`/`ImgButton`, both of which reach
+  `@zanix/space/assets-manifest`). `transformClientAsset`'s check resolves a module's real on-disk
+  path via `realFilePathOf` and reads that file directly — correct for a project-relative or
+  workspace-linked file, but a module resolved from a REMOTE, not-yet-locally-materialized `jsr:`
+  package has no such path (`@deno/vite-plugin`'s own resolver leaves it wrapped as a `\0deno::`
+  specifier whose `resolved` segment stays an un-expanded `https://` URL), so the check silently
+  never ran at all. `transformClientAsset` now falls back to the module's own transform result —
+  Vite's dev pipeline always embeds the untransformed original source in
+  `TransformResult.map.sourcesContent`, the same signal a browser's devtools "original source" view
+  relies on — whenever the disk-based path isn't available. A Comet reaching a `'server-only'`
+  module this way now fails loudly with the same purpose-built violation message and import chain
+  `zanix space dev` already produces for a project-relative violation, instead of hydrating in the
+  browser and crashing later with an unrelated, opaque error.
+- **A single test file run by explicit path (`deno test path/to/file.test.tsx`) could spuriously
+  fail to resolve ordinary DOM types** (`document`, `IntersectionObserver`, `ParentNode`, ...) that
+  real browser-facing source files use and that pass fine when discovered through this config's own
+  `test.include` glob instead — Deno's implicit default `lib` set differs between the two invocation
+  shapes. `compilerOptions` now declares `lib` explicitly (`deno.window`, `dom`, `dom.iterable`),
+  removing the discrepancy for both.
+
 ## [1.3.0] - 2026-09-03
 
 ### Added

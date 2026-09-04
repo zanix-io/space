@@ -626,6 +626,128 @@ Deno.test(
 )
 
 Deno.test(
+  "createSpaceDevEngine: transformClientAsset rejects a 'server-only' module reached only through " +
+    'a REMOTE, not-yet-locally-materialized `jsr:` package. Unlike the two tests above (each using ' +
+    'a project-relative file, always transformed individually through a real, ' +
+    '`Deno.readTextFile`-visible local path that `realFilePathOf` resolves directly), a module ' +
+    "belonging to ANOTHER published JSR package resolves differently: `@deno/vite-plugin`'s own " +
+    'resolver (`resolveDeno`, `dist/resolver.js`) wraps it as a `\\0deno::<loader>::<id>::<resolved>#deno` ' +
+    'specifier whose `resolved` segment stays the SAME un-expanded `https://jsr.io/...` string ' +
+    "whenever the module hasn't been separately materialized into a local cache entry. " +
+    "`realFilePathOf`'s own `resolved.startsWith('https:') ? null : ...` branch correctly refuses " +
+    'to treat that as a real path, so `isServerOnlyFile` never runs — ' +
+    "`isServerOnlySource`'s own `TransformResult.map.sourcesContent`-based fallback (see that " +
+    "function's own doc for the full mechanism) is what still catches the violation here, through " +
+    '`@zanix/space-ui/runtime` composing `Image`, which reaches this exact module. ' +
+    '`jsr:@zanix/space@1.2.0` — an already-published, EXACT-pinned version of this very package — ' +
+    'is the only deterministic way to reproduce a genuinely REMOTE `\\0deno::` specifier (a ' +
+    'project-relative or workspace-linked file never takes this code path); pinned to an exact ' +
+    'version rather than a range so this never drifts as `@zanix/space` itself publishes newer ' +
+    'versions — JSR never unpublishes a version, so `1.2.0` stays resolvable indefinitely.',
+  async () => {
+    await withTempProject(
+      async (root) => {
+        await Deno.writeTextFile(
+          join(root, 'deno.json'),
+          JSON.stringify({
+            imports: {
+              '@zanix/space/assets-manifest': 'jsr:@zanix/space@1.2.0/assets-manifest',
+            },
+          }),
+        )
+        await Deno.writeTextFile(
+          join(root, 'counter.tsx'),
+          [
+            `'use comet'`,
+            `import { resolveAssetHref } from '@zanix/space/assets-manifest'`,
+            `export default function Counter() { return resolveAssetHref('x') as unknown as JSX.Element }`,
+            '',
+          ].join('\n'),
+        )
+      },
+      async (root) => {
+        const engine = await createSpaceDevEngine({ root, isRouteEntry })
+        try {
+          // The Comet must be transformed FIRST — same reasoning as the direct-violation test
+          // above: this is what makes Vite's own dev module graph discover (and record) that the
+          // remote module is imported BY the Comet, so `findDevChainToComet` can name it.
+          const comet = await engine.transformClientAsset('/counter.tsx')
+          assert(comet, 'the Comet itself must transform')
+          // The real, resolved import url Vite rewrote `@zanix/space/assets-manifest` to — never
+          // hand-constructed: the exact `\0deno::` id shape is an internal `@deno/vite-plugin`
+          // convention this test has no business hardcoding.
+          const match = comet.code.match(/from\s+"([^"]*assets-manifest[^"]*)"/)
+          assert(match, comet.code)
+          const assetsManifestUrl = match[1].split('?')[0]
+
+          let thrown: Error | undefined
+          try {
+            await engine.transformClientAsset(assetsManifestUrl)
+          } catch (error) {
+            thrown = error as Error
+          }
+
+          assert(thrown, "expected transformClientAsset to reject the remote 'server-only' module")
+          assert(
+            thrown.message.includes('Server-only module imported into client Comet'),
+            thrown.message,
+          )
+          assert(thrown.message.includes('counter.tsx'), thrown.message)
+          assert(thrown.message.includes('assets-manifest.ts'), thrown.message)
+        } finally {
+          await engine.close()
+        }
+      },
+    )
+  },
+)
+
+Deno.test(
+  'createSpaceDevEngine: transformClientAsset does NOT false-positive on a non-server-only REMOTE ' +
+    '`jsr:` module reached from a Comet — the fallback the test above proves only ever fires for a ' +
+    'REAL directive at the start of the original source, never merely because a module resolved ' +
+    'remotely',
+  async () => {
+    await withTempProject(
+      async (root) => {
+        await Deno.writeTextFile(
+          join(root, 'deno.json'),
+          JSON.stringify({
+            imports: {
+              '@zanix/space/video-source': 'jsr:@zanix/space@1.2.0/video-source',
+            },
+          }),
+        )
+        await Deno.writeTextFile(
+          join(root, 'counter.tsx'),
+          [
+            `'use comet'`,
+            `import { detectVideoSource } from '@zanix/space/video-source'`,
+            `export default function Counter() { return detectVideoSource('x') as unknown as JSX.Element }`,
+            '',
+          ].join('\n'),
+        )
+      },
+      async (root) => {
+        const engine = await createSpaceDevEngine({ root, isRouteEntry })
+        try {
+          const comet = await engine.transformClientAsset('/counter.tsx')
+          assert(comet, 'the Comet itself must transform')
+          const match = comet.code.match(/from\s+"([^"]*video-source[^"]*)"/)
+          assert(match, comet.code)
+          const videoSourceUrl = match[1].split('?')[0]
+
+          const asset = await engine.transformClientAsset(videoSourceUrl)
+          assert(asset, 'a non-server-only remote module must transform normally, never rejected')
+        } finally {
+          await engine.close()
+        }
+      },
+    )
+  },
+)
+
+Deno.test(
   'createSpaceDevEngine: transformClientAsset reflects an edit on the next call, no restart',
   async () => {
     await withTempProject(

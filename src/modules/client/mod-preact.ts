@@ -66,3 +66,8 @@ export type {
   /** `initOrbit({ prefetch })`'s own option shape — `onHover`/`onViewport` triggers. */
   PrefetchOptions,
 } from './prefetch.ts'
+export {
+  /** Whether `key` currently has a retained (detached but not yet reused) `persist` instance —
+   * read-only, never mutates the cache. Renderer-agnostic, same as `readInitialState` above. */
+  isCometPersisted,
+} from './comet-persistence.ts'

@@ -5,6 +5,7 @@ import { findAnchor, resolveLinkInfo } from './link-info.ts'
 import { getPrefetchedFragment, initPrefetch, rescanPrefetchTargets } from './prefetch.ts'
 import type { PrefetchOptions } from './prefetch.ts'
 import { detachPersistedComets, reuseRetainedComets } from './comet-persistence.ts'
+import { registerPersistTransitionNames } from './comet-persist-transition.ts'
 
 const TITLE_TAG = /<title>([^<]*)<\/title>/i
 // Matches a whole `<link ...>` tag as long as `rel="stylesheet"` appears somewhere in its
@@ -264,21 +265,36 @@ async function swapOutlet(href: string, replace: boolean): Promise<void> {
   // the time `swap()` runs, so the destination markup is never visible without its own CSS.
   const readyBody = await ensureStylesheetsLoaded(body)
 
-  // Detached BEFORE `outlet`'s own contents are ever touched below — every `persist`-tagged
-  // boundary still live in the CURRENT outlet is pulled out here, synchronously, while its own
-  // React/Preact instance is still mounted and attached (see comet-persistence.ts's own doc for
-  // why this ordering, not a post-hoc rescue of an already-orphaned node, is what makes a
-  // persisted instance's state survive at all).
-  detachPersistedComets(outlet)
-
   // Parsed into a detached `<template>`, not injected via a plain string assignment — a real DOM
-  // tree is what `reuseRetainedComets` needs to splice a RETAINED LIVE NODE into, in place of its
-  // own fresh placeholder, before any of this ever touches the real document.
+  // tree is what `reuseRetainedComets` (called from inside `swap` below) needs to splice a
+  // RETAINED LIVE NODE into, in place of its own fresh placeholder, before any of this ever
+  // touches the real document.
   const template = document.createElement('template')
   template.innerHTML = readyBody
-  reuseRetainedComets(template.content)
+
+  // Registers each `persist`-tagged boundary's own `view-transition-name` — see
+  // `comet-persist-transition.ts`'s own doc for the full mechanism. This MUST run before
+  // `document.startViewTransition` is invoked below, while the CURRENT outlet's own boundary (if
+  // any) is still attached: the transition's "old state" snapshot is captured synchronously the
+  // moment `startViewTransition` is called, before `swap` ever runs, so a boundary already
+  // detached by then would contribute nothing to it.
+  registerPersistTransitionNames(outlet, template.content)
 
   const swap = () => {
+    // Detached BEFORE `outlet`'s own contents are ever touched below — every `persist`-tagged
+    // boundary still live in the CURRENT outlet is pulled out here, synchronously, while its own
+    // React/Preact instance is still mounted and attached (see comet-persistence.ts's own doc for
+    // why this ordering, not a post-hoc rescue of an already-orphaned node, is what makes a
+    // persisted instance's state survive at all). Run from inside `swap` itself, not before it,
+    // so a genuinely reused boundary's own `view-transition-name` is captured in BOTH the
+    // transition's old-state snapshot (taken just before this callback runs, while the boundary
+    // is still attached under that name) and its new-state snapshot (taken right after this
+    // callback returns, once the SAME node is reattached below, still carrying that name) —
+    // exactly what lets the browser morph it in place instead of treating it as exiting-then-
+    // entering.
+    detachPersistedComets(outlet)
+    reuseRetainedComets(template.content)
+
     outlet.replaceChildren(template.content)
     if (title) document.title = title
     // The ACTIVE renderer's hydrator, resolved through the registry — never a hardcoded import.

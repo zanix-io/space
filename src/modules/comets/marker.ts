@@ -42,3 +42,9 @@ export const COMET_PERSIST_ATTR = 'data-orbit-persist'
  * immediately removed so it never lingers as real markup. Never present in server-rendered HTML;
  * a purely client-side, single-pass bookkeeping detail. */
 export const COMET_REUSED_ATTR = 'data-orbit-reused'
+/** Carries this boundary's own computed `view-transition-name` once `swapOutlet` (`orbit.ts`) has
+ * assigned one — set only on a `persist`-tagged boundary, only client-side, only for the duration
+ * of an Orbit navigation that supports the View Transitions API. See
+ * `comet-persist-transition.ts`'s own doc for why the value lives here (a plain attribute) rather
+ * than on `COMET_PERSIST_ATTR`'s own raw key text directly. Never present in server-rendered HTML. */
+export const COMET_PERSIST_VT_ATTR = 'data-orbit-vt'

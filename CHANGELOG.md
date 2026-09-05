@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-09-05
+
+### Fixed
+
+- **`attachSubmitGuard`/`SubmitGuard`/`ManagedForm`'s `submitGuard` no longer leave a guarded form's
+  submit controls disabled forever after a real browser back/forward-cache (bfcache) restore** — a
+  submission always ends in a real navigation away from the page this guard is attached to (see this
+  module's own doc), but that ORIGIN page can itself come back from bfcache (a back button after
+  that navigation) with its disabled controls and in-flight `submitting` flag frozen exactly as
+  `handleSubmit` left them; nothing re-runs a React/Preact `useEffect`/its cleanup on a bfcache
+  restore (the realm is frozen and thawed, never torn down and remounted), so without this fix a
+  guarded form's submit button/`<input type="submit">` stayed disabled indefinitely once a visitor
+  navigated back to it. `attachSubmitGuard` now also listens for `pageshow`, and resets both the
+  disabled controls and the in-flight flag on a real restore (`event.persisted === true`) — a fresh
+  load (`persisted: false`) leaves both untouched, since nothing has been disabled yet on a fresh
+  instance.
+
 ## [1.4.0] - 2026-09-04
 
 ### Added

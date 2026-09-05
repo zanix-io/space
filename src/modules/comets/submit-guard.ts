@@ -39,7 +39,19 @@ const SUBMIT_CONTROL_SELECTOR = 'button:not([type="button"]):not([type="reset"])
  * `false`) and lets the submission proceed; any FURTHER `submit` while still in flight is
  * rejected outright (`event.preventDefault()`), never reaching the server a second time.
  *
- * @returns A cleanup function — detaches the listener and re-enables any control this call
+ * **Resets on a real bfcache restore, not just on unmount**: a submission always ends in a real
+ * navigation away from this document (see this module's own doc), but the ORIGIN page — the one
+ * this guard is actually attached to — can itself come back from the browser's back/forward cache
+ * (a back button after that navigation) with its disabled controls and in-flight `submitting` flag
+ * frozen exactly as they were the instant `submit` fired. A frozen realm like that never re-runs
+ * this module's own `useEffect`/cleanup (React/Preact don't re-mount on a bfcache restore, since
+ * nothing was ever torn down), so without an explicit `pageshow` listener a form guarded this way
+ * would come back from "back" with its submit control disabled forever. `pageshow`'s own
+ * `persisted: true` is the one reliable signal a real bfcache restore actually happened — a fresh
+ * load (`persisted: false`, including this listener's own very first attach) leaves both untouched,
+ * since nothing has been disabled yet on a fresh instance.
+ *
+ * @returns A cleanup function — detaches both listeners and re-enables any control this call
  * disabled, for the (uncommon) case a consumer detaches without the page actually navigating away
  * (e.g. `SpacePageController`'s own `redirect` never applies, a test harness, or a comet unmount
  * that isn't a real page transition). Matches a `useEffect` callback's own return contract
@@ -66,10 +78,19 @@ export function attachSubmitGuard(options: SubmitGuardOptions): () => void {
     for (const control of disabled) control.disabled = true
   }
 
+  const handlePageShow = (event: Event) => {
+    if (!(event as PageTransitionEvent).persisted) return
+    submitting = false
+    for (const control of disabled) control.disabled = false
+    disabled = []
+  }
+
   form.addEventListener('submit', handleSubmit)
+  globalThis.addEventListener('pageshow', handlePageShow)
 
   return () => {
     form.removeEventListener('submit', handleSubmit)
+    globalThis.removeEventListener('pageshow', handlePageShow)
     for (const control of disabled) control.disabled = false
   }
 }

@@ -1,10 +1,19 @@
 {
   "name": "@zanix/space",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "zanix": {
     "project": "library"
   },
   "compilerOptions": {
+    // Explicit on purpose: Deno's implicit default `lib` set differs depending on whether
+    // type-checking is driven by this config's own `test.include` glob discovery (DOM-inclusive)
+    // or by an explicit file path CLI argument, e.g. `deno test path/to/file.test.tsx`
+    // (DOM-exclusive). Without this, a single test file run the second way fails to resolve
+    // ordinary DOM types (`document`, `IntersectionObserver`, `ParentNode`, ...) that real source
+    // files (`modules/client/prefetch.ts`, and every other browser-facing module under
+    // `modules/client/`) use, even though the same test passes under config-driven discovery.
+    // Declaring `lib` here removes the discrepancy for both invocation shapes.
+    "lib": ["deno.window", "dom", "dom.iterable"],
     "strict": true,
     "noImplicitAny": true,
     "jsx": "react-jsx",
@@ -275,6 +284,17 @@
     // `modules/comets/mod.ts` itself already only ever touches Comet-relevant code — this subpath
     // is that same file, exposed under its own name.
     "./comet": "./src/modules/comets/mod.ts",
+    // Ready-made Comets built on `./comet`'s own hook-free primitives (today: `FormDraftPersistence`,
+    // wiring `attachFormDraftPersistence` into a `useEffect`) — split by renderer for the same reason
+    // `.`/`./react`/`./preact` are: a hook's identity IS its binding to one specific runtime's own
+    // reconciler, so there is no "resolve the active renderer's `useEffect` at call time" trick the
+    // way `defineComet`'s own `createElement` resolution gets to use (`element-factory.ts`'s own
+    // module doc). A consumer imports whichever of these two matches their app's own renderer,
+    // exactly like `@zanix/space/react` vs. `@zanix/space/preact` is already a one-time, per-app
+    // choice; composing `./comet`'s own primitives directly (inside a consumer's own `'use comet'`
+    // file) remains the escape hatch for anything these two don't cover out of the box.
+    "./comet/react": "./src/modules/comets/mod-react.ts",
+    "./comet/preact": "./src/modules/comets/mod-preact.ts",
     "./testing": "./src/modules/testing/mod.ts",
     "./dev": "./src/modules/dev/mod.ts",
     // Both already re-exported from `.` (`mod.ts`) — these two narrow subpaths exist so a

@@ -5,6 +5,116 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-09-04
+
+### Added
+
+- **`attachFormDraftPersistence`/`restoreDraftValue`/`persistDraftValue`** (`@zanix/space/comet`),
+  plus ready-made `FormDraftPersistence` Comets (`@zanix/space/comet/react`,
+  `@zanix/space/comet/preact`) — session/local-scoped draft persistence for a plain `<form>`,
+  restoring unsaved input after an accidental refresh or a navigate-away-and-back with no
+  server-side state to recover it from. Saves the whole form generically via `form.elements`
+  (debounced on `input`/`change`), clears on `submit`, and always excludes `_csrf`,
+  `type="password"`, and `type="file"` fields, plus any field marked `data-no-persist` — none of
+  these are configurable. `restoreDraftValue`/`persistDraftValue` are the narrower, value-level
+  counterpart for a React/Preact-controlled field (which the form-level primitive can never restore
+  into directly): kept as two separate functions, rather than one combined primitive, because
+  restoring must run exactly once while persisting must re-run on every value change — that re-run
+  IS the debounce mechanism, not something a single combined primitive could do without also
+  re-firing restore on every keystroke.
+- **`CSRF_FORM_FIELD`** (`@zanix/space`, from `csrf-guard.ts`) — the `_csrf` form field name
+  `csrfGuard` itself reads a submitted token back from, now exported so `attachFormDraftPersistence`
+  (and any other consumer) can import the real constant instead of re-declaring `'_csrf'` as a bare
+  string.
+- **`attachFormDraftPersistence`'s restore step now dispatches a real, bubbling `input`/`change`
+  event** after writing a field's `.value`/`.checked` — the raw DOM write alone is invisible to any
+  React/Preact-controlled wrapper around that field (e.g. `@zanix/space-ui`'s own `Input`/`Select`/
+  `RadioGroup`, which always track a `value` internally even when the page author never passes one),
+  so a restored draft could get silently reverted on the field's next re-render. The dispatched
+  event is what makes such a field's own `onChange`/`onInput` handler fire and sync its state to
+  match, the same path a genuine keystroke/click already takes.
+- **`attachSubmitGuard`/`SubmitGuard` Comets** (`@zanix/space/comet`, `@zanix/space/comet/react`,
+  `@zanix/space/comet/preact`) — stops a second real `<form>` submission (an impatient double-click,
+  or a slow first response) from ever reaching the server. Disables every submit-triggering control
+  on the form's first real `submit` and rejects any further `submit` while still in flight outright.
+  Relies on this framework's own "Real HTTP, not an RPC" contract: a submission that goes through
+  always ends in a real navigation, so there is deliberately no reset/timeout path.
+- **`attachScrollRestoration`/`ScrollRestoration` Comets** — session/local-scoped scroll-position
+  restoration for the window or a single scrollable container, across a refresh or an Orbit
+  navigation (Orbit never manages scroll position itself). `storageKey` defaults to
+  `location.pathname + location.search` — unlike `FormDraftPersistence`'s own `storageKey`
+  (deliberately required, never derived), a scroll position's real identity genuinely IS the page
+  being viewed. Skips restoring when the current URL already carries a `#fragment` — an explicit
+  anchor wins over a remembered position.
+- **`attachUnsavedChangesGuard`/`UnsavedChangesGuard` Comets** — warns via the browser's own native
+  "leave site?" prompt (`beforeunload`) before a real page unload discards an unsaved `<form>`.
+  Composes naturally alongside `FormDraftPersistence` on the same form. Known gap: only intercepts a
+  real full-page unload — Orbit's own same-origin `<a>` click interception has no exposed "confirm
+  before navigating" hook yet, so an in-app link away from a dirty form still navigates unprompted.
+- **`attachNetworkStatus`/`NetworkStatus` Comets** — live `navigator.onLine` plus real
+  `online`/`offline` transitions, exposed as a `data-network-status="online"|"offline"` attribute (a
+  Comet's own props must be plain JSON, so there's no callback to hand it) on
+  `document.documentElement` by default. `attachNetworkStatus` itself is callback-based, for a
+  consumer's own composite comet wanting real `useState` instead.
+- **`draft-storage.ts`** (`@zanix/space`, internal) — the `sessionStorage`/`localStorage`
+  read/write/namespacing plumbing `FormDraftPersistence` and `ScrollRestoration` both build on,
+  extracted so the fail-soft try/catch discipline and storage-key namespace (now `zn-space:`,
+  previously `zn-space-draft:` — never published, so no migration needed) can't drift out of sync
+  between them.
+- **`attachManagedForm`/`ManagedForm` Comets** — composes `FormDraftPersistence`/`SubmitGuard`/
+  `UnsavedChangesGuard` under one `formId`, so enabling more than one doesn't mean repeating it
+  across separate call sites. Does not render the `<form>` itself, same reason none of the three
+  primitives it composes do: a Comet's own props must be plain JSON, so a component that also needs
+  arbitrary field markup as `children` — closures, event handlers, none of it JSON-serializable —
+  can't be one hydratable boundary.
+- **`getActiveCspNonce()`** (`@zanix/space/client`, `@zanix/space/client/preact`) — the CSP nonce
+  the active document is really enforcing right now, for a Comet that bakes its own `cspNonce` prop
+  into freshly-generated, client-side inline content (a `<style nonce>` built to insert into a
+  sandboxed iframe's `srcDoc`, say) rather than just forwarding it straight through to something
+  that renders its own nonce'd element once, at first mount. That prop reflects the fragment's own,
+  separately-minted nonce — never the still-active top document's, since Orbit only ever swaps the
+  outlet, never the whole document — so baking it into new inline content worked by accident on a
+  hard reload and produced a real CSP violation on every Orbit-navigated visit. Extracted from
+  `comet-persist-transition.ts`'s own already-shipped, identical technique
+  (`document.querySelector('[nonce]')?.nonce`, the `.nonce` IDL property rather than `getAttribute`)
+  into a shared `active-nonce.ts`, so both it and a Comet author's own code call one implementation
+  instead of a second hand-rolled copy.
+
+### Fixed
+
+- **Two overlapping Orbit navigations (e.g. a click that doesn't visibly register followed
+  immediately by a second one) could leave the destination outlet genuinely EMPTY** — its entire
+  fragment content missing, not merely a scroll-position artifact — since nothing tracked an
+  in-flight `swapOutlet` before allowing a second one to start racing its own synchronous DOM
+  mutations against the first's, most reproducibly with `document.startViewTransition` involved.
+  `swapOutlet` now serializes: a call overlapping an already-in-flight one awaits it FIRST, before
+  doing anything else (including its own `fetch`) — every navigation still completes, in the order
+  triggered, rather than one being silently dropped; the trade-off is a fast-following second click
+  visibly landing on the first destination for a moment before the second's own swap takes over,
+  never a torn/blank outlet. Adds no extra microtask tick to the common (non-overlapping) case —
+  serialization only ever engages when a real overlap exists.
+- **`zanix space dev`'s `'server-only'` boundary enforcement no longer silently misses a violation
+  reached through a module belonging to ANOTHER published JSR package** (e.g. `@zanix/space-ui`'s
+  `./runtime` entrypoint composing `Image`/`ImgButton`, both of which reach
+  `@zanix/space/assets-manifest`). `transformClientAsset`'s check resolves a module's real on-disk
+  path via `realFilePathOf` and reads that file directly — correct for a project-relative or
+  workspace-linked file, but a module resolved from a REMOTE, not-yet-locally-materialized `jsr:`
+  package has no such path (`@deno/vite-plugin`'s own resolver leaves it wrapped as a `\0deno::`
+  specifier whose `resolved` segment stays an un-expanded `https://` URL), so the check silently
+  never ran at all. `transformClientAsset` now falls back to the module's own transform result —
+  Vite's dev pipeline always embeds the untransformed original source in
+  `TransformResult.map.sourcesContent`, the same signal a browser's devtools "original source" view
+  relies on — whenever the disk-based path isn't available. A Comet reaching a `'server-only'`
+  module this way now fails loudly with the same purpose-built violation message and import chain
+  `zanix space dev` already produces for a project-relative violation, instead of hydrating in the
+  browser and crashing later with an unrelated, opaque error.
+- **A single test file run by explicit path (`deno test path/to/file.test.tsx`) could spuriously
+  fail to resolve ordinary DOM types** (`document`, `IntersectionObserver`, `ParentNode`, ...) that
+  real browser-facing source files use and that pass fine when discovered through this config's own
+  `test.include` glob instead — Deno's implicit default `lib` set differs between the two invocation
+  shapes. `compilerOptions` now declares `lib` explicitly (`deno.window`, `dom`, `dom.iterable`),
+  removing the discrepancy for both.
+
 ## [1.3.0] - 2026-09-03
 
 ### Added

@@ -159,6 +159,257 @@ manifest, so it can resolve its own className/style via `@zanix/app`'s `resolveB
 presentation," for the full pattern and its one real precondition (the Comet's own author has to opt
 in by adding that call; it's not retroactive).
 
+### Form draft persistence
+
+A ready-made Comet restoring unsaved `<form>` input after an accidental refresh or a
+navigate-away-and-back, with no server-side state to recover it from — a plain, no-JS-required
+`<form>` still works without it; this only adds recovery on top for a browser that has JS:
+
+```tsx
+// used from any page's component — a page's own loader passes hasServerValues, never computed
+// ad hoc elsewhere: `ctx.submitted` is `undefined` on a GET and on any successful action, present
+// only on a `422` validation re-render, exactly the signal that should win over a stale draft
+// Always a NAMED import — this subpath carries more than one ready-made Comet.
+import { FormDraftPersistence } from '@zanix/space/comet/react' // or '@zanix/space/comet/preact'
+
+<form id='new-trigger' method='post'>{/* ... */}</form>
+<FormDraftPersistence
+  formId='new-trigger'
+  storageKey='triggers/new'
+  hasServerValues={ctx.submitted !== undefined}
+/>
+```
+
+Restores a saved draft on attach (unless `hasServerValues`), saves the whole form — generically, via
+`form.elements`, covering a field added later with zero per-field wiring — debounced on every
+`input`/`change`, and clears the draft on `submit`. `storageKey` is required, never derived from
+`location.pathname`: this framework's own `[lang]`-segment routing renders the SAME logical form at
+different pathnames per language, so a pathname-derived key would fragment one operator's own draft
+across a language switch mid-form.
+
+**Always excluded, not configurable**: the `_csrf` field (this framework's own CSRF form field —
+restoring a stale token here produces nothing worse than a confusing 403), any `type="password"`
+field, and any `type="file"` field (never `JSON.stringify`-able). A form author's own field-level
+opt-out for anything else sensitive (an API secret typed into a plain `type="text"` input, say):
+
+```tsx
+<input name='webhookSecret' data-no-persist />
+```
+
+`storage` defaults to `'session'` (scoped to the tab's lifetime — the safe default for config an
+operator types in, like webhook URLs) and accepts `'local'` as an explicit, visible opt-in for a
+draft genuinely meant to survive a browser restart.
+
+**A React/Preact-controlled field restores correctly, as long as it's wired through a real
+`onChange`/`onInput` handler** — after writing `.value`/`.checked` directly, this Comet also
+dispatches a real, bubbling `input` (text-like fields) or `change` (`checkbox`/`radio`/`<select>`)
+event on that same field, the same event a genuine keystroke or click already produces. Any
+component wrapping the field — including `@zanix/space-ui`'s own `Input`/`Select`/`RadioGroup`,
+which always track a `value` internally even when the page author never passes one — picks this up
+through its own change handler and syncs its state to match, instead of the DOM write silently
+getting reverted on the field's next re-render.
+
+**What still genuinely needs `excludeFields` + the value-level primitives**: a field whose real
+state isn't a plain string a dispatched DOM event can carry — a widget storing a structured value
+(an object, a list) that no native `input`/`change` event represents on its own. Exclude it via
+`excludeFields`, and persist it separately with the narrower, value-level primitives both ready-made
+Comets are themselves built on:
+
+```tsx
+'use comet'
+import { useEffect, useState } from 'react'
+import { defineComet, persistDraftValue, restoreDraftValue } from '@zanix/space/comet'
+
+function TriggerConfigEditor({ storageKey, hasServerValues, initial }: Props) {
+  const [config, setConfig] = useState(initial)
+
+  // Restore once — deps are the option VALUES, never `config` itself, so this never re-fires on
+  // a keystroke and never races a stale saved value back over what was just typed.
+  useEffect(
+    () => restoreDraftValue(setConfig, { storageKey, hasServerValues }),
+    [storageKey, hasServerValues],
+  )
+  // Persist, debounced, on every change — `config` IS the dependency here; each re-run's cleanup
+  // cancels the previous pending write before scheduling the next one. That re-run is the debounce
+  // mechanism itself, not something to work around.
+  useEffect(() => persistDraftValue(config, { storageKey }), [config, storageKey])
+
+  // ...renders its own real widget over `config`/`setConfig`
+}
+export default defineComet(TriggerConfigEditor, import.meta.url)
+```
+
+`restoreDraftValue` and `persistDraftValue` are kept as two separate functions rather than one
+combined read-and-write primitive precisely because they need different effect dependencies to
+behave correctly — see the comments above.
+
+`attachFormDraftPersistence` (`@zanix/space/comet`) is the hook-free primitive both
+`FormDraftPersistence` Comets wire into their own `useEffect` — reach for it directly only when
+composing a custom comet that needs more than the ready-made one provides.
+
+### Double-submit prevention
+
+A ready-made Comet stopping a second real `<form>` submission from ever reaching the server — an
+impatient double-click, or a slow first response, firing another `submit` before the first one's
+navigation has even started:
+
+```tsx
+import { SubmitGuard } from '@zanix/space/comet/react' // or '@zanix/space/comet/preact'
+
+<form id='checkout' method='post'>{/* ... */}</form>
+<SubmitGuard formId='checkout' />
+```
+
+On the form's first real `submit`, disables every submit-triggering control inside it (a `<button>`
+with no `type` or `type="submit"`, an `<input type="submit">`) — pass `disableControls={false}` to
+guard only against a second `submit` EVENT (e.g. Enter pressed twice in a text field) and leave
+button state to the page itself. Any further `submit` while still in flight is rejected outright,
+never reaching the server a second time.
+
+Relies on this framework's own "Real HTTP, not an RPC" contract: a submission that goes through
+always ends in a real navigation — the next page, or a freshly re-rendered `422` — so the whole
+document, including this Comet's own in-flight flag, is torn down and reloaded fresh regardless of
+outcome. There is deliberately no reset/timeout path — a real form submission never leaves this
+Comet's own state stale to clean up.
+
+`attachSubmitGuard` (`@zanix/space/comet`) is the hook-free primitive both `SubmitGuard` Comets wire
+into their own `useEffect`.
+
+### Scroll-position restoration
+
+A ready-made Comet restoring window (or a single container's) scroll position across a refresh or an
+Orbit navigation — Orbit (`initOrbit()`) never manages scroll itself, so without this a page reached
+via Orbit keeps whatever position the PREVIOUS page left the viewport at:
+
+```tsx
+import { ScrollRestoration } from '@zanix/space/comet/react' // or '@zanix/space/comet/preact'
+
+// usually once, near the root layout — restores the WHOLE page's own scroll position
+<ScrollRestoration />
+```
+
+Restores a saved position on attach (skipped when the current URL already carries a `#fragment` — an
+explicit anchor link wins over a remembered position from an earlier visit), saves on every `scroll`
+(debounced). `storageKey` defaults to `location.pathname + location.search` — unlike
+`FormDraftPersistence`'s own `storageKey` (deliberately required, never derived), a scroll
+position's real identity genuinely IS the page being viewed: `/en/products` and `/es/products` are
+two distinct viewed pages, each with its own real scroll position, so the `[lang]`-segment reasoning
+that rules out a pathname-derived key for a shared FORM doesn't apply here.
+
+Pass `targetId` to track one scrollable container instead of the whole window (a chat panel, a
+sidebar list) — a page can mix a whole-window instance with one or more container-scoped instances,
+each under its own `storageKey`:
+
+```tsx
+<div id='sidebar'>{/* ... */}</div>
+<ScrollRestoration targetId='sidebar' storageKey='sidebar-scroll' />
+```
+
+`attachScrollRestoration` (`@zanix/space/comet`) is the hook-free primitive both `ScrollRestoration`
+Comets wire into their own `useEffect`.
+
+### Unsaved-changes warning
+
+A ready-made Comet warning before a page unload discards unsaved `<form>` input — the browser's own
+native "leave site?" prompt, shown only once the form has actually changed:
+
+```tsx
+import { UnsavedChangesGuard } from '@zanix/space/comet/react' // or '@zanix/space/comet/preact'
+
+<form id='new-trigger' method='post'>{/* ... */}</form>
+<UnsavedChangesGuard formId='new-trigger' />
+```
+
+Marks the form dirty on any `input`/`change`, clears it on `submit` — composes naturally alongside
+`FormDraftPersistence` on the same form (one avoids losing the typed data locally, the other warns
+before the tab/window closes with it still unsaved), but neither depends on the other.
+`excludeFields` opts a field out of counting as "unsaved" at all (a live-search/filter box inside
+the same form, say). No custom message option: every modern browser ignores a custom `beforeunload`
+string and shows its own fixed wording regardless.
+
+**Known gap, not solved here**: this only ever intercepts a real full-page unload (tab close, back/
+forward, a typed URL) — Orbit intercepts same-origin `<a>` clicks itself, client-side, with no
+exposed "confirm before navigating" hook of its own, so clicking an in-app link away from a dirty
+form navigates immediately, unprompted. Closing that gap is Orbit's own job, not this primitive's.
+
+`attachUnsavedChangesGuard` (`@zanix/space/comet`) is the hook-free primitive both
+`UnsavedChangesGuard` Comets wire into their own `useEffect`.
+
+### Live network status
+
+A ready-made Comet exposing `navigator.onLine` plus real `online`/`offline` transitions as a
+`data-*` attribute, rather than a prop callback — a Comet's own props must be plain JSON, so there
+is no function to hand it:
+
+```tsx
+import { NetworkStatus } from '@zanix/space/comet/react' // or '@zanix/space/comet/preact'
+
+// usually once, near the root layout
+<NetworkStatus />
+```
+
+```css
+[data-network-status="offline"] .requires-network {
+  display: none;
+}
+```
+
+Writes `data-network-status="online"|"offline"` on `document.documentElement` by default; pass
+`targetId` to write it on a different element instead, and `attribute` to use a different attribute
+name. A consumer wanting real `useState` instead of a DOM attribute composes the underlying
+primitive directly:
+
+```tsx
+'use comet'
+import { useEffect, useState } from 'react'
+import { attachNetworkStatus, defineComet } from '@zanix/space/comet'
+
+function ConnectionBanner() {
+  const [online, setOnline] = useState(true)
+  useEffect(() => attachNetworkStatus(setOnline), [])
+  return online ? null : <p>You are offline.</p>
+}
+export default defineComet(ConnectionBanner, import.meta.url)
+```
+
+`attachNetworkStatus` (`@zanix/space/comet`) is the callback-based primitive both `NetworkStatus`
+Comets wire their own DOM write into.
+
+### Composing form behaviors: `ManagedForm`
+
+A ready-made Comet composing `FormDraftPersistence`/`SubmitGuard`/`UnsavedChangesGuard` under one
+`formId`, so enabling more than one doesn't mean repeating it across separate call sites:
+
+```tsx
+import { ManagedForm } from '@zanix/space/comet/react' // or '@zanix/space/comet/preact'
+
+<form id='new-trigger' method='post'>{/* ... */}</form>
+<ManagedForm
+  formId='new-trigger'
+  draft={{ storageKey: 'triggers/new', hasServerValues: ctx.submitted !== undefined }}
+  submitGuard
+  unsavedChanges
+/>
+```
+
+`draft` takes `FormDraftPersistenceOptions` minus `formId` (omit to leave draft persistence disabled
+— it has no default-enabled state, since `storageKey`/`hasServerValues` are themselves required);
+`submitGuard`/`unsavedChanges` each take `true` for their own defaults, an options object (again
+minus `formId`) to customize, or omit/`false` to leave that one disabled. Attaching more than one to
+the same `submit`/`input`/`change` event is safe by construction — each is an independent
+`addEventListener` call; native DOM listeners never overwrite each other, and one calling
+`event.preventDefault()` (`SubmitGuard`, rejecting a second submission) doesn't stop the others from
+also running.
+
+**Does not render the `<form>` itself**, same reason none of the three primitives it composes do: a
+Comet's own props must be plain JSON, so a component that also needs to accept arbitrary field
+markup as `children` — closures, event handlers, none of it JSON-serializable — can't be one
+hydratable boundary. The `<form>` and its fields stay ordinary, server-rendered markup; this only
+ever attaches behavior to it by `id`.
+
+`attachManagedForm` (`@zanix/space/comet`) is the hook-free primitive both `ManagedForm` Comets wire
+into their own `useEffect`.
+
 ## See also
 
 - [`README.md`](../README.md#selective-hydration-comets) — the "Selective hydration" section this

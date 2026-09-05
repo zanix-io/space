@@ -207,7 +207,44 @@ export function getActiveCspSignature(): string {
   )
 }
 
-async function swapOutlet(href: string, replace: boolean): Promise<void> {
+// Serializes overlapping `swapOutlet` calls, so two navigations landing before the first's own
+// transition has settled (e.g. a click that doesn't visibly register followed immediately by a
+// second one) can never race their own synchronous DOM mutations against each other. Confirmed
+// real without this: the destination outlet ending up genuinely EMPTY — its entire fragment
+// content missing, not merely a scroll-position artifact — reproduced specifically when two
+// `startViewTransition`-wrapped swaps overlapped, since nothing tracked an in-flight one before
+// allowing a second to start. A later call simply awaits the earlier one's own promise FIRST,
+// before doing anything else (including its own `fetch`) — every navigation still completes, in
+// the order it was triggered, rather than one being silently dropped; the trade-off is a second,
+// fast-following click visibly landing on the FIRST destination for a moment before the second's
+// own swap takes over, not a torn/blank outlet.
+//
+// Deliberately `null` when nothing is in flight, not an always-resolved `Promise.resolve()`: the
+// COMMON case (no overlap) must call `performSwap` SYNCHRONOUSLY, adding no extra microtask tick —
+// `.then()` schedules a microtask even against an already-resolved promise, and `swapOutlet` is
+// always called fire-and-forget (`onClick`/`onPopState` never await it), so the number of ticks
+// between the call and its own observable DOM/history effects is exactly what a caller counting
+// microtasks (`orbit-navigation.test.ts`'s own `click()`/`flush()` helpers) depends on. An extra
+// tick in the common case would silently desync every such caller from this function's real
+// timing, for every navigation, not just an overlapping one.
+let pendingSwap: Promise<void> | null = null
+
+function swapOutlet(href: string, replace: boolean): Promise<void> {
+  const start = (): Promise<void> => {
+    const swap = performSwap(href, replace)
+    pendingSwap = swap
+    // Self-clearing: once THIS swap settles, only null out `pendingSwap` if nothing newer already
+    // replaced it — a finally attached directly to `swap` adds no tick before `swap`'s own
+    // observable side effects (DOM mutation, history update) already ran; those happen
+    // synchronously inside `performSwap`'s own body, never deferred to this callback.
+    return swap.finally(() => {
+      if (pendingSwap === swap) pendingSwap = null
+    })
+  }
+  return pendingSwap ? pendingSwap.then(start) : start()
+}
+
+async function performSwap(href: string, replace: boolean): Promise<void> {
   let html: string
   let cspHeader: string | null
   try {

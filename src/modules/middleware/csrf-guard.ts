@@ -33,7 +33,11 @@ export type CsrfGuardOptions = {
 }
 
 const SAFE_METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD', 'OPTIONS'])
-const FORM_FIELD = '_csrf'
+
+/** The form field name {@linkcode csrfGuard} reads a submitted token back from —
+ * `attachFormDraftPersistence` (`@zanix/space/comet`) imports this directly so a restored draft
+ * never resurrects a stale CSRF value, instead of re-declaring `'_csrf'` as a bare string. */
+export const CSRF_FORM_FIELD = '_csrf'
 
 function generateToken(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(24))
@@ -56,12 +60,12 @@ async function readFormField(ctx: GuardContext): Promise<string | undefined> {
   // consumed). Only genuinely untouched `multipart/form-data` (which `@zanix/server` never
   // pre-parses) still needs, and is still safe for, the clone-and-read fallback below.
   if (ctx.payload.body instanceof FormData) {
-    const value = ctx.payload.body.get(FORM_FIELD)
+    const value = ctx.payload.body.get(CSRF_FORM_FIELD)
     return typeof value === 'string' ? value : undefined
   }
 
   try {
-    const value = (await ctx.req.clone().formData()).get(FORM_FIELD)
+    const value = (await ctx.req.clone().formData()).get(CSRF_FORM_FIELD)
     return typeof value === 'string' ? value : undefined
   } catch {
     return undefined

@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.4.2] - 2026-09-05
+
+### Fixed
+
+- **`zanix space build` no longer fails with `[UNRESOLVED_ENTRY]`/`vite:worker-import-meta-url` for
+  any project using `attachFormDraftPersistence`/`FormDraftPersistence`** (`@zanix/space/comet`,
+  `@zanix/space/comet/react`, `@zanix/space/comet/preact`) — a regression introduced in 1.4.0, when
+  `csrfGuard`'s private `_csrf` field-name constant became the exported `CSRF_FORM_FIELD` and
+  `form-draft-persistence.ts` started importing it directly from `csrf-guard.ts`. That import
+  dragged `csrfGuard`'s own `@zanix/utils/helpers` dependency into every Comet build reachable from
+  `@zanix/space/comet` — transitively, the full `logger`, and through it `WorkerManager`/
+  `processor.ts` (a real `new Worker(...)` user Vite's client build can never resolve). Every
+  project with at least one Comet using this primitive failed to build client-side, unconditionally,
+  since 1.4.0. `CSRF_FORM_FIELD` now lives in its own dependency-free module (`csrf-form-field.ts`),
+  imported by both `csrfGuard` and `attachFormDraftPersistence` — its value and behavior are
+  unchanged.
+
 ## [1.4.1] - 2026-09-05
 
 ### Fixed

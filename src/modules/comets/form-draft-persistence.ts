@@ -1,4 +1,4 @@
-import { CSRF_FORM_FIELD } from '../middleware/csrf-guard.ts'
+import { CSRF_FORM_FIELD } from '../middleware/csrf-form-field.ts'
 import {
   clearFromStorage,
   DEFAULT_DRAFT_DEBOUNCE_MS,

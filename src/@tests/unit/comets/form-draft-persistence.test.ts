@@ -1,6 +1,6 @@
 import { assert, assertEquals, assertFalse } from '@std/assert'
 import { installTimerMock, resetDom } from './dom-test-setup.ts'
-import { CSRF_FORM_FIELD } from 'modules/middleware/csrf-guard.ts'
+import { CSRF_FORM_FIELD } from 'modules/middleware/csrf-form-field.ts'
 import {
   attachFormDraftPersistence,
   DEFAULT_DRAFT_DEBOUNCE_MS,

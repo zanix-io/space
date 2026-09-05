@@ -1,6 +1,7 @@
 import type { GuardContext, MiddlewareGuard } from '@zanix/server'
 import { HttpError } from '@zanix/errors'
 import { assertZnxCookieName, SESSION_COOKIE_ATTRIBUTES } from '@zanix/helpers'
+import { CSRF_FORM_FIELD } from './csrf-form-field.ts'
 
 /** The `ctx.locals` key {@linkcode csrfGuard} stashes the current request's CSRF token under —
  * `SpacePageController` reads this back into `PageContext.csrfToken` automatically. */
@@ -33,11 +34,6 @@ export type CsrfGuardOptions = {
 }
 
 const SAFE_METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD', 'OPTIONS'])
-
-/** The form field name {@linkcode csrfGuard} reads a submitted token back from —
- * `attachFormDraftPersistence` (`@zanix/space/comet`) imports this directly so a restored draft
- * never resurrects a stale CSRF value, instead of re-declaring `'_csrf'` as a bare string. */
-export const CSRF_FORM_FIELD = '_csrf'
 
 function generateToken(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(24))

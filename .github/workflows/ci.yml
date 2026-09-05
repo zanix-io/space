@@ -49,10 +49,10 @@ jobs:
         run: deno lint
 
       - name: Check for circular-import hazards
-        run: deno run -A jsr:@zanix/cli check-cycles
+        run: deno run --min-dep-age=0 -A jsr:@zanix/cli check-cycles
 
       - name: Check for duplicate '@zanix/*' dependencies
-        run: deno run -A jsr:@zanix/cli check-duplicates
+        run: deno run --min-dep-age=0 -A jsr:@zanix/cli check-duplicates
 
       # Required by the audio/video functional suite (`voice-upload-s3.test.ts`,
       # `video-upload-s3.test.ts`, `system-ffmpeg-transcoder.calibration.test.ts`, and every other

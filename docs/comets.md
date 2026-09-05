@@ -375,6 +375,41 @@ export default defineComet(ConnectionBanner, import.meta.url)
 `attachNetworkStatus` (`@zanix/space/comet`) is the callback-based primitive both `NetworkStatus`
 Comets wire their own DOM write into.
 
+### Composing form behaviors: `ManagedForm`
+
+A ready-made Comet composing `FormDraftPersistence`/`SubmitGuard`/`UnsavedChangesGuard` under one
+`formId`, so enabling more than one doesn't mean repeating it across separate call sites:
+
+```tsx
+import { ManagedForm } from '@zanix/space/comet/react' // or '@zanix/space/comet/preact'
+
+<form id='new-trigger' method='post'>{/* ... */}</form>
+<ManagedForm
+  formId='new-trigger'
+  draft={{ storageKey: 'triggers/new', hasServerValues: ctx.submitted !== undefined }}
+  submitGuard
+  unsavedChanges
+/>
+```
+
+`draft` takes `FormDraftPersistenceOptions` minus `formId` (omit to leave draft persistence disabled
+— it has no default-enabled state, since `storageKey`/`hasServerValues` are themselves required);
+`submitGuard`/`unsavedChanges` each take `true` for their own defaults, an options object (again
+minus `formId`) to customize, or omit/`false` to leave that one disabled. Attaching more than one to
+the same `submit`/`input`/`change` event is safe by construction — each is an independent
+`addEventListener` call; native DOM listeners never overwrite each other, and one calling
+`event.preventDefault()` (`SubmitGuard`, rejecting a second submission) doesn't stop the others from
+also running.
+
+**Does not render the `<form>` itself**, same reason none of the three primitives it composes do: a
+Comet's own props must be plain JSON, so a component that also needs to accept arbitrary field
+markup as `children` — closures, event handlers, none of it JSON-serializable — can't be one
+hydratable boundary. The `<form>` and its fields stay ordinary, server-rendered markup; this only
+ever attaches behavior to it by `id`.
+
+`attachManagedForm` (`@zanix/space/comet`) is the hook-free primitive both `ManagedForm` Comets wire
+into their own `useEffect`.
+
 ## See also
 
 - [`README.md`](../README.md#selective-hydration-comets) — the "Selective hydration" section this

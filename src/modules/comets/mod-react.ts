@@ -23,3 +23,5 @@ export { default as UnsavedChangesGuard } from './unsaved-changes-guard-react.ts
 export type { UnsavedChangesGuardOptions } from './unsaved-changes-guard.ts'
 export { default as NetworkStatus } from './network-status-react.tsx'
 export type { NetworkStatusOptions } from './network-status.ts'
+export { default as ManagedForm } from './managed-form-react.tsx'
+export type { ManagedFormOptions } from './managed-form.ts'

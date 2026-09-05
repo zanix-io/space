@@ -15,3 +15,5 @@ export { default as UnsavedChangesGuard } from './unsaved-changes-guard-preact.t
 export type { UnsavedChangesGuardOptions } from './unsaved-changes-guard.ts'
 export { default as NetworkStatus } from './network-status-preact.tsx'
 export type { NetworkStatusOptions } from './network-status.ts'
+export { default as ManagedForm } from './managed-form-preact.tsx'
+export type { ManagedFormOptions } from './managed-form.ts'

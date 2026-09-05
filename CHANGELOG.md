@@ -61,6 +61,12 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
   extracted so the fail-soft try/catch discipline and storage-key namespace (now `zn-space:`,
   previously `zn-space-draft:` — never published, so no migration needed) can't drift out of sync
   between them.
+- **`attachManagedForm`/`ManagedForm` Comets** — composes `FormDraftPersistence`/`SubmitGuard`/
+  `UnsavedChangesGuard` under one `formId`, so enabling more than one doesn't mean repeating it
+  across separate call sites. Does not render the `<form>` itself, same reason none of the three
+  primitives it composes do: a Comet's own props must be plain JSON, so a component that also needs
+  arbitrary field markup as `children` — closures, event handlers, none of it JSON-serializable —
+  can't be one hydratable boundary.
 
 ### Fixed
 

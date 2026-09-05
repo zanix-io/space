@@ -229,8 +229,9 @@ cross-navigation state persistence (`persist`), the build-time `'server-only'` b
 ready-made Comets under `@zanix/space/comet/react` / `@zanix/space/comet/preact` —
 `FormDraftPersistence` (session/local-scoped form draft recovery), `SubmitGuard` (double-submit
 prevention), `ScrollRestoration` (scroll-position recovery across a refresh or an Orbit navigation),
-`UnsavedChangesGuard` (a native "leave site?" warning before an unsaved form is discarded), and
-`NetworkStatus` (live online/offline as a `data-*` attribute).
+`UnsavedChangesGuard` (a native "leave site?" warning before an unsaved form is discarded),
+`NetworkStatus` (live online/offline as a `data-*` attribute), and `ManagedForm` (composes the three
+form-level behaviors above under one `formId`).
 
 ### Client-side navigation ("Orbit")
 

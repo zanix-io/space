@@ -133,6 +133,38 @@ exists" — that stays the server's manifest, read fresh from each fragment.
 A page whose CSS is already fully covered by what's already loaded (the common case) triggers none
 of this — the fragment simply doesn't need any `<link>` insertion.
 
+### CSP during navigation
+
+A document's active `Content-Security-Policy` is fixed at the navigation that created it — no later
+`fetch()` response, regardless of its own headers, is ever consulted by the browser to update it.
+Before swapping a fetched (or prefetched) fragment in, the client compares that fragment's own
+resolved CSP against the active document's own — both normalized so a per-request nonce alone never
+counts as a real difference, since the overwhelming common case is two pages sharing the exact same
+policy with only the nonce differing. A genuine mismatch (a stricter or looser per-page
+`Page({ headers: { csp } })`, or a guard varying the policy per request) degrades to a real
+navigation instead — the one thing that can actually apply a different CSP correctly. This needs no
+configuration; it's automatic for every app, and a page with no CSP configured at all is unaffected
+either way.
+
+**Reading the nonce the active document is really enforcing** — for a Comet that bakes its own
+`cspNonce` prop into freshly-generated, client-side inline content (a `<style nonce>` built to
+insert into a sandboxed iframe's `srcDoc`, say), rather than just forwarding it straight through to
+something that renders its own nonce'd element once, at first mount:
+
+```ts
+import { getActiveCspNonce } from '@zanix/space/client'
+
+const nonce = getActiveCspNonce() // the ACTIVE document's own nonce, right now
+```
+
+A Comet's own `PageContext.cspNonce` prop reflects that fragment's own, separately-minted nonce —
+never the still-active top document's, since Orbit only ever swaps the outlet, never the whole
+document. Baking the prop value into new inline content works by accident on a hard reload (the same
+response mints both), then produces a real CSP violation the first time the page is reached via an
+Orbit navigation. `getActiveCspNonce()` reads the nonce a real, parsed element on the page already
+carries instead — always accurate, regardless of how the current document was reached. `undefined`
+on a page with no nonce-based CSP configured at all.
+
 ### Manual rendering (`renderToResponse`, `useRequestCache`)
 
 Rendering an element directly, without going through a page controller:

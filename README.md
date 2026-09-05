@@ -267,8 +267,9 @@ navigation on any failure. A cross-origin `href` or a same-document hash link ge
 too, exactly like the equivalent `<a>` would.
 
 See [`docs/orbit.md`](./docs/orbit.md) for the full contract: escape hatches, prefetch eligibility,
-`Vary` caching, and the lower-level `renderToResponse`/`useRequestCache`/`readInitialState` surface
-for rendering an element manually.
+`Vary` caching, CSP handling during a soft navigation (including `getActiveCspNonce()`, for a Comet
+generating its own nonce'd content client-side), and the lower-level
+`renderToResponse`/`useRequestCache`/`readInitialState` surface for rendering an element manually.
 
 ### Middleware (guards, default CSP and security headers)
 

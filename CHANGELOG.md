@@ -67,9 +67,32 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
   primitives it composes do: a Comet's own props must be plain JSON, so a component that also needs
   arbitrary field markup as `children` — closures, event handlers, none of it JSON-serializable —
   can't be one hydratable boundary.
+- **`getActiveCspNonce()`** (`@zanix/space/client`, `@zanix/space/client/preact`) — the CSP nonce
+  the active document is really enforcing right now, for a Comet that bakes its own `cspNonce` prop
+  into freshly-generated, client-side inline content (a `<style nonce>` built to insert into a
+  sandboxed iframe's `srcDoc`, say) rather than just forwarding it straight through to something
+  that renders its own nonce'd element once, at first mount. That prop reflects the fragment's own,
+  separately-minted nonce — never the still-active top document's, since Orbit only ever swaps the
+  outlet, never the whole document — so baking it into new inline content worked by accident on a
+  hard reload and produced a real CSP violation on every Orbit-navigated visit. Extracted from
+  `comet-persist-transition.ts`'s own already-shipped, identical technique
+  (`document.querySelector('[nonce]')?.nonce`, the `.nonce` IDL property rather than `getAttribute`)
+  into a shared `active-nonce.ts`, so both it and a Comet author's own code call one implementation
+  instead of a second hand-rolled copy.
 
 ### Fixed
 
+- **Two overlapping Orbit navigations (e.g. a click that doesn't visibly register followed
+  immediately by a second one) could leave the destination outlet genuinely EMPTY** — its entire
+  fragment content missing, not merely a scroll-position artifact — since nothing tracked an
+  in-flight `swapOutlet` before allowing a second one to start racing its own synchronous DOM
+  mutations against the first's, most reproducibly with `document.startViewTransition` involved.
+  `swapOutlet` now serializes: a call overlapping an already-in-flight one awaits it FIRST, before
+  doing anything else (including its own `fetch`) — every navigation still completes, in the order
+  triggered, rather than one being silently dropped; the trade-off is a fast-following second click
+  visibly landing on the first destination for a moment before the second's own swap takes over,
+  never a torn/blank outlet. Adds no extra microtask tick to the common (non-overlapping) case —
+  serialization only ever engages when a real overlap exists.
 - **`zanix space dev`'s `'server-only'` boundary enforcement no longer silently misses a violation
   reached through a module belonging to ANOTHER published JSR package** (e.g. `@zanix/space-ui`'s
   `./runtime` entrypoint composing `Image`/`ImgButton`, both of which reach

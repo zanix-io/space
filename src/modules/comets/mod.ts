@@ -24,3 +24,24 @@ export { loadCometManifest, resolveCometModuleUrl } from './comet-manifest.ts'
 export type { CometManifest } from './comet-manifest.ts'
 export { createReloader } from './reloader.ts'
 export type { ReloadDescriptor } from './reloader.ts'
+export {
+  attachFormDraftPersistence,
+  DEFAULT_DRAFT_DEBOUNCE_MS,
+  persistDraftValue,
+  restoreDraftValue,
+} from './form-draft-persistence.ts'
+export type {
+  DraftStorageKind,
+  DraftValueOptions,
+  FormDraftPersistenceOptions,
+} from './form-draft-persistence.ts'
+export { attachSubmitGuard } from './submit-guard.ts'
+export type { SubmitGuardOptions } from './submit-guard.ts'
+export { attachScrollRestoration } from './scroll-restoration.ts'
+export type { ScrollRestorationOptions } from './scroll-restoration.ts'
+export { attachUnsavedChangesGuard } from './unsaved-changes-guard.ts'
+export type { UnsavedChangesGuardOptions } from './unsaved-changes-guard.ts'
+export { attachNetworkStatus, DEFAULT_NETWORK_STATUS_ATTRIBUTE } from './network-status.ts'
+export type { NetworkStatusOptions } from './network-status.ts'
+export { attachManagedForm } from './managed-form.ts'
+export type { ManagedFormOptions } from './managed-form.ts'

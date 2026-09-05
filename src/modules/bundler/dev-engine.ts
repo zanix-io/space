@@ -241,6 +241,51 @@ async function isServerOnlyFile(filePath: string): Promise<boolean> {
 }
 
 /**
+ * Fallback counterpart to {@linkcode isServerOnlyFile}, for a module {@linkcode realFilePathOf}
+ * cannot resolve to a real on-disk path — the case of a Comet-reachable module belonging to
+ * ANOTHER published JSR package (e.g. a `'use comet'` file importing `Menu` from
+ * `@zanix/space-ui/runtime`, which composes `Image`/`ImgButton`, both of which reach
+ * `@zanix/space/assets-manifest.ts`). Such a module is not always backed by a real,
+ * `Deno.readTextFile`-visible local cache file at the path {@linkcode parseDenoSpecifier}
+ * computes: `@deno/vite-plugin`'s own `resolveDeno` (its `dist/resolver.js`,
+ * `@deno/vite-plugin@2.0.3`) wraps a module as a `\0deno::<loader>::<id>::<resolved>#deno`
+ * specifier whenever `@deno/loader`'s own `resolveSync` result is remote (`resolved.id` still an
+ * `https:` URL) OR needs a non-`null` loader — for a JSR-hosted `.ts` source not yet separately
+ * materialized into a local, `Deno.readTextFile`-visible cache entry by THIS specific resolution
+ * path, both the `id` and `resolved` segments `toDenoSpecifier` embeds stay the SAME un-expanded
+ * `https://jsr.io/...` string. `realFilePathOf`'s own `resolved.startsWith('https:') ? null : ...`
+ * branch correctly refuses to treat that as a real path, and returns `null` — but the module's real
+ * TEXT content is still genuinely available (`@deno/loader`'s own `load()` hook fetches and
+ * transpiles it, which is why `transformClientAsset` itself still returns real, transformed JS for
+ * the module), just never reachable through a literal filesystem read at the `resolved` string's
+ * own path.
+ *
+ * Reuses data `transformClientAsset` already computes for an unrelated reason: Vite's own dev
+ * transform pipeline always populates `TransformResult.map.sourcesContent[0]` with the
+ * UNTRANSFORMED original source text — the same signal a browser's own devtools "original source"
+ * view relies on — present regardless of whether the module resolved to a real local path or
+ * stayed a remote `\0deno::` specifier. The TRANSFORMED `result.code` is never checked instead,
+ * even for an ordinary, non-optimized single-file transform: Rolldown's own transform drops a
+ * bare, unrecognized directive-position string-literal statement (`'server-only'` is not
+ * `'use strict'`) from its OUTPUT entirely, keeping it only inside the sourcemap's own
+ * `sourcesContent` — the same reason {@linkcode isServerOnlyFile} above reads a file's REAL source
+ * directly rather than ever inspecting a transform result.
+ *
+ * `map`'s real shape here is Rolldown's own `SourceMap` (re-exported through Vite's
+ * `TransformResult['map']`) — narrowed structurally, not imported, matching this file's own
+ * deliberate avoidance of deeply recursive Vite/Rolldown vendor types (see this file's own
+ * top-of-file comment) elsewhere (`(error as { code?: string }).code`, right above in
+ * `transformClientAsset`, is the same established pattern).
+ */
+function isServerOnlySource(
+  map: { sourcesContent?: readonly (string | null)[] } | { mappings: '' } | null | undefined,
+): boolean {
+  const sourcesContent = map && 'sourcesContent' in map ? map.sourcesContent : undefined
+  const originalSource = sourcesContent?.[0]
+  return typeof originalSource === 'string' && SERVER_ONLY_DIRECTIVE.test(originalSource)
+}
+
+/**
  * The real, on-disk absolute path behind an `EnvironmentModuleNode` — for any real `@zanix/space`
  * subpath import (`@zanix/space`, `@zanix/space-ui`, ... all live OUTSIDE the project root, in a
  * separate package directory), `@deno/vite-plugin`'s own `resolveViteSpecifier` resolves it to one
@@ -758,9 +803,20 @@ export async function createSpaceDevEngine(
       // content is servable. `realFilePathOf` (not raw `mod?.file`) is what makes this reach a
       // real `@zanix/space`-style dependency import too, not just a project-local file — see its
       // own doc for why `mod.file` alone would silently miss the common case entirely.
+      //
+      // `modPath && await isServerOnlyFile(modPath)` is the PRIMARY check (a real disk read of the
+      // module's own untransformed source) — `isServerOnlySource(result.map)` only ever runs as a
+      // fallback, when `modPath` is `null` (see {@linkcode isServerOnlySource}'s own doc for
+      // exactly which real case that is, and why a disk read can't reach it). Never the other way
+      // around: `isServerOnlyFile` reads the file directly and is unaffected by anything this
+      // specific transform happened to produce, so it stays authoritative whenever it can run at
+      // all.
       if (mod) {
         const modPath = realFilePathOf(mod)
-        if (modPath && await isServerOnlyFile(modPath)) {
+        const isServerOnly = modPath
+          ? await isServerOnlyFile(modPath)
+          : isServerOnlySource(result.map)
+        if (isServerOnly) {
           const chain = await findDevChainToComet(mod)
           throw new Error(formatServerOnlyViolation(chain))
         }

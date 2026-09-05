@@ -47,6 +47,11 @@ export type {
   /** `navigate(href, options)`'s own option shape. */
   NavigateOptions,
 } from './orbit.ts'
+export {
+  /** The CSP nonce the active document is really enforcing right now — read this, never a
+   * Comet's own `cspNonce` prop, when baking a nonce into freshly-generated inline content. */
+  getActiveCspNonce,
+} from './active-nonce.ts'
 // `prefetch.ts` is DOM-only and imports neither renderer (its whole dependency set is
 // `orbit-protocol.ts` + `link-info.ts`, both plain data/DOM helpers) — it was simply missed here
 // when the React barrel gained it, which left `initOrbit({ prefetch })`'s own option type

@@ -1,5 +1,6 @@
 import { COMET_PERSIST_ATTR, COMET_PERSIST_VT_ATTR } from '../comets/marker.ts'
 import { hashSourceKey } from '../comets/comet-manifest.ts'
+import { getActiveCspNonce } from './active-nonce.ts'
 
 /**
  * Gives a `persist`-tagged Comet boundary its own `view-transition-name` for the duration of an
@@ -51,15 +52,13 @@ import { hashSourceKey } from '../comets/comet-manifest.ts'
  * call site to pass one through here. Every full-document Space response already renders at least
  * one nonced element unconditionally before any client module can even start running
  * (`BUILTIN_CSS`'s own `<style nonce>` in `<head>` — see `builtin-css.ts`'s own doc — or the
- * bootstrap `<script nonce>` itself), so this reads the ALREADY-ACTIVE page's own nonce back off
- * whichever one the parser rendered, the same `document.querySelector('[nonce]')?.nonce` technique
- * `dev-vite-hot-client.ts` already establishes for the identical problem: a real browser
- * deliberately hides a nonce's content attribute from `getAttribute`/`outerHTML` once the element
- * is inserted, for security, but its own `.nonce` IDL property still returns the real value for an
- * element the PARSER actually inserted from real HTML. A page with no CSP configured at all (a
- * page-level `headers: { csp: false }`) simply has no nonced element to find — the `<style>`
- * element created below then carries no `nonce` attribute either, which is correct: no CSP means
- * nothing to authorize in the first place.
+ * bootstrap `<script nonce>` itself), so {@linkcode getActiveCspNonce} (`active-nonce.ts`) always
+ * has something to find on a page with a nonce-based CSP at all — reused here rather than
+ * re-querying by hand, the same shared helper a Comet author reaches for to solve the identical
+ * problem for their own dynamically-generated content (see that module's own doc). A page with no
+ * CSP configured at all (a page-level `headers: { csp: false }`) simply has no nonced element to
+ * find — the `<style>` element created below then carries no `nonce` attribute either, which is
+ * correct: no CSP means nothing to authorize in the first place.
  *
  * @module
  */
@@ -98,8 +97,8 @@ function getOrCreateStyleElement(): HTMLStyleElement | null {
   const el = document.createElement('style')
   // Assigned BEFORE `appendChild` below, deliberately — a nonce-based CSP evaluates a `<style>`
   // element the INSTANT it enters the document; setting `.nonce` any later is already too late.
-  const nonced = document.querySelector('[nonce]') as (Element & { nonce?: string }) | null
-  if (nonced?.nonce) el.nonce = nonced.nonce
+  const nonce = getActiveCspNonce()
+  if (nonce) el.nonce = nonce
   document.head.appendChild(el)
   styleElement = el
   return el

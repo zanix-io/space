@@ -225,7 +225,13 @@ import Counter from '../comets/counter.tsx'
 ```
 
 See [`docs/comets.md`](./docs/comets.md) for the full contract: wiring, mount modes,
-cross-navigation state persistence (`persist`), and the build-time `'server-only'` boundary.
+cross-navigation state persistence (`persist`), the build-time `'server-only'` boundary, and the
+ready-made Comets under `@zanix/space/comet/react` / `@zanix/space/comet/preact` —
+`FormDraftPersistence` (session/local-scoped form draft recovery), `SubmitGuard` (double-submit
+prevention), `ScrollRestoration` (scroll-position recovery across a refresh or an Orbit navigation),
+`UnsavedChangesGuard` (a native "leave site?" warning before an unsaved form is discarded),
+`NetworkStatus` (live online/offline as a `data-*` attribute), and `ManagedForm` (composes the three
+form-level behaviors above under one `formId`).
 
 ### Client-side navigation ("Orbit")
 
@@ -261,8 +267,9 @@ navigation on any failure. A cross-origin `href` or a same-document hash link ge
 too, exactly like the equivalent `<a>` would.
 
 See [`docs/orbit.md`](./docs/orbit.md) for the full contract: escape hatches, prefetch eligibility,
-`Vary` caching, and the lower-level `renderToResponse`/`useRequestCache`/`readInitialState` surface
-for rendering an element manually.
+`Vary` caching, CSP handling during a soft navigation (including `getActiveCspNonce()`, for a Comet
+generating its own nonce'd content client-side), and the lower-level
+`renderToResponse`/`useRequestCache`/`readInitialState` surface for rendering an element manually.
 
 ### Middleware (guards, default CSP and security headers)
 

@@ -660,4 +660,51 @@ Deno.test(
   },
 )
 
+Deno.test(
+  'navigate: two overlapping navigations are serialized — the second never starts its own fetch ' +
+    "until the first has fully settled, so neither races the other's DOM mutation",
+  async () => {
+    const { outlet } = setUp()
+    const deferred: Array<(response: Response) => void> = []
+    fetchImpl = () =>
+      new Promise<Response>((resolve) => {
+        deferred.push(resolve)
+      })
+
+    const first = navigate('/checkout')
+    const second = navigate('/cart')
+    await Promise.resolve()
+    await Promise.resolve()
+
+    // The second navigation's own fetch has NOT started yet — only the first one has, even
+    // though both `navigate()` calls already ran, synchronously, one after the other.
+    assertEquals(fetchCalls.length, 1)
+    assertEquals(fetchCalls[0].url, 'https://example.com/checkout')
+
+    deferred[0](okResponse(outletHtml('<p>first</p>')))
+    await first
+    await flush()
+
+    // Only once the first has FULLY settled does the second's own fetch fire.
+    assertEquals(fetchCalls.length, 2)
+    assertEquals(fetchCalls[1].url, 'https://example.com/cart')
+    assertEquals(
+      outlet.innerHTML,
+      '<p>first</p>',
+      "the first destination's own content lands first, briefly, rather than being skipped",
+    )
+
+    deferred[1](okResponse(outletHtml('<p>second</p>')))
+    await second
+
+    // The outlet ends up with the SECOND (later-triggered) destination's content — never blank,
+    // never a mix of both, the real failure mode this fix closes.
+    assertEquals(outlet.innerHTML, '<p>second</p>')
+    assertEquals(historyCalls, [
+      { method: 'pushState', url: 'https://example.com/checkout' },
+      { method: 'pushState', url: 'https://example.com/cart' },
+    ])
+  },
+)
+
 installTimerMock // referenced so the import is never flagged unused if a future edit stops calling it

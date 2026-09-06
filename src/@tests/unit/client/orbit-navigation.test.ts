@@ -375,6 +375,68 @@ Deno.test(
   },
 )
 
+// Security regression coverage for `reviveFragmentScripts`'s own verification gate
+// (`orbit.ts`) — a fragment that passes the CSP-SIGNATURE check above (same policy SHAPE as the
+// active document) says nothing about whether any one `<script>` INSIDE its body actually carries
+// the nonce that exact response's own header declared. Without checking that too, ANY script
+// found there — including one an unrelated XSS bug elsewhere managed to inject, with no nonce or
+// the wrong one — would get handed a fresh, valid nonce and executed, silently undoing CSP's own
+// protection specifically for content reached through Orbit.
+
+Deno.test(
+  "onClick: a fragment script whose own nonce matches what its response's CSP header actually " +
+    'declared is revived and executes — the legitimate, server-authorized case',
+  async () => {
+    const { anchor, outlet } = setUp()
+    setActiveCspSignature("default-src 'self'; script-src 'self' 'nonce-*'")
+    fetchImpl = () =>
+      Promise.resolve(
+        okResponseWithCsp(
+          outletHtml(
+            '<p id="marker">old</p><script nonce="real-nonce-value">' +
+              'document.getElementById("marker").textContent = "ran"' +
+              '</script>',
+          ),
+          "default-src 'self'; script-src 'self' 'nonce-real-nonce-value'",
+        ),
+      )
+
+    click(anchor)
+    await flush()
+
+    assertEquals(outlet.querySelector('#marker')?.textContent, 'ran')
+  },
+)
+
+Deno.test(
+  "onClick: a fragment script whose own nonce does NOT match what its response's CSP header " +
+    'actually declared is left inert — never executes, even though the swap itself still applies ' +
+    'normally (the outlet content still replaces, since the overall CSP SHAPE matches; only the ' +
+    'unauthorized script itself is refused, exactly like a real CSP-enforcing full-document load ' +
+    'already would)',
+  async () => {
+    const { anchor, outlet } = setUp()
+    setActiveCspSignature("default-src 'self'; script-src 'self' 'nonce-*'")
+    fetchImpl = () =>
+      Promise.resolve(
+        okResponseWithCsp(
+          outletHtml(
+            '<p id="marker">old</p><script nonce="attacker-guessed-nonce">' +
+              'document.getElementById("marker").textContent = "ran"' +
+              '</script>',
+          ),
+          "default-src 'self'; script-src 'self' 'nonce-real-nonce-value'",
+        ),
+      )
+
+    click(anchor)
+    await flush()
+
+    assertEquals(outlet.querySelector('#marker')?.textContent, 'old')
+    assertEquals(outlet.querySelector('#marker') !== null, true, 'the swap itself still applied')
+  },
+)
+
 Deno.test(
   'onClick: a fragment response with no Content-Security-Policy header at all, swapped into a ' +
     'page that ALSO has none, is never treated as a mismatch',

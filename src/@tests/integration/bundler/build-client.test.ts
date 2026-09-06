@@ -219,7 +219,7 @@ Deno.test(
       await Deno.writeTextFile(
         join(routesDir, 'layout.tsx'),
         "import { SubmitGuard } from '@zanix/space/comet/react'\n" +
-          'export default function Layout() { return null }\nexport { SubmitGuard }\n',
+          "export default function Layout() { return <SubmitGuard formId='logout' /> }\n",
       )
 
       const result = await buildSpaceClient({

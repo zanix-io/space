@@ -5,6 +5,96 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.6.1] - 2026-09-06
+
+### Security
+
+- **A revived fragment `<script>` (`orbit.ts`'s own `reviveFragmentScripts`, added in 1.6.0) got a
+  valid, currently-enforced CSP nonce and executed UNCONDITIONALLY, regardless of what nonce (if
+  any) it originally carried** — silently defeating nonce-based CSP as a defense-in-depth layer
+  against XSS specifically for any page reached through an Orbit client-side navigation (same-origin
+  fragment fetches, the common case for nearly every in-app link click). The CSP-signature check
+  `swapOutlet` already runs before ever applying a fragment (`normalizeCspSignature`) only compares
+  the overall policy SHAPE, deliberately ignoring the nonce value itself — it says nothing about
+  whether any individual `<script>` inside that fragment's body was actually authorized by the
+  server for that exact response. A script an unrelated XSS bug managed to inject into rendered HTML
+  (with no nonce, or the wrong one) would previously still get a fresh, valid nonce here and run —
+  exactly what a real CSP-enforcing full-document load already refuses to execute. Fixed by
+  `reviveFragmentScripts`'s new `fragmentNonce` parameter: a script is only ever revived when its
+  own `nonce` attribute matches the nonce THIS fragment response's own `Content-Security-Policy`
+  header actually declared (`extractCspNonce(cspHeader)`, read via `getAttribute('nonce')` —
+  confirmed against a real Chromium build, not just this package's own `happy-dom`-based tests, to
+  reliably reflect the true value regardless of how or where the element was parsed). A script with
+  no nonce, or one that doesn't match, is left exactly as parsed — inert forever, the same practical
+  outcome a real CSP block already produces — while a legitimate, server-authorized script (always
+  correctly nonce'd whenever this app has nonce-based CSP configured at all) is unaffected. On a
+  page with no nonce-based CSP configured, every script is still revived unconditionally, unchanged
+  from before this fix.
+
+### Fixed
+
+- **`zanix space dev`: a ready-made Comet shipped by a THIRD-PARTY package (e.g. `@zanix/space-ui`'s
+  `NavDrawer`, built on this package's own `defineComet`) never hydrates — its `data-comet-module`
+  comes out malformed (missing Vite's own `/@id/` prefix, and a single-slash `https:/jsr.io` instead
+  of `https://jsr.io`), which `resolveCometModuleUrl` (`comet-manifest.ts`) never recognizes as a
+  real URL. `@zanix/space`'s OWN ready-made Comets (`SubmitGuard`, ...) never show this — they're
+  diverted to a genuine native `import()` (`NATIVE_RUNTIME_MODULES`), so their `import.meta.url` is
+  computed by Deno itself. A third-party package's own Comet instead goes through Vite's ordinary
+  SSR module runner, which derives `import.meta.url` by running the module's own id through a POSIX
+  `path.resolve`-style normalizer — harmless for a real filesystem path, but for
+  `@deno/vite-plugin`'s own wrapped remote-module id (`deno::<loader>::<id>::<resolved>#deno`) this
+  silently collapses the embedded `https://` down to `https:/` (consecutive `/` are never meaningful
+  in a path, so the normalizer treats them as one), corrupting `import.meta.url` for every such
+  module. Fixed in `ssr-module-evaluator.ts`'s `RealImportEvaluator.runInlinedModule`: before
+  running a module, if its own id is one of `@deno/vite-plugin`'s wrapped specifiers resolving to a
+  genuine remote `http(s):` URL, that real, un-mangled URL overwrites the module's own corrupted
+  `import.meta.url` — general to any package's own remote-sourced Comet, not limited to a hardcoded
+  allowlist. An ordinary local file's `import.meta.url` is entirely unaffected.
+- **A real `zanix space build` still never bundled a ready-made Comet shipped by a THIRD-PARTY
+  package (e.g. `@zanix/space-ui`'s `NavDrawer`) — only this package's OWN six (`SubmitGuard`, ...),
+  via 1.6.0's `discoverUsedBuiltInComets`, a hardcoded name list scoped to
+  `@zanix/space/comet/<renderer>` alone** — a project composing `NavDrawer` directly still hit the
+  same `Failed to hydrate a Comet boundary` failure 1.6.0 fixed for this package's own Comets, since
+  nothing ever registered `NavDrawer`'s real source as a build entry. Fixed by replacing that
+  hardcoded mechanism with `discoverUsedCometImports` (`discover-comets.ts`): a project-wide scan
+  for any named import from a non-relative specifier actually rendered as JSX, each candidate
+  resolved through its own package's real module graph (following a re-export barrel down to its own
+  source, local or remote) and registered as a real build entry only once its target file actually
+  carries the `'use comet'` directive — the same generic mechanism now covers this package's own
+  ready-made Comets too, so `built-in-comets-registry.ts` and its hardcoded name list are gone
+  entirely. A project importing no ready-made Comet at all still produces zero extra build output,
+  unchanged.
+- **`comet-plugin.ts`'s `unwrapDenoModuleId` picked out a remote comet's own resolved URL via
+  `lastIndexOf('::')`, silently truncating it if the URL itself ever contained a literal `::`** — a
+  real `https://`/`file://` value never does today, so this never misbehaved in practice, but the
+  identity it computes feeds directly into the `'server-only'` boundary check
+  (`matchesKnownSource`/`findChainToComet`) and the `comets-manifest.json` key a production runtime
+  trusts to resolve a Comet's real chunk. Fixed by mirroring `@deno/vite-plugin`'s own
+  `parseDenoSpecifier` exactly: split on `::`, then rejoin every field past the first three (`deno`,
+  the loader, the original specifier) back into the resolved value, instead of assuming it never
+  contains the delimiter itself.
+- **A Comet/`clientEntry` import reached only through a DEEP SUBPATH — with or without a trailing
+  Vite-only `?worker`/`?url`/`?raw`/`?inline` suffix
+  (`monaco-editor/esm/vs/editor/
+  editor.worker?worker`, the real, documented way to reach a
+  specific worker entry file inside a package) — never got reduced to its real, installable package
+  name before being added to `optimizeDeps.include`** (`deno-optimize-deps-alias.ts`'s own
+  `collectBareSpecifiersFromFile`, fixed in 1.6.0 for the narrower "an entire bare specifier, no
+  subpath" case only). A value like
+  `optimizeDeps.include: ['monaco-editor/esm/vs/editor/editor.worker?worker']` can never match a
+  real installed package, so Vite's own pre-bundling/CJS-interop pass silently never actually ran
+  for it — confirmed live via a Monaco Web Worker setup: a transitive CJS dependency several levels
+  down (`monaco-graphql` → `graphql-language-service` → `nullthrows`) never got Vite's ESM-interop
+  rewrite, surfacing inside a Web Worker as
+  `SyntaxError: ... does not provide an export named
+  'default'`. Fixed by the new
+  `canonicalizePackageSpecifier`: strips a trailing `?...` suffix, then reduces to the package name
+  itself — the first two `/`-separated segments for a scoped package (`@scope/name/subpath` →
+  `@scope/name`), or just the first for an unscoped one (`name/subpath` → `name`) — applies
+  uniformly in both `zanix space dev` and a real `zanix space build`, and to both
+  `renderer: 'react'`/`'preact'` (`denoOptimizeDepsAliasPlugin` carries no mode/renderer-conditional
+  logic of its own).
+
 ## [1.6.0] - 2026-09-06
 
 ### Added

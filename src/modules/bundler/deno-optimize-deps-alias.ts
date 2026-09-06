@@ -1,60 +1,14 @@
 import type { Plugin, ResolvedConfig } from 'vite'
 import { dirname, resolve as resolvePath } from '@std/path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
-import { type Loader, ResolutionMode, ResolveError, Workspace } from '@deno/loader'
+import { pathToFileURL } from 'node:url'
+import type { Loader } from '@deno/loader'
 import { resolveDeno } from '@deno/vite-plugin/resolver'
 import { discoverComets } from './discover-comets.ts'
-import { findDenoConfigPath } from './deno-loader.ts'
+import { getBrowserLoader, resolveDenoAt } from './deno-specifier-resolver.ts'
 import { getClientEntry, resolveClientEntryFilePath } from '../render/client-entry.ts'
 
 // `Plugin`/`ResolvedConfig` are intentionally NOT re-exported — same accepted, structural
 // `deno doc --lint` finding already established by `space-plugin.ts`'s own doc comment.
-
-/** A SEPARATE loader instance from `deno-loader.ts`'s own `getSharedLoader()` — that one is
- * `platform: 'node'`, deliberately scoped to this project's own SSR-side resolution needs
- * (`cjs-interop.ts`, `bare-specifier-resolve.ts` — see its own doc). This plugin resolves modules
- * a real BROWSER will load, so `platform: 'browser'` is the semantically correct choice — for a
- * package with platform-conditional `exports` (unlike `react`/`react-dom`, which don't
- * discriminate node/browser within the same subpath), reusing the SSR loader here could silently
- * resolve the wrong file.
- *
- * Cached per discovered config path, never a single process-wide singleton: constructing one
- * `Workspace` with no explicit `configPath` at all falls back to auto-discovering from the
- * process's own `Deno.cwd()`, which is `@zanix/space`'s own development root while iterating on
- * `@zanix/space` itself (this plugin's real, intended target is always some OTHER app's
- * `config.root`) — silently correct only by coincidence, for whichever specifiers both configs
- * happen to declare identically (`react`), and silently WRONG for anything declared only in the
- * real target app's own `deno.json` (a real, separate npm dependency — `ms` — imported through a
- * Comet's own relative helper file). Each loader still only ever computes resolutions on demand,
- * never caches a module instance, so sharing one across calls for the SAME root creates no second
- * source of module identity — the same guarantee `getSharedLoader()`'s own doc already establishes
- * (that one is ALSO cached per discovered config path, not a bare singleton, for the identical
- * reason).
- *
- * Deliberately never calls `loader.addEntrypoints(...)` — a real app's own `node_modules` is
- * already fully materialized by the time this plugin's `configResolved` ever runs (Deno's own
- * `nodeModulesDir: 'auto'` resolves every bare specifier the app's `deno.json` declares as part
- * of the SAME `deno run` invocation that starts `zanix space dev` in the first place, well before
- * this plugin gets a chance to run), so `resolveDeno`/`loader.resolveSync` already succeeds
- * without it for anything genuinely declared there. `addEntrypoints` has a real side effect beyond
- * THIS loader's own graph: triggering it against a freshly-created project (one never previously
- * run through a real `deno run`) breaks the unrelated `ssr` environment's OWN, already-correct
- * dependency resolution (`RealImportEvaluator`/`bare-specifier-resolve.ts`'s own fix), the exact
- * kind of cross-cutting failure this file's own `ssr`-scoping comments elsewhere already guard
- * against — so it stays unused here.
- */
-const browserLoadersByConfigPath = new Map<string, Promise<Loader>>()
-function getBrowserLoader(root: string): Promise<Loader> {
-  const configPath = findDenoConfigPath(root)
-  const key = configPath ?? ''
-  let loaderPromise = browserLoadersByConfigPath.get(key)
-  if (!loaderPromise) {
-    loaderPromise = new Workspace({ platform: 'browser', configPath })
-      .createLoader()
-    browserLoadersByConfigPath.set(key, loaderPromise)
-  }
-  return loaderPromise
-}
 
 /** Every bare specifier any environment's own resolved `optimizeDeps.include` lists — the
  * complete, deduplicated set this plugin needs to resolve. Vite populates `include` itself
@@ -93,6 +47,31 @@ function extractImportSpecifiers(source: string): string[] {
     while ((match = re.exec(source))) specifiers.add(match[2])
   }
   return [...specifiers]
+}
+
+/**
+ * Reduces a non-relative import specifier down to the real, installable package name
+ * `optimizeDeps.include` actually needs — the same canonicalization Vite's own dependency scanner
+ * already applies when it discovers a bare import through its normal static-analysis path (never
+ * reached from a project's own local relative-import graph, which is why this file's own walk
+ * exists at all — see its top-level doc). Two real gaps this closes, both confirmed live via a
+ * Monaco Web Worker setup importing a deep subpath: a scoped package's own name is its first TWO
+ * `/`-separated segments, never the whole string (`@zanix/space/comet/react` is package
+ * `@zanix/space`, not a package literally named `@zanix/space/comet/react`); and Vite's own
+ * `?worker`/`?url`/`?raw`/`?inline` import-suffix convention (`monaco-editor/esm/vs/editor/
+ * editor.worker?worker`) is never part of a real package name either. Without this,
+ * `optimizeDeps.include` gets a value it can never actually match against a real installed
+ * package, so the whole point of adding it — triggering Vite's own pre-bundling/CJS-interop pass —
+ * silently never happens, exactly as if this discovery had never run at all.
+ *
+ * @param specifier - A non-relative specifier exactly as matched from source text (never
+ * pre-validated) — a plain bare import (`lodash`) passes through unchanged, since a plain package
+ * name already equals its own canonical form.
+ */
+export function canonicalizePackageSpecifier(specifier: string): string {
+  const withoutQuery = specifier.split('?')[0]
+  const segments = withoutQuery.split('/')
+  return withoutQuery.startsWith('@') ? segments.slice(0, 2).join('/') : segments[0]
 }
 
 /** Resolves a relative import (`./x`, `../x`) to a real file on disk, trying the raw path first
@@ -152,7 +131,7 @@ async function collectBareSpecifiersFromFile(
         return
       }
       if (specifier.startsWith('/')) return // an absolute project path — not a package, skip
-      bareSpecifiers.add(specifier)
+      bareSpecifiers.add(canonicalizePackageSpecifier(specifier))
     }),
   )
 }
@@ -198,69 +177,6 @@ async function discoverBareSpecifiersFromEntryFiles(
 function exactSpecifierRegex(specifier: string): RegExp {
   const escaped = specifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   return new RegExp(`^${escaped}$`)
-}
-
-/**
- * A referrer-aware sibling of `@deno/vite-plugin/resolver`'s own `resolveDeno` — that function
- * hardcodes `referrer: undefined` in its own `loader.resolveSync` call, which is exactly right for
- * resolving a Comet's own TOP-LEVEL bare imports against `config.root`'s single, unscoped import
- * map (no ambiguity there to resolve), but wrong for a specifier found INSIDE a file this plugin
- * itself already resolved to some OTHER local package (`@zanix/space`'s own `mod.ts`, once
- * `@zanix/space` itself resolves locally — see {@linkcode discoverNestedAliases}'s own doc for why
- * this is needed at all). A bare specifier like `modules/render/mod.ts` is only meaningful against
- * `@zanix/space`'s OWN `deno.jsonc` import map (`"modules/": "./src/modules/"`), never the
- * consuming project's — exactly the same "a member's `imports` are scoped to that member's own
- * directory" reasoning `resolveViteSpecifier`'s own `memberReferrerUrl` and
- * `bare-specifier-resolve.ts`'s own `resolveBareSpecifierCanonically` already establish for the
- * `ssr` side; this file's own browser-scoped loader had no equivalent until now.
- *
- * Mirrors `resolveDeno`'s own jsr:/http(s): `addEntrypoints`-then-re-resolve dance (needed because
- * `loader.resolveSync` alone returns an un-expanded `jsr:`/`http(s):` string the first time a given
- * target hasn't been graphed yet) rather than importing it, since `resolveDeno` itself has no
- * `referrer` parameter to thread through — reimplementing the ~15 lines here is simpler and safer
- * than forking `@deno/vite-plugin` to add one. Never handles `resolveDeno`'s own `id.startsWith('npm:')`
- * branch — that only matters for a LITERAL `npm:`-prefixed specifier, which real TypeScript source
- * text (what {@linkcode extractImportSpecifiers} scans) never contains; a bare specifier like
- * `'react'` is what always shows up here instead, same as `resolveDeno`'s own primary case.
- *
- * `addEntrypoints` here carries the exact same, already-accepted cross-cutting risk
- * {@linkcode getBrowserLoader}'s own doc describes for `resolveDeno`'s existing (already shipped,
- * unconditional) call to it in `configResolved` below — nothing new is introduced by calling it
- * again, referrer-aware, from this sibling function.
- */
-async function resolveDenoAt(
-  id: string,
-  loader: Loader,
-  referrer: string | undefined,
-): Promise<{ id: string; isLocalFile: boolean } | null> {
-  if (id.startsWith('\0')) return null
-  let resolved: string
-  try {
-    resolved = loader.resolveSync(id, referrer, ResolutionMode.Import)
-    if (
-      resolved.startsWith('jsr:') || resolved.startsWith('http:') ||
-      resolved.startsWith('https:')
-    ) {
-      try {
-        await loader.addEntrypoints([resolved])
-      } catch {
-        return null
-      }
-      resolved = loader.resolveSync(resolved, referrer, ResolutionMode.Import)
-    }
-  } catch (err) {
-    if (err instanceof ResolveError) return null
-    throw err
-  }
-  if (resolved.startsWith('node:')) return null
-  if (resolved.startsWith('file://')) {
-    return { id: fileURLToPath(resolved), isLocalFile: true }
-  }
-  // A remote (jsr:/http(s):) or otherwise non-file result — genuinely unresolvable to a local
-  // filesystem path this plugin's own `resolve.alias` mechanism could ever point to. Left for a
-  // caller to skip, same as `configResolved`'s own existing `!/^https?:\/\//` filter does today for
-  // a top-level specifier.
-  return { id: resolved, isLocalFile: false }
 }
 
 /**

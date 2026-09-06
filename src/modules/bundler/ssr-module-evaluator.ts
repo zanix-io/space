@@ -1,5 +1,6 @@
-import type { ModuleEvaluator, ModuleRunnerContext } from 'vite/module-runner'
+import type { EvaluatedModuleNode, ModuleEvaluator, ModuleRunnerContext } from 'vite/module-runner'
 import { join, toFileUrl } from '@std/path'
+import { isDenoSpecifier, parseDenoSpecifier } from '@deno/vite-plugin/resolver'
 import { fromNativeRuntimeSentinel } from './native-runtime-modules.ts'
 
 /**
@@ -57,6 +58,7 @@ export class RealImportEvaluator implements ModuleEvaluator {
   public async runInlinedModule(
     context: ModuleRunnerContext,
     code: string,
+    module: Readonly<EvaluatedModuleNode>,
   ): Promise<void> {
     const ssrModuleExportsKey = '__vite_ssr_exports__'
     const ssrImportMetaKey = '__vite_ssr_import_meta__'
@@ -64,6 +66,37 @@ export class RealImportEvaluator implements ModuleEvaluator {
     const ssrDynamicImportKey = '__vite_ssr_dynamic_import__'
     const ssrExportAllKey = '__vite_ssr_exportAll__'
     const ssrExportNameKey = '__vite_ssr_exportName__'
+
+    // `context[ssrImportMetaKey].url` is what a module's own `import.meta.url` evaluates to — Vite's
+    // own module runner (`ModuleRunner.directRequest`) computes this by running `module.id`/`.file`
+    // through a POSIX `path.resolve`-style normalizer, which silently collapses a real remote
+    // specifier's `https://` down to `https:/` (consecutive `/` are never meaningful in a filesystem
+    // path, so the normalizer treats them as one) — confirmed empirically, a real, reproduced bug:
+    // any Comet whose OWN source file is reached through a bare/remote specifier (a ready-made
+    // Comet shipped by a THIRD-PARTY package, e.g. `@zanix/space-ui`'s `NavDrawer`, never one of
+    // `@zanix/space`'s own — those are diverted to a genuine native `import()` instead, see
+    // `runExternalModule`'s own doc, so `import.meta.url` there is computed by Deno itself, never
+    // touched by this normalizer at all) gets a corrupted, single-slash `data-comet-module` in
+    // `zanix space dev` — malformed in a way `resolveCometModuleUrl` (`comet-manifest.ts`) never
+    // recognizes as a real `https://`/`http://` URL, so it falls through to the WRONG branch entirely
+    // instead of the one that correctly serves a remote module.
+    //
+    // `module.id`/`.file` themselves are never touched by that normalizer — they still carry
+    // `@deno/vite-plugin`'s own real, un-mangled wrapped specifier
+    // (`deno::<loader>::<id>::<resolved>#deno`), the exact same shape `dev-engine.ts`'s own
+    // `realFilePathOf` already parses via `isDenoSpecifier`/`parseDenoSpecifier` for an unrelated
+    // reason (recovering a real on-disk path for `'server-only'`/`'use comet'` directive scanning).
+    // Reusing that same pair here recovers the real, un-mangled resolved value and corrects
+    // `import.meta.url` BEFORE this module ever runs — a real filesystem path is left untouched
+    // (that case already works correctly; only a genuinely remote `http(s):` resolution needed
+    // fixing), and nothing here is specific to any one package — it corrects `import.meta.url` for
+    // ANY module reached this way, not just a hardcoded allowlist.
+    if (module.id && isDenoSpecifier(module.id)) {
+      const { resolved } = parseDenoSpecifier(module.id)
+      if (resolved.startsWith('http://') || resolved.startsWith('https://')) {
+        context[ssrImportMetaKey].url = resolved
+      }
+    }
 
     const params = [
       ssrModuleExportsKey,

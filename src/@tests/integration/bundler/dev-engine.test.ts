@@ -1,5 +1,5 @@
 import { assert, assertEquals } from '@std/assert'
-import { join } from '@std/path'
+import { fromFileUrl, join } from '@std/path'
 import { getTemporaryFolder } from '@zanix/helpers'
 import { createSpaceDevEngine, type SsrModuleChangedEvent } from 'modules/bundler/dev-engine.ts'
 import { resolveCometModuleUrl } from 'modules/comets/comet-manifest.ts'
@@ -1001,6 +1001,80 @@ Deno.test(
         }
       },
     )
+  },
+)
+
+/**
+ * The full end-to-end counterpart to `ssr-module-evaluator.test.ts`'s own `runInlinedModule` unit
+ * tests above — those call the evaluator directly with a hand-built context; this instead runs the
+ * REAL `zanix space dev` request path (`createSpaceDevEngine` → `ssrLoadModule` → the real Vite SSR
+ * module runner → `RealImportEvaluator`) against `@zanix/space-ui@2.0.0`'s own real, published,
+ * `defineComet`-wrapped `NavDrawer`, then actually RENDERS it (`renderToStaticMarkup`) to confirm
+ * the real `data-comet-module` attribute a browser would receive carries the correct, un-mangled
+ * `https://jsr.io/...` value — not the `https:/jsr.io` (single slash) corruption this whole
+ * regression suite exists for. A separate, local `deno.json` pins `@zanix/space-ui`'s own real `jsr:`
+ * subpath directly (an exact version, never a `^` range, so this never drifts against a moving
+ * target) instead of walking up to this repo's own `deno.jsonc`, which still points
+ * `@zanix/space-ui` at its local, unpublished checkout during this cross-repo development window —
+ * the real, immutable, already-published package is what a genuine third-party consumer actually
+ * resolves.
+ */
+Deno.test(
+  'createSpaceDevEngine: ssrLoadModule renders the real, published @zanix/space-ui NavDrawer with a correct, un-mangled data-comet-module attribute — the real end-to-end fix for the reported zanix space dev NavDrawer hydration failure',
+  async () => {
+    const root = await Deno.makeTempDir({ dir: TMP_ROOT })
+    try {
+      // Spreads THIS repo's own real dependency set (react, react-dom, ...) rather than
+      // hand-guessing which transitive specifier `mod-react.ts`'s own renderer-installation graph
+      // needs next — the same technique `build-client.test.ts`'s own real SubmitGuard test uses,
+      // for the identical reason. Only `@zanix/space-ui` (still pointed at its local, unpublished
+      // checkout in `ownDenoJsonc.imports` during this cross-repo development window) and
+      // `@zanix/space/react` (self-resolved by this repo's own `name`/`exports` fields, which a
+      // temp root with its own `deno.json` never walks up to) need an explicit override here.
+      const { parse } = await import('jsr:@std/jsonc@^1.0.2')
+      const ownDenoJsonc = parse(
+        await Deno.readTextFile(fromFileUrl(new URL('../../../../deno.jsonc', import.meta.url))),
+      ) as { imports: Record<string, string> }
+      const reactModPath = fromFileUrl(new URL('../../../../mod-react.ts', import.meta.url))
+      await Deno.writeTextFile(
+        join(root, 'deno.json'),
+        JSON.stringify({
+          imports: {
+            ...ownDenoJsonc.imports,
+            '@zanix/space/react': reactModPath,
+            '@zanix/space-ui/runtime/nav-drawer': 'jsr:@zanix/space-ui@2.0.0/runtime/nav-drawer',
+          },
+        }),
+      )
+      await Deno.writeTextFile(
+        join(root, 'page.tsx'),
+        `import '@zanix/space/react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { NavDrawer } from '@zanix/space-ui/runtime/nav-drawer'
+
+export const html = renderToStaticMarkup(<NavDrawer label="Main" items={[]} />)
+`,
+      )
+
+      const engine = await createSpaceDevEngine({ root, isRouteEntry })
+      try {
+        const mod = await engine.ssrLoadModule('/page.tsx')
+        const html = mod.html as string
+        assert(
+          html.includes(
+            'data-comet-module="/@id/__x00__deno::TypeScript::https://jsr.io/@zanix/space-ui/' +
+              '2.0.0/src/components/NavDrawer/index.ts::https://jsr.io/@zanix/space-ui/2.0.0/src/' +
+              'components/NavDrawer/index.ts#deno"',
+          ),
+          html,
+        )
+        assert(!html.includes('https:/jsr.io'), html)
+      } finally {
+        await engine.close()
+      }
+    } finally {
+      await Deno.remove(root, { recursive: true })
+    }
   },
 )
 

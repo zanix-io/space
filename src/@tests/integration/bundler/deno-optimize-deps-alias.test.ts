@@ -210,6 +210,43 @@ Deno.test(
 )
 
 Deno.test(
+  "denoOptimizeDepsAliasPlugin: a Comet importing a DEEP SUBPATH ('react-dom/client', never the " +
+    "package's own root) still gets the real package name added to optimizeDeps.include — never " +
+    'the raw subpath text, which `optimizeDeps.include` could never match against a real ' +
+    'installed package (the real gap `canonicalizePackageSpecifier` closes, confirmed live via a ' +
+    "Monaco Web Worker's own deep worker-entry subpath import)",
+  { ignore: !shouldRunEnvSensitiveTests },
+  async () => {
+    const root = await Deno.makeTempDir({ dir: TMP_ROOT })
+    try {
+      await Deno.writeTextFile(
+        join(root, 'counter.tsx'),
+        `'use comet'\nimport { createRoot } from 'react-dom/client'\nexport default function Counter() { return typeof createRoot }\n`,
+      )
+      await withDevServer(root, async (server) => {
+        const include = server.config.environments.client.optimizeDeps.include
+        assert(
+          include?.includes('react-dom'),
+          `expected the bare package name "react-dom", never the raw subpath — got: ${include}`,
+        )
+        assertFalse(
+          include?.includes('react-dom/client'),
+          'the raw, un-canonicalized subpath specifier must never reach optimizeDeps.include',
+        )
+        const result = await server.environments.client.transformRequest('/counter.tsx')
+        assert(
+          result?.code.includes('/.vite/deps/react-dom_client.js') ||
+            result?.code.includes('/.vite/deps/react-dom.js'),
+          result?.code,
+        )
+      })
+    } finally {
+      await removeTempDirWithRetry(root)
+    }
+  },
+)
+
+Deno.test(
   'denoOptimizeDepsAliasPlugin: discovers a specifier reached only through a real ' +
     "SpaceAppConfig.clientEntry override — never reachable from any Comet's own import graph, " +
     'the real gap this closes (a Monaco Web Worker setup surfaced it as an opaque "Could not ' +

@@ -55,8 +55,18 @@ function unwrapDenoModuleId(id: string): string {
   const stripped = id.startsWith('\0') ? id.slice(1) : id
   if (!stripped.startsWith('deno::') || !stripped.endsWith('#deno')) return id
   const withoutSuffix = stripped.slice(0, -'#deno'.length)
-  const lastSeparator = withoutSuffix.lastIndexOf('::')
-  return lastSeparator === -1 ? id : withoutSuffix.slice(lastSeparator + 2)
+  // `deno::<loader>::<specifier>::<resolved>` — exactly 4 `::`-separated fields, the first 3 fixed
+  // (`deno`, the loader, the original specifier) and every remaining one belonging to `<resolved>`,
+  // rejoined with `::` rather than picked out via `lastIndexOf`'s "last separator wins" — the
+  // identical approach `@deno/vite-plugin`'s own `parseDenoSpecifier` already takes for this exact
+  // format, for the identical reason: a real resolved URL/path is never guaranteed not to contain a
+  // literal `::` substring of its own. This codebase's own real inputs never do today (a genuine
+  // `https://`/`file://` value only ever has single colons), so `lastIndexOf` never actually
+  // mis-split anything observed so far — but it would silently truncate `<resolved>` to whatever
+  // followed its OWN last `::` the moment one ever did, on a value this function feeds straight
+  // into the `'server-only'` boundary's own identity comparison ({@linkcode matchesKnownSource}).
+  const parts = withoutSuffix.split('::')
+  return parts.length < 4 ? id : parts.slice(3).join('::')
 }
 
 /**

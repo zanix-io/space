@@ -213,27 +213,58 @@ export async function ensureStylesheetsLoaded(html: string): Promise<string> {
  * its replacement content to already be connected right next to it — both true here as a
  * consequence of plain in-order connection, nothing this function does explicitly.
  *
- * `nonce` is deliberately never copied from the original — a fragment response never carries a
- * per-request nonce that matches the CURRENTLY ACTIVE document's own (Orbit only ever swaps the
+ * `nonce` is deliberately never copied from the original AS-IS — a fragment response never carries
+ * a per-request nonce that matches the CURRENTLY ACTIVE document's own (Orbit only ever swaps the
  * outlet, never the whole document — the identical problem `getActiveCspNonce()`'s own doc already
- * describes for a Comet generating new nonce'd content client-side). Every fresh script gets that
+ * describes for a Comet generating new nonce'd content client-side). Every REVIVED script gets that
  * active nonce instead, or none at all on a page with no nonce-based CSP configured.
+ *
+ * `fragmentNonce` gates WHICH scripts get revived at all — a script is only ever revived when its
+ * own `nonce` attribute matches `fragmentNonce` (the nonce THIS fragment's own
+ * `Content-Security-Policy` response header actually declared, via {@linkcode extractCspNonce}), or
+ * when `fragmentNonce` is `undefined` (no nonce-based CSP configured at all — nothing to verify
+ * against, so every script is revived, unchanged from before this check existed). Without this, ANY
+ * `<script>` found here — including one an unrelated XSS bug elsewhere managed to inject into the
+ * rendered HTML, with no nonce or the wrong one — would get handed a fresh, VALID nonce
+ * unconditionally, silently undoing CSP's nonce protection specifically for content reached through
+ * an Orbit navigation: exactly what a real CSP-enforcing full-document load already refuses to
+ * execute. A rejected script is left exactly as parsed, inert forever (the same original bug this
+ * function otherwise fixes) — the same practical outcome a real CSP block already produces.
  *
  * Exported so a dedicated `happy-dom`-backed test can exercise it directly (same setup
  * `ensureStylesheetsLoaded`'s own suite already established), not only indirectly through a full
  * `performSwap`.
  */
-export function reviveFragmentScripts(root: DocumentFragment): void {
-  const nonce = getActiveCspNonce()
+export function reviveFragmentScripts(
+  root: DocumentFragment,
+  fragmentNonce: string | undefined,
+): void {
+  const activeNonce = getActiveCspNonce()
   for (const original of root.querySelectorAll('script')) {
+    // `getAttribute`, not `.nonce` — confirmed empirically (a real Chrome, not just `happy-dom`)
+    // that a script's own nonce attribute stays readable this way regardless of how/where it was
+    // parsed, unlike `getActiveCspNonce()`'s own `.nonce` read, which exists for a DIFFERENT
+    // element (the ACTIVE document's own, already-connected one) and reason.
+    if (fragmentNonce !== undefined && original.getAttribute('nonce') !== fragmentNonce) continue
     const script = document.createElement('script')
     for (const { name, value } of original.attributes) {
       if (name !== 'nonce') script.setAttribute(name, value)
     }
-    if (nonce !== undefined) script.nonce = nonce
+    if (activeNonce !== undefined) script.nonce = activeNonce
     script.textContent = original.textContent
     original.replaceWith(script)
   }
+}
+
+/**
+ * Extracts the shared script-src/style-src nonce value from a raw `Content-Security-Policy` header
+ * — this framework's own convention (every zero-config CSP default gives style-src the SAME
+ * per-request nonce as script-src), so there's exactly one value to ever find. `undefined` when the
+ * header carries no nonce-based CSP at all (a `null` header, or a real one with no nonce source) —
+ * {@linkcode reviveFragmentScripts}'s own contract for "nothing to verify a script's nonce against".
+ */
+function extractCspNonce(cspHeader: string | null): string | undefined {
+  return cspHeader?.match(/'nonce-([^']+)'/)?.[1]
 }
 
 /**
@@ -359,7 +390,10 @@ async function performSwap(href: string, replace: boolean): Promise<void> {
   // See `reviveFragmentScripts`'s own doc — must run before `template.content` is ever moved into
   // the live document (`swap` below), so every script it contains (React's own streaming Suspense
   // reveal mechanism included) is a fresh, non-inert element the moment it gets there.
-  reviveFragmentScripts(template.content)
+  // `extractCspNonce(cspHeader)` is THIS fragment's own declared nonce, straight off the same
+  // response `cspHeader` already came from — never the active document's own (that's what a
+  // revived script gets ASSIGNED, not what it's checked against).
+  reviveFragmentScripts(template.content, extractCspNonce(cspHeader))
 
   // Registers each `persist`-tagged boundary's own `view-transition-name` — see
   // `comet-persist-transition.ts`'s own doc for the full mechanism. This MUST run before

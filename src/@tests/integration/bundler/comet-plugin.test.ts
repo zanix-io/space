@@ -237,3 +237,55 @@ Deno.test('cometPlugin: a file with no "use comet" directive is left alone entir
     await Deno.remove(root, { recursive: true })
   }
 })
+
+Deno.test(
+  "cometPlugin: a wrapped remote id whose OWN resolved value contains a literal '::' is never " +
+    'truncated — the manifest key keeps the full value, matching what a real `import.meta.url` ' +
+    'would actually be for it. Calls `transform`/`generateBundle` directly, bypassing a real ' +
+    'Rollup build entirely: this exercises the id-unwrapping logic in isolation, the same way a ' +
+    'real one never observably differs for THIS specific parsing question',
+  async () => {
+    // A hand-built wrapped id in the exact `deno::<loader>::<specifier>::<resolved>#deno` shape
+    // `@deno/vite-plugin`'s own `toDenoSpecifier` produces — `resolved` deliberately contains its
+    // own literal `::`, an edge case a real `https://`/`file://` value never produces today but
+    // that a naive `lastIndexOf`-based parse would still mishandle if one ever did (silently
+    // dropping everything before that inner `::`) — `@deno/vite-plugin`'s own `parseDenoSpecifier`
+    // already guards against exactly this, and this plugin's own unwrap step mirrors it.
+    const resolvedWithEmbeddedSeparator = 'https://jsr.io/@example/pkg/mod.ts?variant=a::b'
+    const wrappedId = `\0deno::TSX::jsr:@example/pkg@^1.0.0::${resolvedWithEmbeddedSeparator}#deno`
+
+    // Vite's own `Plugin['transform']`/`['generateBundle']` types are deeply recursive unions
+    // this test has no interest in reproducing; a plain hook call only needs a `this` carrying
+    // `emitFile` and the real (code, id)/(options, bundle) args, hence `any[]` for those.
+    // deno-lint-ignore no-explicit-any
+    type PluginHook = (this: { emitFile: (asset: unknown) => void }, ...args: any[]) => unknown
+
+    const plugin = cometPlugin({ knownEntryPaths: [] })
+    const fakeTransformContext = { emitFile: () => {} }
+    await (plugin.transform as PluginHook).call(
+      fakeTransformContext,
+      "'use comet'\nexport default function C() {}\n",
+      wrappedId,
+    )
+
+    let manifestSource: string | undefined
+    const fakeGenerateBundleContext = {
+      emitFile: (asset: unknown) => {
+        const { fileName, source } = asset as { fileName: string; source: string }
+        if (fileName === 'comets-manifest.json') manifestSource = source
+      },
+    }
+    const fakeBundle: Record<string, unknown> = {
+      'assets/example.js': {
+        type: 'chunk',
+        facadeModuleId: wrappedId,
+        fileName: 'assets/example.js',
+      },
+    }
+    ;(plugin.generateBundle as PluginHook).call(fakeGenerateBundleContext, {}, fakeBundle)
+
+    assert(manifestSource, 'expected comets-manifest.json to have been emitted')
+    const manifest = JSON.parse(manifestSource)
+    assertEquals(manifest[resolvedWithEmbeddedSeparator], '/assets/example.js')
+  },
+)

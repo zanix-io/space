@@ -41,7 +41,7 @@ Deno.test(
       'document.getElementById("target").textContent = "ran"' +
       '</script>'
 
-    reviveFragmentScripts(template.content)
+    reviveFragmentScripts(template.content, undefined)
     document.body.appendChild(template.content)
     await Promise.resolve()
 
@@ -62,7 +62,7 @@ Deno.test(
       '<div id="a"></div>' +
       '<script>globalThis.__reviveTestHelper("a")</script>'
 
-    reviveFragmentScripts(template.content)
+    reviveFragmentScripts(template.content, undefined)
     try {
       document.body.appendChild(template.content)
       await Promise.resolve()
@@ -93,7 +93,7 @@ Deno.test(
     const original = template.content.querySelector('script')
     assert(original, 'expected a script fixture to exist before reviving')
 
-    reviveFragmentScripts(template.content)
+    reviveFragmentScripts(template.content, undefined)
 
     const inner = template.content.querySelector('#inner')
     const revived = template.content.querySelector('script')
@@ -111,7 +111,7 @@ Deno.test(
     const template = document.createElement('template')
     template.innerHTML = '<div id="a" class="keep-me">hello<script>1</script></div>'
 
-    reviveFragmentScripts(template.content)
+    reviveFragmentScripts(template.content, undefined)
 
     const div = template.content.querySelector('#a')
     assert(div, 'expected the div to survive')
@@ -128,7 +128,7 @@ Deno.test(
     const template = document.createElement('template')
     template.innerHTML = '<script src="/vendor.js" async></script>'
 
-    reviveFragmentScripts(template.content)
+    reviveFragmentScripts(template.content, undefined)
 
     const script = template.content.querySelector('script')
     assert(script, 'expected the script to survive as a script')
@@ -140,7 +140,9 @@ Deno.test(
 Deno.test(
   "reviveFragmentScripts: never copies the original's own nonce — every fresh script gets the " +
     "ACTIVE document's current nonce instead, the same reasoning getActiveCspNonce()'s own doc " +
-    'already establishes for a Comet generating new content',
+    'already establishes for a Comet generating new content. fragmentNonce: undefined here models ' +
+    'a page with no nonce-based CSP at all — nothing to verify a script against, so it still gets ' +
+    'revived and reassigned unconditionally, same as before the verification gate existed',
   () => {
     resetDom()
     // Stubs `document.querySelector('[nonce]')` directly, exactly like
@@ -160,7 +162,7 @@ Deno.test(
       const template = document.createElement('template')
       template.innerHTML = '<script nonce="stale-fragment-nonce">1</script>'
 
-      reviveFragmentScripts(template.content)
+      reviveFragmentScripts(template.content, undefined)
 
       // `.nonce`, never `getAttribute('nonce')` — same reasoning `active-nonce.test.ts`'s own
       // suite already documents: happy-dom keeps the IDL property and the content attribute
@@ -177,6 +179,72 @@ Deno.test(
   },
 )
 
+// Security regression coverage: a fragment's own SCRIPT-LEVEL nonce (as opposed to the fragment
+// response's CSP header's declared nonce, `fragmentNonce`) must actually be checked before a
+// script is ever revived/executed — the exact gap that would otherwise let ANY `<script>` an
+// unrelated XSS bug managed to inject into rendered HTML get handed a fresh, valid nonce and run,
+// silently undoing CSP's own nonce protection specifically for Orbit-navigated content. Read via
+// `getAttribute('nonce')` (confirmed empirically against a real Chrome, not just `happy-dom`, to
+// reliably reflect the true value regardless of how/where the element was parsed) — happy-dom
+// itself reflects an attribute set via markup this way too (unlike `.nonce`, per the test above),
+// so these assertions exercise the real gate, not a stub standing in for it.
+
+Deno.test(
+  'reviveFragmentScripts: a script whose own nonce matches fragmentNonce IS revived and executes ' +
+    '— the legitimate, server-authorized case',
+  async () => {
+    resetDom()
+    const template = document.createElement('template')
+    template.innerHTML = '<div id="target"></div><script nonce="real-fragment-nonce">' +
+      'document.getElementById("target").textContent = "ran"' +
+      '</script>'
+
+    reviveFragmentScripts(template.content, 'real-fragment-nonce')
+    document.body.appendChild(template.content)
+    await Promise.resolve()
+
+    assertEquals(document.getElementById('target')?.textContent, 'ran')
+  },
+)
+
+Deno.test(
+  'reviveFragmentScripts: a script with NO nonce at all is left inert when fragmentNonce is set — ' +
+    'never revived, never executes, exactly what a real CSP-enforcing full-document load would ' +
+    'already refuse to run',
+  async () => {
+    resetDom()
+    const template = document.createElement('template')
+    template.innerHTML = '<div id="target"></div><script>' +
+      'document.getElementById("target").textContent = "ran"' +
+      '</script>'
+
+    reviveFragmentScripts(template.content, 'real-fragment-nonce')
+    document.body.appendChild(template.content)
+    await Promise.resolve()
+
+    assertEquals(document.getElementById('target')?.textContent, '')
+  },
+)
+
+Deno.test(
+  "reviveFragmentScripts: a script whose nonce doesn't match fragmentNonce is left inert — the " +
+    'exact injected-script scenario this gate exists for (an XSS bug elsewhere, or simply a ' +
+    "different response's stale nonce, guessing wrong)",
+  async () => {
+    resetDom()
+    const template = document.createElement('template')
+    template.innerHTML = '<div id="target"></div><script nonce="attacker-guessed-nonce">' +
+      'document.getElementById("target").textContent = "ran"' +
+      '</script>'
+
+    reviveFragmentScripts(template.content, 'real-fragment-nonce')
+    document.body.appendChild(template.content)
+    await Promise.resolve()
+
+    assertEquals(document.getElementById('target')?.textContent, '')
+  },
+)
+
 Deno.test(
   'reviveFragmentScripts: on a page with no nonce-based CSP at all, the fresh script carries no ' +
     'nonce either',
@@ -185,7 +253,7 @@ Deno.test(
     const template = document.createElement('template')
     template.innerHTML = '<script>1</script>'
 
-    reviveFragmentScripts(template.content)
+    reviveFragmentScripts(template.content, undefined)
 
     const script = template.content.querySelector('script')
     assert(script, 'expected the script to survive as a script')
@@ -200,7 +268,7 @@ Deno.test(
     const template = document.createElement('template')
     template.innerHTML = '<div id="a">hello</div>'
 
-    reviveFragmentScripts(template.content)
+    reviveFragmentScripts(template.content, undefined)
 
     assertEquals(template.content.querySelector('#a')?.textContent, 'hello')
   },

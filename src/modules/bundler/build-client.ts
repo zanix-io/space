@@ -13,8 +13,7 @@ import type { MediaOptimizeOptions } from './media-plugin-types.ts'
 import { ASSETS_PLUGIN_SPECIFIER, MEDIA_PLUGIN_SPECIFIER } from './build-plugin-specifiers.ts'
 import { createAssetManifestRegistry } from 'modules/assets/asset-manifest-registry.ts'
 import { resolvePwaPluginOptions } from './resolve-pwa-plugin-options.ts'
-import { discoverComets, discoverUsedBuiltInComets } from './discover-comets.ts'
-import { getBuiltInCometUrls } from 'modules/comets/built-in-comets-registry.ts'
+import { discoverComets, discoverUsedCometImports } from './discover-comets.ts'
 import { collectPageStyles, discoverPages, type ModuleImporter } from './discover-pages.ts'
 import { scanPageFiles } from 'modules/router/scan-page-files.ts'
 import {
@@ -371,25 +370,22 @@ export async function buildSpaceClient(
     input[entryName] = errorFile
   }
 
-  // Whichever of this package's own ready-made Comets (`SubmitGuard`, ...) the project actually
-  // imports from `@zanix/space/comet/<renderer>` — the SAME auto-comet treatment
-  // `errorBoundaryFiles` above already gets, for the SAME reason: none of these are reachable
-  // client-side without a real built chunk of their own, and without one `discoverComets`'s own
-  // local-filesystem walk never finds them (they live inside THIS package's own install location,
-  // never a consuming app's `routesDir`) — silently degrading to an unattributed "Failed to
-  // hydrate a Comet boundary" the moment an app composes one directly. Detected, not assumed: an
-  // app that never imports any of these gets zero extra build output for them. Each URL is either
-  // a real `file://` path (this package's own test suite, or a TEMP-linked local checkout —
-  // realpath'd, same as any other local comet) or a real `https://jsr.io/...` one (any genuine
-  // `jsr:`-installed consumer) — passed straight through unresolved in that case, same `isFileUrl`
-  // branch `errorBoundaryFiles`'s own default-error-view handling above already establishes.
-  const usedBuiltInComets = await discoverUsedBuiltInComets(root, renderer)
-  const builtInCometFiles = await Promise.all(
-    getBuiltInCometUrls(renderer, usedBuiltInComets).map((url) =>
-      isFileUrl(url) ? Deno.realPath(fromFileUrl(url)) : Promise.resolve(url)
-    ),
-  )
-  for (const cometFile of builtInCometFiles) {
+  // Any ready-made Comet this project actually renders — whether shipped by THIS package
+  // (`SubmitGuard`, ...) or a completely different one (`@zanix/space-ui`'s own `NavDrawer`, built
+  // on this package's `defineComet` but never one of this package's own) — the SAME auto-comet
+  // treatment `errorBoundaryFiles` above already gets, for the SAME reason: none of these are
+  // reachable client-side without a real built chunk of their own, and without one
+  // `discoverComets`'s own local-filesystem walk never finds them (they live inside SOME OTHER
+  // package's own install location, never this app's `routesDir`) — silently degrading to an
+  // unattributed "Failed to hydrate a Comet boundary" the moment an app composes one directly.
+  // Detected, not assumed: an app that never renders any such Comet gets zero extra build output
+  // for it. Each entry is already either a real, realpath'd local path (this package's own test
+  // suite, or a TEMP-linked local checkout) or a real `https://jsr.io/...` one (any genuine
+  // `jsr:`-installed consumer) — `discoverUsedCometImports` itself resolves that distinction, so
+  // there's no separate `isFileUrl` branch needed here the way `errorBoundaryFiles`'s own
+  // default-error-view handling above still needs for its own, differently-sourced URL.
+  const usedCometFiles = await discoverUsedCometImports(root)
+  for (const cometFile of usedCometFiles) {
     const entryName = toEntryName(realRoot, cometFile)
     input[entryName] = cometFile
   }
@@ -561,7 +557,7 @@ export async function buildSpaceClient(
       clientEntryPlugin({ renderer, entryId: resolvedClientEntry }),
       deno(),
       ...spacePlugin({ renderer }),
-      cometPlugin({ knownEntryPaths: [...comets, ...errorBoundaryFiles, ...builtInCometFiles] }),
+      cometPlugin({ knownEntryPaths: [...comets, ...errorBoundaryFiles, ...usedCometFiles] }),
       ...cssPlugin({ ...css, cometEntries, globalEntries, pageEntries }),
       ...(pwa ? [pwaPlugin(resolvePwaPluginOptions(pwa, root))] : []),
       // An explicit, shared `manifestRegistry` — never either plugin's own internal fallback one —

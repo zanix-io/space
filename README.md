@@ -235,14 +235,14 @@ form-level behaviors above under one `formId`).
 
 ### Client-side navigation ("Orbit")
 
-Already on by default — every app's auto-generated client entry calls `initOrbit()` alongside
-`hydrateComets()`, no configuration needed:
+Already on by default — every app's auto-generated client entry runs `initOrbit()` alongside
+`hydrateComets()`, via `initClientEntry()`, no configuration needed:
 
 ```ts
 // your own client entry, only if you set SpaceAppConfig.clientEntry
-import { initOrbit } from '@zanix/space/client'
+import { initClientEntry } from '@zanix/space/client'
 
-initOrbit()
+initClientEntry() // hydrateComets() + hydrateErrorBoundaries() + initOrbit(), in one call
 ```
 
 That's the entire integration — no server-side setup, no wiring into `vite.config.ts`. Every

@@ -250,6 +250,36 @@ Deno.test('onClick: a click on a descendant of the anchor resolves via findAncho
 })
 
 Deno.test(
+  "onClick: a fragment shaped like React's own streaming Suspense reveal (a hidden placeholder " +
+    'plus a later <script> that un-hides it) ends up VISIBLE after the swap — the real, ' +
+    "end-to-end regression this whole mechanism exists for (see orbit.ts's own " +
+    'reviveFragmentScripts doc)',
+  async () => {
+    const { anchor, outlet } = setUp()
+    // Structurally faithful to what `render-to-response.tsx`'s own doc history describes React
+    // actually emitting for a boundary that resolves after the initial shell — a placeholder left
+    // `hidden`, plus a SEPARATE, later `<script>` that reveals it — never React's own literal
+    // minified `$RC`/`$RB` helpers (fragile to hardcode, and beside the point: this suite tests
+    // Orbit's own swap mechanism, not React's internals). Before the fix, this `<script>` — parsed
+    // via `template.innerHTML` exactly like a real fragment response — would never run at all,
+    // leaving the placeholder hidden forever with no error anywhere.
+    fetchImpl = () =>
+      Promise.resolve(okResponse(outletHtml(
+        '<div hidden id="S:0">real settled content</div>' +
+          '<script>document.getElementById("S:0").hidden = false</script>',
+      )))
+
+    click(anchor)
+    await flush()
+
+    const placeholder = outlet.querySelector('[id="S:0"]') as HTMLElement | null
+    assert(placeholder, 'expected the swapped-in placeholder to be present')
+    assertFalse(placeholder.hidden, 'expected the reveal script to have actually run')
+    assertEquals(placeholder.textContent, 'real settled content')
+  },
+)
+
+Deno.test(
   'onClick: a non-ok fragment response degrades to a real navigation (location.href), ' +
     'never a broken swap',
   async () => {

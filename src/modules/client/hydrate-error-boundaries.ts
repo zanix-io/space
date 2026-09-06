@@ -148,7 +148,8 @@ async function hydrateBoundary(boundary: HTMLElement): Promise<void> {
  * (the normal case, on every page load where nothing actually failed) is left completely untouched.
  *
  * Meant to be called once, from this app's own client entry, right alongside `hydrateComets()` —
- * `client-entry-plugin.ts`'s own auto-generated default entry already does this.
+ * `client-entry-plugin.ts`'s own auto-generated default entry already does this, via
+ * `initClientEntry()` (`client-entry-init.ts`).
  *
  * `hydrate-error-boundaries.test.ts` covers this function's own control flow (which boundary gets
  * acted on, in what order, what happens when the dynamic `import()` fails) via the same cheap,

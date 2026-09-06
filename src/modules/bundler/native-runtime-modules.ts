@@ -165,18 +165,65 @@ import type { Plugin } from 'vite'
  * `DlqProvider` class reference registered natively via `@zanix/datamaster/core` — see that test's
  * own doc for the exact failure this entry closes.
  *
+ * `@zanix/utils` is on this list too — a real, reproduced `instanceof` split, not the same
+ * container-lookup mechanism the four packages above share
+ *
+ * `@zanix/validator` (`@zanix/utils`'s own `IsString`/`BaseRTO` decorators) does NOT need this
+ * entry — see the "not every package belongs here" paragraph below, and
+ * `native-runtime-modules-validator.test.ts` — but `@zanix/errors` (also a `@zanix/utils` subpath,
+ * aliased in every `zanix new`-scaffolded project's own `deno.jsonc` as `"@zanix/errors": "jsr:
+ * @zanix/utils@^X/errors"`, exactly as this package's own top-level `imports` block aliases it
+ * too) shares a DIFFERENT, real vulnerability with the four container-lookup packages above,
+ * through a different mechanism: `instanceof`. A real, reproduced production incident, not a
+ * hypothetical: a consuming app's own Space page's `catch (e) { if (e instanceof HttpError &&
+ * e.status.code === 'FORBIDDEN') return redirectResponse(...) }` never ran for an `HttpError`
+ * thrown by `@zanix/auth`'s own internals (`totp.ts`'s `authenticate` throwing `new
+ * HttpError('FORBIDDEN', { code: 'INVALID_TOTP' })` for a wrong TOTP code) — the raw, unhandled
+ * error reached the client instead of the page's intended redirect. Root cause: `@zanix/auth` IS
+ * on this list, so its OWN internal `import { HttpError } from '@zanix/errors'` resolves through
+ * the NATIVE side; the PAGE file's own, separately Vite-SSR-evaluated `import { HttpError } from
+ * '@zanix/errors'` did not (`@zanix/errors` was not yet on this list), landing on a SECOND,
+ * reference-different `HttpError` class. `e instanceof HttpError` is `false` across two different
+ * classes even when the thrown object's serialized shape (`name`, `status`, `code`) is identical —
+ * confirmed never to reproduce in production (one native evaluation of everything, no Vite, no
+ * split). A sibling page whose OWN interactor throws its OWN `HttpError` directly (never crossing
+ * through a natively-resolved package like `@zanix/auth`) is unaffected either way: both the throw
+ * site and the catch site go through the SAME Vite-SSR evaluation together, so they already share
+ * one `HttpError` class regardless of this entry — the split only bites a throw that originates
+ * inside a package already on this list. `native-runtime-modules-errors.test.ts` confirms both the
+ * reference-identity fix and the cross-copy `instanceof` check directly.
+ *
+ * `@zanix/utils` bare is ALSO added (not just `@zanix/errors`), but confirmed EMPIRICALLY (a
+ * `resolveId` probe log against a real project file's own `import { HttpError } from
+ * '@zanix/errors'`) to be insufficient on its own: the literal specifier text reaching this
+ * plugin's `resolveId` for that import is `'@zanix/errors'` itself — the ALIAS name a project's
+ * own `deno.jsonc` declares — never rewritten to `'@zanix/utils/errors'` (or a
+ * `jsr:@zanix/utils@^X/errors` form `isNativeRuntimeSpecifier`'s own `JSR_OR_NPM_SPECIFIER_RE`
+ * would normalize) before this plugin's `resolveId` gets a turn. That normalization only happens
+ * for a THIRD-PARTY package's own nested import of a dependency it declares its own version range
+ * for (see `isNativeRuntimeSpecifier`'s own doc) — a project's own top-level file's import-map
+ * alias is never rewritten ahead of this plugin at all. `@zanix/utils` bare is kept anyway, for the
+ * same reason `@zanix/space`/`@zanix/server`/etc. need no separate alias entries: it covers a file
+ * that bare-imports `'@zanix/utils'`/`'@zanix/utils/<subpath>'` literally, and a third-party
+ * package's own nested `jsr:@zanix/utils@^X/<subpath>`-shaped dependency import (the
+ * `NavDrawer`/`@zanix/space/comet` shape `native-runtime-modules-relayed-specifier.test.ts` already
+ * pins for `@zanix/space`) — both real, if less common, reachable paths than the aliased
+ * `@zanix/errors` form the actual incident hit.
+ *
  * Not every `@zanix/*` package belongs here on the strength of this pattern alone, though —
- * `@zanix/utils` (`@zanix/validator`'s `IsString`/`BaseRTO` decorators specifically) does not
- * share this vulnerability: `classValidation`'s real validation logic is closure-captured directly
- * onto each accessor at class-definition time, never looked up through a cross-module registry, so
- * it survives the identical split unharmed (see `native-runtime-modules-validator.test.ts` — the
- * one real gap there, `classMetadata`'s static field introspection, doesn't share this
- * container-lookup mechanism at all and reaches no request-handling path). `@zanix/admin` and
- * `@zanix/app` expose no real, non-type, non-primitive import through a `ssrLoadModule`-reached
- * file in `console` (this ecosystem's real consumer app) — nothing to reproduce a failure against.
- * A package earns an entry here only once its OWN identity-sensitive mechanism and a real (or
- * realistically reachable) import path through this engine's SSR graph are both confirmed, the
- * same bar every entry above already meets.
+ * `@zanix/validator`'s `IsString`/`BaseRTO` decorators specifically do not share EITHER
+ * vulnerability above: `classValidation`'s real validation logic is closure-captured directly
+ * onto each accessor at class-definition time, never looked up through a cross-module registry
+ * NOR compared via `instanceof`, so it survives the identical split unharmed (see
+ * `native-runtime-modules-validator.test.ts` — the one real gap there, `classMetadata`'s static
+ * field introspection, doesn't share this container-lookup mechanism at all and reaches no
+ * request-handling path). This is exactly why `@zanix/utils` earns its entry through
+ * `@zanix/errors`'s `instanceof` exposure specifically, not through `@zanix/validator`'s. `@zanix/
+ * admin` and `@zanix/app` expose no real, non-type, non-primitive import through a
+ * `ssrLoadModule`-reached file in `console` (this ecosystem's real consumer app) — nothing to
+ * reproduce a failure against. A package earns an entry here only once its OWN identity-sensitive
+ * mechanism and a real (or realistically reachable) import path through this engine's SSR graph
+ * are both confirmed, the same bar every entry above already meets.
  *
  * **Adding a package here has a required, paired change in `@zanix/cli`, not just this file.**
  * `RealImportEvaluator.runExternalModule` (`ssr-module-evaluator.ts`) does a plain native
@@ -204,6 +251,20 @@ export const NATIVE_RUNTIME_MODULES = [
   '@zanix/datamaster',
   '@zanix/asyncmq',
   '@zanix/notifications',
+  // NOT `'@zanix/utils'` bare — confirmed EMPIRICALLY (a `resolveId` probe log) that a real project
+  // file's own `import { HttpError } from '@zanix/errors'` reaches this hook as the literal ALIAS
+  // text `'@zanix/errors'`, never rewritten to `'@zanix/utils/errors'`/`jsr:@zanix/utils@^X/errors`
+  // before this plugin's `resolveId` runs (that normalization, `JSR_OR_NPM_SPECIFIER_RE`, only
+  // fires for a THIRD-PARTY package's own nested dependency-range import — see
+  // `isNativeRuntimeSpecifier`'s own doc). `@zanix/errors` therefore needs its own explicit entry
+  // below, not a bare `'@zanix/utils'` one — which would also be a dead entry regardless: the real
+  // `@zanix/utils` package has no root (`.`) export at all (`deno info`/`import('@zanix/utils')`
+  // itself fails with `Unknown export '.'`), so a bare entry could only ever match a THIRD-PARTY
+  // package's own nested `@zanix/utils/<subpath>` import — a path no real code in this ecosystem
+  // currently takes (confirmed: nothing outside this package's own aliased subpaths imports
+  // `@zanix/utils` any other way) — see this file's header doc, "`@zanix/utils` is on this list
+  // too", for the full incident this closes.
+  '@zanix/errors',
   'react',
   'react-dom',
   'preact',
@@ -238,11 +299,51 @@ export function fromNativeRuntimeSentinel(url: string): string | null {
   return decodeURIComponent(url.slice(NATIVE_IMPORT_SCHEME.length))
 }
 
+/**
+ * Matches a `jsr:`/`npm:`-prefixed specifier — `jsr:@scope/name@range` or
+ * `jsr:@scope/name@range/subpath` (`npm:name@range[/subpath]` the same shape, unscoped) — and
+ * reconstructs the bare `name`/`name/subpath` form {@linkcode isNativeRuntimeSpecifier}'s own
+ * check already expects. `[^/]*` for the range deliberately accepts ANY non-slash text (`^1.0.0`,
+ * `~1.2.3`, a bare `1.0.0`, `*`, ...) — this never needs to parse semver, only to skip past it.
+ *
+ * This is the real, confirmed shape a specifier arrives in at THIS plugin's own `resolveId` hook
+ * when the import comes from WITHIN a third-party package's own source (that package's OWN
+ * declared dependency range for `@zanix/space`/`react`/..., not the literal bare text its file
+ * wrote) — see {@linkcode isNativeRuntimeSpecifier}'s own doc for the full "why" and the real bug
+ * this closes.
+ */
+const JSR_OR_NPM_SPECIFIER_RE = /^(?:jsr|npm):(@[^/@]+\/[^/@]+|[^/@]+)@[^/]*(\/.*)?$/
+
 /** `true` for `@zanix/space`/`@zanix/server` themselves, or any of their subpaths (`pkg/...`) —
  * never for an unrelated specifier that merely starts with the same text (`@zanix/space-ui` must
- * NOT match `@zanix/space`, hence the explicit `/` boundary check rather than a bare `startsWith`). */
+ * NOT match `@zanix/space`, hence the explicit `/` boundary check rather than a bare `startsWith`).
+ *
+ * Also matches the identical package reached via a `jsr:`/`npm:`-prefixed form (see
+ * {@linkcode JSR_OR_NPM_SPECIFIER_RE}'s own doc) — a REAL, reproduced gap, not a hypothetical
+ * extension: a route/layout file's own bare `import { NavDrawer } from '@zanix/space-ui/...'`
+ * reaches THIS plugin correctly (`@zanix/space-ui` is rightly not on the list), but `NavDrawer`'s
+ * OWN internal `import { defineComet } from '@zanix/space/comet'` — a THIRD-PARTY package's own
+ * source, resolved through ITS OWN declared dependency range — arrives here as
+ * `jsr:@zanix/space@^1.0.0/comet`, never the bare text `@zanix/space/comet` that
+ * `@zanix/space-ui`'s file actually wrote (confirmed directly: a real `ssrLoadModule` probe
+ * importing a real `NavDrawer` logs exactly that string reaching this hook). The bare-text-only
+ * check above silently let this specifier fall through as an ordinary, Vite-transformable
+ * dependency — materializing a SECOND, separately-evaluated copy of `@zanix/space`'s own
+ * `element-factory.ts` (and everything else `@zanix/space` exports), with none of the native
+ * side's own `setCometElementFactory()` registration on it: `getCometElementFactory()` throws
+ * "no react element factory is registered" for THIS copy specifically, even though the native
+ * side's own copy has one — every Comet an app imports directly still worked, since only ONE
+ * exercised this exact third-party-package-reached path. `react`/`react-dom`/`preact` share the
+ * identical exposure for a THIRD-PARTY component using hooks, reached the same indirect way (a
+ * real, confirmed `npm:react@^19.2.0` specifier from this same `NavDrawer` probe, never exercised
+ * before now because nothing on this list previously composed another package with its own hooks).
+ */
 function isNativeRuntimeSpecifier(id: string): boolean {
-  return NATIVE_RUNTIME_MODULES.some((pkg) => id === pkg || id.startsWith(`${pkg}/`))
+  const jsrOrNpmMatch = JSR_OR_NPM_SPECIFIER_RE.exec(id)
+  const normalized = jsrOrNpmMatch ? `${jsrOrNpmMatch[1]}${jsrOrNpmMatch[2] ?? ''}` : id
+  return NATIVE_RUNTIME_MODULES.some((pkg) =>
+    normalized === pkg || normalized.startsWith(`${pkg}/`)
+  )
 }
 
 /**

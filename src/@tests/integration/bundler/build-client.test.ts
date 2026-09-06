@@ -175,6 +175,107 @@ Deno.test(
 )
 
 Deno.test(
+  'buildSpaceClient: a ready-made Comet this package itself ships (SubmitGuard), imported ' +
+    "directly by a layout — never marked 'use comet' itself — gets a real chunk and a " +
+    'comets-manifest.json entry keyed by its own real source path, exactly like a project-authored ' +
+    'comet does',
+  async () => {
+    await withTempDir(async (root) => {
+      // A real, local `deno.json`, TEMP-linking `@zanix/space/comet/react` straight at THIS
+      // checkout's own `mod-react.ts` — the same technique a real consumer's own import map
+      // resolves the bare specifier through, just pointed at a local file instead of `jsr:`,
+      // since this test runs from inside the package's own repo, not a published install. Every
+      // OTHER import (`@zanix/space/client` included, the auto-generated default client entry's
+      // own import) is copied straight from this repo's own `deno.jsonc` — its exact same
+      // dependency set, so this never has to hand-guess which transitive specifier the real
+      // client-entry graph needs next, and never drifts as that graph changes.
+      const { parse } = await import('jsr:@std/jsonc@^1.0.2')
+      const ownDenoJsonc = parse(
+        await Deno.readTextFile(fromFileUrl(new URL('../../../../deno.jsonc', import.meta.url))),
+      ) as { imports: Record<string, string> }
+      const modReactPath = fromFileUrl(
+        new URL('../../../modules/comets/mod-react.ts', import.meta.url),
+      )
+      const clientModPath = fromFileUrl(
+        new URL('../../../modules/client/mod.ts', import.meta.url),
+      )
+      await Deno.writeTextFile(
+        join(root, 'deno.json'),
+        JSON.stringify({
+          imports: {
+            ...ownDenoJsonc.imports,
+            // `@zanix/space/client` isn't in `ownDenoJsonc.imports` at all — the real repo
+            // self-resolves it via its own `name`/`exports` fields, a walk-up mechanism this
+            // temp root's own `deno.json` (created below) stops the moment it exists — so both
+            // this and the actual specifier under test need an explicit local override here.
+            '@zanix/space/client': clientModPath,
+            '@zanix/space/comet/react': modReactPath,
+          },
+        }),
+      )
+      const routesDir = join(root, 'routes')
+      await Deno.mkdir(routesDir, { recursive: true })
+      await Deno.writeTextFile(join(routesDir, 'page.tsx'), 'export default null\n')
+      await Deno.writeTextFile(
+        join(routesDir, 'layout.tsx'),
+        "import { SubmitGuard } from '@zanix/space/comet/react'\n" +
+          'export default function Layout() { return null }\nexport { SubmitGuard }\n',
+      )
+
+      const result = await buildSpaceClient({
+        root,
+        routesDir,
+        css: { tailwind: false },
+        minify: false,
+      })
+
+      const assetsDir = join(result.outDir, 'assets')
+      const submitGuardSourcePath = fromFileUrl(
+        new URL('../../../modules/comets/submit-guard-react.tsx', import.meta.url),
+      )
+      const realSubmitGuardPath = await Deno.realPath(submitGuardSourcePath)
+
+      const manifest = JSON.parse(
+        await Deno.readTextFile(join(result.outDir, 'comets-manifest.json')),
+      )
+      const builtUrl: string = manifest[realSubmitGuardPath]
+      assert(builtUrl, JSON.stringify(manifest))
+
+      const jsFiles = await listJsFiles(assetsDir)
+      assert(
+        jsFiles.some((name) => `/assets/${name}` === builtUrl),
+        `expected ${builtUrl} among ${jsFiles.join(', ')}`,
+      )
+      const code = await Deno.readTextFile(join(result.outDir, builtUrl.replace(/^\//, '')))
+      assert(code.includes('attachSubmitGuard'), code)
+    })
+  },
+)
+
+Deno.test(
+  'buildSpaceClient: a ready-made Comet this package ships is never bundled when the project ' +
+    'never imports it — no extra chunk, no comets-manifest.json entry for it, matching every ' +
+    'other unused dependency',
+  async () => {
+    await withTempDir(async (root) => {
+      const routesDir = join(root, 'routes')
+      await Deno.mkdir(routesDir, { recursive: true })
+      await Deno.writeTextFile(join(routesDir, 'page.tsx'), 'export default null\n')
+
+      const result = await buildSpaceClient({ root, routesDir, css: { tailwind: false } })
+
+      const manifest = JSON.parse(
+        await Deno.readTextFile(join(result.outDir, 'comets-manifest.json')).catch(() => '{}'),
+      )
+      const submitGuardSourcePath = await Deno.realPath(
+        fromFileUrl(new URL('../../../modules/comets/submit-guard-react.tsx', import.meta.url)),
+      )
+      assertEquals(manifest[submitGuardSourcePath], undefined)
+    })
+  },
+)
+
+Deno.test(
   "buildSpaceClient: the same auto-comet treatment applies under renderer: 'preact' too — not " +
     "React-only. Even Preact's own hydrateErrorBoundaries needs a real built chunk to `import()` " +
     "back client-side for its `hydrate()` call, exactly like React's `createRoot` mount does",

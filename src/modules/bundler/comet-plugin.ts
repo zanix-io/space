@@ -36,6 +36,48 @@ export interface CometPluginOptions {
 
 const MANIFEST_FILE_NAME = 'comets-manifest.json'
 
+/**
+ * Reverses `@deno/vite-plugin`'s own wrapped module-id convention for a bare/remote specifier it
+ * resolved (`deno::<loader>::<specifier>::<resolved>#deno`, NUL-prefixed — confirmed against that
+ * package's real resolver output, the exact format `comet-manifest.ts`'s own
+ * `toBrowserDenoSpecifier` builds in the opposite direction) back to the plain, resolved URL a
+ * comet's own `import.meta.url` actually evaluates to at runtime. Returns `id` unchanged for
+ * anything that never took this shape — an ordinary project-relative file Vite resolves without
+ * this plugin's help never does.
+ *
+ * Needed here because a comet whose own SOURCE FILE is itself a remote/bare specifier — every
+ * ready-made Comet this package ships (`SubmitGuard`, ...), used from a `jsr:`-installed consumer,
+ * as opposed to a comet merely IMPORTING a remote package — is a real case, and this wrapped id's
+ * own NUL byte makes `Deno.realPath` throw outright on it (confirmed empirically: an unhandled
+ * build crash, not merely a silent manifest mismatch, without this unwrap step in place first).
+ */
+function unwrapDenoModuleId(id: string): string {
+  const stripped = id.startsWith('\0') ? id.slice(1) : id
+  if (!stripped.startsWith('deno::') || !stripped.endsWith('#deno')) return id
+  const withoutSuffix = stripped.slice(0, -'#deno'.length)
+  const lastSeparator = withoutSuffix.lastIndexOf('::')
+  return lastSeparator === -1 ? id : withoutSuffix.slice(lastSeparator + 2)
+}
+
+/**
+ * Resolves `id` to the identity {@linkcode cometSourceIds}/`serverOnlySourceIds`/`knownEntryPaths`
+ * compare against, and `generateBundle` writes `comets-manifest.json` keyed by:
+ * {@linkcode unwrapDenoModuleId}'s plain, resolved URL for a remote/bare specifier (never a real
+ * filesystem path to `realPath`), or the realpath'd filesystem path for an ordinary local file
+ * (falling back to the raw id on a `Deno.realPath` failure — a virtual/synthetic id, e.g. Vite's
+ * own `\0`-prefixed ones this package doesn't otherwise recognize, simply never matches anything,
+ * correctly, since a virtual module can never be a real `'use comet'`/`'server-only'` file).
+ */
+async function resolveComparableId(id: string): Promise<string> {
+  const unwrapped = unwrapDenoModuleId(id)
+  if (unwrapped !== id) return unwrapped
+  try {
+    return await Deno.realPath(id)
+  } catch {
+    return id
+  }
+}
+
 /** Minimal shape this plugin needs from Rollup's real `PluginContext` to walk the module graph in
  * `buildEnd` — kept narrow (not `Rollup.PluginContext`) so this function stays trivially testable
  * and doesn't pull the full vendor type in just to describe two fields it actually reads. */
@@ -45,14 +87,17 @@ interface ModuleGraphReader {
   ): { importers: readonly string[]; dynamicImporters: readonly string[] } | null
 }
 
-/** Best-effort realpath match: `id`s coming out of `getModuleInfo` may or may not already be the
- * symlink-resolved path `cometSourceIds`/`serverOnlySourceIds` are keyed by (same ambiguity
- * `transform`'s own `realId` normalization exists to route around — see that hook's doc). Tries the
- * raw id first (the common case, zero syscalls), then falls back to a real `Deno.realPath`. A
- * virtual/synthetic module id (e.g. Vite's own `\0`-prefixed ones) simply never resolves and never
- * matches — correct, since a virtual module can never be a real `'use comet'`/`'server-only'` file. */
+/** Best-effort match against `knownRealIds` (`cometSourceIds`, in {@linkcode findChainToComet}'s
+ * own use): `id`s coming out of `getModuleInfo` may or may not already be normalized the same way
+ * {@linkcode resolveComparableId} normalizes `cometSourceIds`/`serverOnlySourceIds` themselves (same
+ * ambiguity `transform`'s own call to it exists to route around). Tries the raw id first (the
+ * common case, zero work), then {@linkcode unwrapDenoModuleId}'s plain URL, then a real
+ * `Deno.realPath` — the identical three-step ladder `resolveComparableId` itself climbs, just
+ * without committing to any one of them up front, since a match is all this needs. */
 async function matchesKnownSource(id: string, knownRealIds: ReadonlySet<string>): Promise<boolean> {
   if (knownRealIds.has(id)) return true
+  const unwrapped = unwrapDenoModuleId(id)
+  if (unwrapped !== id && knownRealIds.has(unwrapped)) return true
   try {
     return knownRealIds.has(await Deno.realPath(id))
   } catch {
@@ -180,36 +225,30 @@ export function cometPlugin(options: CometPluginOptions = {}): Plugin {
     apply: 'build',
     async transform(code, id) {
       if (USE_COMET_DIRECTIVE.test(code)) {
-        // Rollup/Rolldown resolve a chunk's own `facadeModuleId` through the real
-        // (symlink-resolved) filesystem path — realpath-ing here too, once per comet file at build
-        // time, is what keeps this set matching that later in `generateBundle`, on a filesystem
-        // where `id` itself isn't already the real path (e.g. a temp dir under macOS's symlinked
-        // `/tmp`/`/var`).
-        const realId = await Deno.realPath(id)
+        // `resolveComparableId` is what keeps this set matching `generateBundle`'s own lookup
+        // later, regardless of whether `id` is an ordinary local file (realpath'd, same reasoning
+        // as `'server-only'` below always needed) or a ready-made Comet resolved through a remote
+        // specifier (`@deno/vite-plugin`'s own wrapped id for it — unwrapped back to its plain,
+        // resolved URL instead, since `Deno.realPath` throws outright on that wrapped id's own NUL
+        // byte, a real, confirmed build crash otherwise).
+        const realId = await resolveComparableId(id)
         cometSourceIds.add(realId)
         // Only force a NEW chunk for a comet reached transitively (e.g. through a page's own
         // static import) — one already given to Rollup as a real entry (`knownEntryPaths`) already
         // gets its own chunk on its own; forcing one anyway would emit a second, duplicate copy of
         // the same source (see `CometPluginOptions.knownEntryPaths`'s own doc for how this was
-        // confirmed).
+        // confirmed). Every ready-made Comet this package ships is always registered as a known
+        // entry (see `build-client.ts`'s own doc), so this branch only ever runs for an ordinary
+        // local file in practice — `realId`'s realpath'd form is what keeps it matching
+        // `generateBundle`'s own lookup on a filesystem where `id` itself isn't already the real
+        // path (e.g. a temp dir under macOS's symlinked `/tmp`/`/var`).
         if (!knownEntryPaths.has(realId)) {
           this.emitFile({ type: 'chunk', id: realId, preserveSignature: false })
         }
         return null
       }
       if (SERVER_ONLY_DIRECTIVE.test(code)) {
-        // A module resolved through a remote JSR package (`@deno/vite-plugin`'s own
-        // `deno::TypeScript::https://...`-shaped id for it) isn't a real on-disk path —
-        // `Deno.realPath` throws on it instead of resolving. Falling back to the raw `id` in that
-        // case still lets `findChainToComet`'s own `matchesKnownSource` match it correctly (it
-        // tries the raw id first, before ever attempting a realpath itself), rather than crashing
-        // the whole build for a case the `'server-only'` violation message is specifically meant
-        // to handle cleanly.
-        try {
-          serverOnlySourceIds.add(await Deno.realPath(id))
-        } catch {
-          serverOnlySourceIds.add(id)
-        }
+        serverOnlySourceIds.add(await resolveComparableId(id))
       }
       return null
     },
@@ -232,12 +271,12 @@ export function cometPlugin(options: CometPluginOptions = {}): Plugin {
 
       const manifest: CometManifest = {}
       for (const chunk of Object.values(bundle)) {
-        if (
-          chunk.type === 'chunk' && chunk.facadeModuleId &&
-          cometSourceIds.has(chunk.facadeModuleId)
-        ) {
-          manifest[chunk.facadeModuleId] = `/${chunk.fileName}`
-        }
+        if (chunk.type !== 'chunk' || !chunk.facadeModuleId) continue
+        // A ready-made Comet resolved through a remote specifier gets a `facadeModuleId` wrapped
+        // by `@deno/vite-plugin`'s own resolver, never the plain URL `cometSourceIds` holds for it
+        // (an ordinary local file's `facadeModuleId` is already plain, so this is a no-op there).
+        const sourceKey = unwrapDenoModuleId(chunk.facadeModuleId)
+        if (cometSourceIds.has(sourceKey)) manifest[sourceKey] = `/${chunk.fileName}`
       }
 
       this.emitFile({

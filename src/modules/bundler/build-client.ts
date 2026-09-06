@@ -13,7 +13,8 @@ import type { MediaOptimizeOptions } from './media-plugin-types.ts'
 import { ASSETS_PLUGIN_SPECIFIER, MEDIA_PLUGIN_SPECIFIER } from './build-plugin-specifiers.ts'
 import { createAssetManifestRegistry } from 'modules/assets/asset-manifest-registry.ts'
 import { resolvePwaPluginOptions } from './resolve-pwa-plugin-options.ts'
-import { discoverComets } from './discover-comets.ts'
+import { discoverComets, discoverUsedBuiltInComets } from './discover-comets.ts'
+import { getBuiltInCometUrls } from 'modules/comets/built-in-comets-registry.ts'
 import { collectPageStyles, discoverPages, type ModuleImporter } from './discover-pages.ts'
 import { scanPageFiles } from 'modules/router/scan-page-files.ts'
 import {
@@ -21,7 +22,11 @@ import {
   DEFAULT_ERROR_VIEW_REACT_URL,
 } from 'modules/router/default-view-specifiers.ts'
 import { getGlobalCssPaths, type StylesheetRef } from 'modules/render/css-manifest.ts'
-import { CLIENT_ENTRY_VIRTUAL_ID, getClientEntry } from 'modules/render/client-entry.ts'
+import {
+  CLIENT_ENTRY_VIRTUAL_ID,
+  getClientEntry,
+  resolveClientEntryFilePath,
+} from 'modules/render/client-entry.ts'
 import { clientEntryPlugin } from './client-entry-plugin.ts'
 import { normalizeSourceKey } from 'modules/comets/comet-manifest.ts'
 import {
@@ -66,7 +71,7 @@ export interface BuildSpaceClientOptions {
   /**
    * This app's own `SpaceAppConfig.clientEntry` override, if any — defaults to `getClientEntry()`,
    * the same eager registry `defineSpaceApp({ clientEntry })` populates. `undefined` (the normal
-   * case) builds the auto-generated default entry instead (`hydrateComets()`/`initOrbit()`, see
+   * case) builds the auto-generated default entry instead (`initClientEntry()`, see
    * `client-entry-plugin.ts`'s own doc) — every app gets a real, built bootstrap chunk either way,
    * never an empty one.
    */
@@ -366,6 +371,29 @@ export async function buildSpaceClient(
     input[entryName] = errorFile
   }
 
+  // Whichever of this package's own ready-made Comets (`SubmitGuard`, ...) the project actually
+  // imports from `@zanix/space/comet/<renderer>` — the SAME auto-comet treatment
+  // `errorBoundaryFiles` above already gets, for the SAME reason: none of these are reachable
+  // client-side without a real built chunk of their own, and without one `discoverComets`'s own
+  // local-filesystem walk never finds them (they live inside THIS package's own install location,
+  // never a consuming app's `routesDir`) — silently degrading to an unattributed "Failed to
+  // hydrate a Comet boundary" the moment an app composes one directly. Detected, not assumed: an
+  // app that never imports any of these gets zero extra build output for them. Each URL is either
+  // a real `file://` path (this package's own test suite, or a TEMP-linked local checkout —
+  // realpath'd, same as any other local comet) or a real `https://jsr.io/...` one (any genuine
+  // `jsr:`-installed consumer) — passed straight through unresolved in that case, same `isFileUrl`
+  // branch `errorBoundaryFiles`'s own default-error-view handling above already establishes.
+  const usedBuiltInComets = await discoverUsedBuiltInComets(root, renderer)
+  const builtInCometFiles = await Promise.all(
+    getBuiltInCometUrls(renderer, usedBuiltInComets).map((url) =>
+      isFileUrl(url) ? Deno.realPath(fromFileUrl(url)) : Promise.resolve(url)
+    ),
+  )
+  for (const cometFile of builtInCometFiles) {
+    const entryName = toEntryName(realRoot, cometFile)
+    input[entryName] = cometFile
+  }
+
   const resolvedGlobalCss = await Promise.all(
     globalCss.map(async (stylesheet) => {
       const href = typeof stylesheet === 'string' ? stylesheet : stylesheet.href
@@ -432,16 +460,15 @@ export async function buildSpaceClient(
   }
 
   // Always included, unlike `comets`/`globalCss`/page styles above — every app gets a real,
-  // built bootstrap chunk, whether that's `clientEntry`'s own override (realpath'd, same
-  // resolution `globalCss` entries already go through) or the auto-generated default (the virtual
-  // id itself, resolved by `clientEntryPlugin`'s own `resolveId`/`load` hooks below — never a real
-  // filesystem path, so it skips `Deno.realPath` entirely). A fixed literal entry name, not
-  // `toEntryName`-derived: there is only ever ONE client entry per build, and the virtual id isn't
-  // a real path `toEntryName`'s own `relative()` call could meaningfully resolve against `realRoot`
-  // anyway.
-  const resolvedClientEntry = clientEntry === undefined
-    ? CLIENT_ENTRY_VIRTUAL_ID
-    : await Deno.realPath(resolve(root, clientEntry))
+  // built bootstrap chunk, whether that's `clientEntry`'s own override (realpath'd via
+  // `resolveClientEntryFilePath`, same resolution `globalCss` entries already go through) or the
+  // auto-generated default (the virtual id itself, resolved by `clientEntryPlugin`'s own
+  // `resolveId`/`load` hooks below — never a real filesystem path, so it skips `Deno.realPath`
+  // entirely). A fixed literal entry name, not `toEntryName`-derived: there is only ever ONE client
+  // entry per build, and the virtual id isn't a real path `toEntryName`'s own `relative()` call
+  // could meaningfully resolve against `realRoot` anyway.
+  const resolvedClientEntry = await resolveClientEntryFilePath(root, clientEntry) ??
+    CLIENT_ENTRY_VIRTUAL_ID
   input['client-entry'] = resolvedClientEntry
 
   // Zero comets, zero declared global CSS, no `pwa`, and no `assetsDir` configured is a valid (if
@@ -534,7 +561,7 @@ export async function buildSpaceClient(
       clientEntryPlugin({ renderer, entryId: resolvedClientEntry }),
       deno(),
       ...spacePlugin({ renderer }),
-      cometPlugin({ knownEntryPaths: [...comets, ...errorBoundaryFiles] }),
+      cometPlugin({ knownEntryPaths: [...comets, ...errorBoundaryFiles, ...builtInCometFiles] }),
       ...cssPlugin({ ...css, cometEntries, globalEntries, pageEntries }),
       ...(pwa ? [pwaPlugin(resolvePwaPluginOptions(pwa, root))] : []),
       // An explicit, shared `manifestRegistry` — never either plugin's own internal fallback one —

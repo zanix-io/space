@@ -30,7 +30,26 @@ import { Window } from 'happy-dom'
 // ("Failed to execute 'dispatchEvent'... parameter 1 is not of type 'Event'"), not something any
 // test here has any interest in exercising. Harmless for `ensureStylesheetsLoaded`'s own use,
 // which never navigates at all.
-const dom = new Window({ settings: { navigation: { disableMainFrameNavigation: true } } })
+//
+// `enableJavaScriptEvaluation` — off by default in happy-dom (a script inserted via
+// `createElement`/`appendChild`/`innerHTML` never runs its own text content otherwise, regardless
+// of the "already started" distinction real browsers make). Needed for
+// `reviveFragmentScripts`'s own suite (`revive-fragment-scripts.test.ts`) to assert against real
+// script EXECUTION, not just DOM shape — confirmed empirically that happy-dom, with this on,
+// correctly implements the same "already started" rule real browsers do (a script parsed via
+// `innerHTML` stays inert even once moved into a connected document; only a freshly created one
+// runs), which is exactly the distinction that function's own fix depends on.
+// `suppressInsecureJavaScriptEnvironmentWarning` only silences happy-dom's own console warning
+// about running arbitrary code in a shared VM context — a real concern for a process evaluating
+// untrusted input, irrelevant here since every script this test suite ever evaluates is a fixture
+// string this repo's own tests wrote.
+const dom = new Window({
+  settings: {
+    navigation: { disableMainFrameNavigation: true },
+    enableJavaScriptEvaluation: true,
+    suppressInsecureJavaScriptEnvironmentWarning: true,
+  },
+})
 // deno-lint-ignore no-explicit-any
 const globals = globalThis as any
 globals.document = dom.document

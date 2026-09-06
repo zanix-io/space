@@ -8,11 +8,22 @@ This is the full reference the README's
 ### Turning it on
 
 Already on by default — the auto-generated client entry every app gets (see
-[`docs/comets.md`](./comets.md)) calls `initOrbit()` alongside `hydrateComets()`, with no
-configuration needed. Only relevant if you've set `SpaceAppConfig.clientEntry` to your own file:
+[`docs/comets.md`](./comets.md)) runs `initOrbit()` alongside `hydrateComets()`, via
+`initClientEntry()`, with no configuration needed. Only relevant if you've set
+`SpaceAppConfig.clientEntry` to your own file — call `initClientEntry(options)` once, which forwards
+`options` straight to `initOrbit`:
 
 ```ts
-// your own client entry, if you configured one — call once, alongside hydrateComets()
+// your own client entry, if you configured one
+import { initClientEntry } from '@zanix/space/client'
+
+initClientEntry({ prefetch: { onViewport: true } }) // same shape initOrbit itself takes
+```
+
+Need `initOrbit()` on its own, separate from `hydrateComets()`/`hydrateErrorBoundaries()`? It stays
+independently exported too:
+
+```ts
 import { initOrbit } from '@zanix/space/client'
 
 initOrbit()

@@ -10,6 +10,7 @@ import { addGlobalCssPaths, getCssManifest, loadCssManifest } from 'modules/rend
 import {
   getClientEntryManifest,
   loadClientEntryManifest,
+  loadClientEntryProductionKey,
   setClientEntry,
 } from 'modules/render/client-entry.ts'
 import { getCometManifest, loadCometManifest } from 'modules/comets/comet-manifest.ts'
@@ -310,6 +311,7 @@ export function defineSpaceApp(config: SpaceAppConfig): ZanixAppDefinition {
       if (clientBuildDir !== undefined && !isDevClientEnabled()) {
         await loadCometManifest(`${clientBuildDir}/comets-manifest.json`)
         await loadClientEntryManifest(`${clientBuildDir}/client-entry-manifest.json`)
+        await loadClientEntryProductionKey(Deno.cwd())
         await loadCssManifest(`${clientBuildDir}/css-manifest.json`)
         await loadAssetsManifest(`${clientBuildDir}/assets-manifest.json`)
         loadAssetsBuildOutput(clientBuildDir)

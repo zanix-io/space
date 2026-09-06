@@ -77,9 +77,10 @@ async function hydrateBoundary(boundary: HTMLElement): Promise<void> {
  * (`error-boundary-preact.ts`'s own conditional emission), a segment that genuinely failed.
  *
  * Meant to be called once, from this app's own client entry, right alongside `hydrateComets()` —
- * `client-entry-plugin.ts`'s own auto-generated default entry already does this for BOTH renderers
- * (this symbol exists in `@zanix/space/client/preact` for exactly that reason — see the client
- * barrel parity test).
+ * `client-entry-plugin.ts`'s own auto-generated default entry already does this for BOTH renderers,
+ * via each barrel's own `initClientEntry()` (`client-entry-init-preact.ts` here — this symbol
+ * exists in `@zanix/space/client/preact` for exactly that reason — see the client barrel parity
+ * test).
  *
  * `hydrate-error-boundaries-preact.test.ts` covers both this function's own control flow (cheap
  * fakes) and a real `hydrate()` mount (real `happy-dom`, a real fixture module), the same two-tier

@@ -5,6 +5,7 @@ import { type Loader, ResolutionMode, ResolveError, Workspace } from '@deno/load
 import { resolveDeno } from '@deno/vite-plugin/resolver'
 import { discoverComets } from './discover-comets.ts'
 import { findDenoConfigPath } from './deno-loader.ts'
+import { getClientEntry, resolveClientEntryFilePath } from '../render/client-entry.ts'
 
 // `Plugin`/`ResolvedConfig` are intentionally NOT re-exported — same accepted, structural
 // `deno doc --lint` finding already established by `space-plugin.ts`'s own doc comment.
@@ -157,25 +158,30 @@ async function collectBareSpecifiersFromFile(
 }
 
 /**
- * Every bare specifier reachable from `cometFiles` (as found by {@linkcode discoverComets}),
- * discovered by walking each file's own relative-import graph — the part of the fix that makes it
- * genuinely generic rather than covering only `react`/`react-dom` (the one case Vite's own
- * `@vitejs/plugin-react`-driven heuristic already adds to `optimizeDeps.include` automatically).
- * `ms` (a real, deliberately React-unrelated CJS package, imported through a relative helper
- * file, never directly by a Comet itself) was the real case that exposed this gap: being resolved
- * and aliased by this plugin is not enough on its own — `optimizeDeps.include` membership is what
- * actually triggers Vite's own pre-bundling/CJS-interop pass in the first place; an alias with no
- * corresponding `include` entry just remaps a path Vite never decided to optimize.
+ * Every bare specifier reachable from `entryFiles` (a project's own Comets, as found by
+ * {@linkcode discoverComets}, plus its `clientEntry` override when it has one — see
+ * `denoOptimizeDepsAliasPlugin`'s own `configResolved` hook for exactly which files this ever gets
+ * called with), discovered by walking each file's own relative-import graph — the part of the fix
+ * that makes it genuinely generic rather than covering only `react`/`react-dom` (the one case
+ * Vite's own `@vitejs/plugin-react`-driven heuristic already adds to `optimizeDeps.include`
+ * automatically). `ms` (a real, deliberately React-unrelated CJS package, imported through a
+ * relative helper file, never directly by a Comet itself) was the real case that exposed this gap
+ * for Comets; a `clientEntry` override needs the identical fix for the identical reason — it's a
+ * real, first-class client-bundle entry point too (`build-client.ts`'s own `resolvedClientEntry`),
+ * just never reachable from any Comet. Either way, being resolved and aliased by this plugin is not
+ * enough on its own — `optimizeDeps.include` membership is what actually triggers Vite's own
+ * pre-bundling/CJS-interop pass in the first place; an alias with no corresponding `include` entry
+ * just remaps a path Vite never decided to optimize.
  */
-async function discoverBareSpecifiersFromComets(
-  cometFiles: string[],
+async function discoverBareSpecifiersFromEntryFiles(
+  entryFiles: string[],
 ): Promise<string[]> {
-  if (cometFiles.length === 0) return []
+  if (entryFiles.length === 0) return []
 
   const visited = new Set<string>()
   const bareSpecifiers = new Set<string>()
   await Promise.all(
-    cometFiles.map((file) => collectBareSpecifiersFromFile(file, visited, bareSpecifiers)),
+    entryFiles.map((file) => collectBareSpecifiersFromFile(file, visited, bareSpecifiers)),
   )
   return [...bareSpecifiers]
 }
@@ -278,7 +284,7 @@ async function resolveDenoAt(
  * dedup makes the recursion terminate even through a real import cycle.
  *
  * Deliberately does NOT add anything to `optimizeDeps.include` — only the TOP-LEVEL entries this
- * walk starts from (`@zanix/space` itself) need that (see {@linkcode discoverBareSpecifiersFromComets}'s
+ * walk starts from (`@zanix/space` itself) need that (see {@linkcode discoverBareSpecifiersFromEntryFiles}'s
  * own doc for why `include` membership matters at all). A specifier discovered by recursing PAST an
  * already-included entry is reached DURING esbuild's own bundling of that entry — confirmed
  * empirically that a plain `resolve.alias` entry, with no separate `include` entry of its own, is
@@ -376,9 +382,9 @@ async function discoverNestedAliases(
  * `optimizeDeps`/CJS-interop pipeline runs completely unmodified and produces the same real,
  * battle-tested output it always does. This plugin never touches React, JSX, or any renderer
  * concern — it only ever reads whatever `optimizeDeps.include` already contains (whoever put it
- * there) plus whatever {@linkcode discoverBareSpecifiersFromComets} finds by walking this project's
- * own Comet files, for whatever future renderer (`--renderer=preact` included) ends up needing the
- * same fix.
+ * there) plus whatever {@linkcode discoverBareSpecifiersFromEntryFiles} finds by walking this
+ * project's own Comet files and `clientEntry` override (if any), for whatever future renderer
+ * (`--renderer=preact` included) ends up needing the same fix.
  *
  * Being resolved and aliased is not enough on its own for a specifier Vite never decided to
  * optimize in the first place — `optimizeDeps.include` membership is what actually triggers Vite's
@@ -413,7 +419,13 @@ export function denoOptimizeDepsAliasPlugin(): Plugin {
         collectOptimizeDepsIncludeSpecifiers(config),
       )
       const cometFiles = await discoverComets(config.root)
-      const discovered = await discoverBareSpecifiersFromComets(cometFiles)
+      // `clientEntry` is a real, first-class client-bundle entry point too (`build-client.ts`'s
+      // own `resolvedClientEntry`), parallel in status to a Comet — but never reachable from any
+      // Comet's own relative-import graph, so without this it was invisible to the walk below.
+      // `undefined` for the auto-generated default (a synthetic virtual module, no file to walk).
+      const clientEntryFile = await resolveClientEntryFilePath(config.root, getClientEntry())
+      const entryFiles = clientEntryFile ? [...cometFiles, clientEntryFile] : cometFiles
+      const discovered = await discoverBareSpecifiersFromEntryFiles(entryFiles)
       const newlyDiscovered = discovered.filter((spec) => !alreadyIncluded.has(spec))
 
       const specifiers = [...alreadyIncluded, ...newlyDiscovered]

@@ -11,6 +11,7 @@
 export { readInitialState } from '../render/read-initial-state.ts'
 export { hydrateComets } from './hydrate-comets.ts'
 export { hydrateErrorBoundaries } from './hydrate-error-boundaries.ts'
+export { initClientEntry } from './client-entry-init.ts'
 export { scheduleCometHydration } from './schedule-comet-hydration.ts'
 export type { CometSchedulingDeps } from './schedule-comet-hydration.ts'
 export { extractFragmentTitle, initOrbit, navigate, shouldInterceptNavigation } from './orbit.ts'

@@ -5,6 +5,145 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-09-06
+
+### Added
+
+- **`initClientEntry(options)`**, exported from both `@zanix/space/client` and
+  `@zanix/space/client/preact` — combines the three calls a client entry has always needed
+  (`hydrateComets()`, `hydrateErrorBoundaries()`, `initOrbit(options)`) into one. `options` forwards
+  straight to `initOrbit`. The auto-generated default client entry (`client-entry-plugin.ts`) now
+  calls this instead of writing the three out inline, and it's the new recommended shape for a
+  project that sets `SpaceAppConfig.clientEntry` to add its own extra code (an analytics init, a
+  service worker registration, ...) — previously that meant reproducing all three calls by hand
+  first. `hydrateComets`/`hydrateErrorBoundaries`/`initOrbit` stay independently exported and
+  independently callable, unchanged, for anyone who wants them separate (e.g. to interleave code
+  between them).
+
+### Fixed
+
+- **(React renderer only) An Orbit-swapped page whose SSR render genuinely straddles more than one
+  stream flush still went permanently blank, with no error anywhere — 1.5.0's own fix (awaiting the
+  render stream's own `allReady` before returning an Orbit fragment response) did not resolve this
+  in general, confirmed via a real, reproducible case: it only ever prevented the
+  placeholder/reveal-script pair for a single Suspense boundary (or several independent SIBLING
+  ones); a render whose synchronous work is large enough to cross React's own internal flush
+  threshold — the ordinary case for any real page, not a contrived one — still produces it, whether
+  `allReady` was awaited or not.** `allReady` resolving means the render is COMPLETE, not that its
+  already-queued chunks get restructured into something `innerHTML` can safely execute; waiting
+  longer only ever changed WHEN it became safe to start reading the stream, never WHAT was written
+  into it. The real fix is client-side: `orbit.ts`'s new `reviveFragmentScripts` walks every
+  `<script>` a freshly-parsed fragment carries and replaces each with a genuinely fresh element (a
+  script parsed via `innerHTML`, or moved out of a `<template>`'s own inert `content` fragment, is
+  marked "already started" per the HTML Living Standard and never executes again regardless of where
+  it's moved to afterward — only a brand-new element does, the instant it becomes connected) — done
+  in place, before `template.content` is ever moved into the live outlet, so
+  `outlet.replaceChildren(template.content)`'s own in-order connection is what executes every one of
+  them automatically, in the exact order React's own `$RC`/`$RB` reveal protocol depends on. Every
+  fresh script's `nonce` comes from `getActiveCspNonce()` (the ACTIVE document's own
+  currently-enforced value), never copied from the original — a fragment response's own per-request
+  nonce can never match what the still-active document is actually enforcing, the identical
+  reasoning already established for a Comet generating new nonce'd content client-side. This fix
+  handles a fragment's streaming shape uniformly, so the now-redundant `allReady` wait (and the
+  `fragmentOnly` option on `renderToResponse` that existed only for it) has been removed from
+  `render-to-response.tsx` — a fragment response streams progressively again, exactly like a full
+  document already does, since Orbit's client no longer cares which shape it receives.
+- **`zanix space dev`'s `nativeRuntimeModulesPlugin` (the module-identity fix that makes
+  `@zanix/space`/`@zanix/server`/`react`/... share ONE instance between the native process and
+  `ssrLoadModule`'s own Vite SSR graph) silently failed to recognize any of those same packages when
+  reached indirectly, through a THIRD-PARTY dependency's own internal import** — e.g. a layout's own
+  `import { NavDrawer } from '@zanix/space-ui/runtime/nav-drawer'`, where `NavDrawer` itself does
+  `import { defineComet } from '@zanix/space/comet'`. That inner import reaches this plugin not as
+  the bare text `'@zanix/space/comet'` `@zanix/space-ui`'s own source literally wrote, but as
+  `'jsr:@zanix/space@^1.0.0/comet'` — `@zanix/space-ui`'s own declared dependency range, resolved by
+  Deno before Vite's plugin chain ever sees it — a shape the plugin's bare-text-only match never
+  recognized, silently letting `@zanix/space` fall through as an ordinary, Vite-transformable
+  dependency instead. The result: a real, reproduced production incident — a Comet composed from a
+  dependency (never one imported directly by the app itself) threw
+  `InternalError: ... no react element factory is registered` on every render, in dev only, while
+  every other Comet in the same app kept working. Fixed by normalizing a `jsr:`/`npm:`-prefixed
+  specifier back to its bare `name`/`name/subpath` form before matching
+  (`isNativeRuntimeSpecifier`'s own new `JSR_OR_NPM_SPECIFIER_RE`) — no new entries needed on
+  `NATIVE_RUNTIME_MODULES` itself, and no paired `@zanix/cli` change either, since every affected
+  package was already correctly listed; only the matching logic was blind to this specifier shape.
+- **`zanix space dev`-only: a Space page's own `catch (e) { if (e instanceof HttpError && ...) }`
+  never ran for an `HttpError` thrown by a NATIVELY-resolved package's own internals** (e.g.
+  `@zanix/auth`'s `totp.ts` throwing `new HttpError('FORBIDDEN', { code: 'INVALID_TOTP' })` for a
+  wrong TOTP code) — the raw, unhandled error reached the client instead of the page's own intended
+  redirect, a real, reproduced production incident, never in `zanix space build` + `deno run` (one
+  native evaluation of everything, no Vite, no split). Root cause: `@zanix/auth` is on
+  `NATIVE_RUNTIME_MODULES`, so its own internal `import { HttpError } from '@zanix/errors'` resolved
+  through the native side, but a page's own, separately Vite-SSR-evaluated
+  `import { HttpError } from '@zanix/errors'` did not — `@zanix/errors` (a `@zanix/utils` subpath,
+  aliased in every `zanix new`-scaffolded project's own `deno.jsonc`) was not on the list, so
+  `e instanceof HttpError` compared against two reference-different classes, always `false`, even
+  though the thrown object's serialized shape (`name`/`status`/`code`) matched exactly. Fixed by
+  adding `'@zanix/errors'` to `NATIVE_RUNTIME_MODULES` — confirmed empirically that the literal
+  specifier text a project file's own `import ... from '@zanix/errors'` produces at this plugin's
+  `resolveId` hook is the alias itself, never rewritten to `'@zanix/utils/errors'` beforehand, so
+  the entry names the alias directly rather than relying on `@zanix/utils`'s own subpath-matching
+  (which would also be unreachable in practice — the real `@zanix/utils` package has no root export
+  at all).
+- **A package imported ONLY from a `SpaceAppConfig.clientEntry` override was invisible to Vite's
+  dependency-optimizer discovery** (`discoverBareSpecifiersFromEntryFiles`, renamed from
+  `discoverBareSpecifiersFromComets` — `deno-optimize-deps-alias.ts`) — the mechanism that feeds
+  `optimizeDeps.include` for anything a Comet imports walked ONLY Comet files, never a project's own
+  `clientEntry` file, even though it's a real, first-class client-bundle entry point in identical
+  standing to a Comet. A transitive CommonJS dependency reachable only from `clientEntry` could then
+  fail ESM interop at runtime — confirmed via a Monaco Web Worker setup, where this surfaced as an
+  opaque, detail-free `Could not create web worker(s)` console failure with nothing pointing back at
+  a missing `optimizeDeps.include` entry. `denoOptimizeDepsAliasPlugin`'s own `configResolved` hook
+  now also resolves a real `clientEntry` override (via the new, shared `resolveClientEntryFilePath`
+  — also now what `build-client.ts`'s own `resolvedClientEntry` resolution uses, replacing its
+  previously duplicated inline logic) and includes it in the walk; the auto-generated default
+  `clientEntry` (no override) is deliberately excluded — it has no file to walk, and only ever
+  imports `@zanix/space/client` itself, a first-party JSR module with no CJS-interop concern.
+- **A `SpaceAppConfig.clientEntry` override never resolved in a real production build** —
+  `bootstrapModules` came out empty for every full-document response, app-wide (zero Comet
+  hydration, zero Orbit navigation, on every route, not only whatever the custom entry itself did),
+  with no error anywhere pointing at the cause. `resolveClientEntryUrl()`'s production branch looked
+  up the manifest by the raw, un-resolved override string (`resolveClientEntrySpecifier()`'s own
+  value, e.g. `'./src/main.client.ts'`), while `client-entry-manifest.json` is written keyed by that
+  same override's realpath'd, absolute filesystem path (`build-client.ts`'s own
+  `resolvedClientEntry`) — the two values are never equal for any real-world `clientEntry`, so the
+  lookup always missed. `zanix space dev` never exercises this branch at all (it root-relative-ifies
+  the raw specifier directly for its own dev-server URL), which is why extensive dev-mode testing of
+  a `clientEntry`-based feature could look completely correct and still be entirely broken in
+  production. Fixed by resolving and caching the override's realpath once, at boot — alongside
+  `loadClientEntryManifest` — via the new `loadClientEntryProductionKey`, so
+  `resolveClientEntryUrl()` looks the manifest up by the exact same key the build wrote it with,
+  instead of recomputing (or mismatching) it on every request.
+- **A ready-made Comet this package itself ships (`SubmitGuard`, `FormDraftPersistence`,
+  `ScrollRestoration`, `UnsavedChangesGuard`, `NetworkStatus`, `ManagedForm` —
+  `@zanix/space/comet/react`/`/preact`) silently failed to hydrate in a real production build the
+  moment a consuming app composed it directly** — `Failed to hydrate a Comet boundary` on every page
+  render, with an unattributed CSP/network error underneath, and zero indication the cause was
+  specific to a package-shipped Comet rather than an author's own. `discoverComets`'s own build-time
+  walk only ever scans a consuming app's own project tree, so it never sees a ready-made Comet's
+  real source location — this package's own install location, resolved via `jsr:` for any genuine
+  consumer, never something under that app's `routesDir`. With no `comets-manifest.json` entry for
+  it, `resolveCometModuleUrl`'s production lookup fell back to the raw `import.meta.url` value — a
+  real `https://jsr.io/...` URL for a `jsr:`-installed consumer — which a browser can neither
+  execute directly (a raw, uncompiled `.tsx` file) nor even reach past a default CSP with no
+  `jsr.io` allowance. Separately, actually registering one of these as a real build entry (the fix
+  below) exposed a second, previously unreachable bug: `cometPlugin`'s own `'use comet'` handling
+  called `Deno.realPath` unconditionally on a comet's module id, which throws outright on the
+  NUL-prefixed id `@deno/vite-plugin` produces for a remote/bare specifier — a hard build crash,
+  confirmed via a real build against this package's own actually-published `SubmitGuard` source.
+  Fixed by: `build-client.ts`'s own `discoverUsedBuiltInComets` (`discover-comets.ts`) scans a
+  project's source for a named import of one of these six from
+  `@zanix/space/comet/<active renderer>` — the same directive-scanning walk `discoverComets` already
+  runs, reused rather than duplicated — and registers only the ones actually imported as real build
+  entries, exactly like a project's own Comet or `error.tsx` already are
+  (`built-in-comets-registry.ts`'s own `getBuiltInCometUrls` resolves each to its real URL via
+  `new URL(specifier, import.meta.url)`, deliberately not `import.meta.resolve`, for the identical
+  `zanix space dev` SSR-module-runner-interception reason `default-view-specifiers.ts` already
+  documents). `comet-plugin.ts`'s own `unwrapDenoModuleId` reverses `@deno/vite-plugin`'s wrapped id
+  back to the plain, resolved URL a comet's own `import.meta.url` actually evaluates to at runtime,
+  both to stop the `Deno.realPath` crash and so `comets-manifest.json` ends up keyed by a value
+  `resolveCometModuleUrl`'s runtime lookup can actually match. An app that never imports any of
+  these six gets zero extra build output for them, same as any other unused dependency.
+
 ## [1.5.0] - 2026-09-05
 
 ### Added

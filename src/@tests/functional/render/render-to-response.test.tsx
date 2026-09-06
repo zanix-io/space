@@ -401,14 +401,11 @@ Deno.test(
 )
 
 Deno.test(
-  'renderToResponse: fragmentOnly resolves a genuinely async Suspense boundary to its settled ' +
-    'content directly — no placeholder, no reveal script, since an Orbit fragment swap never ' +
-    'executes an inserted <script> at all',
+  'renderToResponse: a genuinely async Suspense boundary always resolves to a complete response ' +
+    'containing the settled content — whether or not React happens to represent it as a hidden ' +
+    "placeholder plus a later reveal script is no longer this function's own concern (Orbit's " +
+    "client, orbit.ts's own reviveFragmentScripts, is what makes either shape work)",
   async () => {
-    // A real timer, not a hand-resolved promise: `fragmentOnly` awaits the stream's own
-    // `allReady` internally, inside `renderToResponse` itself, so correctness here does not
-    // depend on exactly when this resolves relative to the caller — unlike the previous test,
-    // there is no ordering to control for.
     function Delayed() {
       const value = use(
         new Promise<string>((resolve) => setTimeout(() => resolve('settled'), 20)),
@@ -419,12 +416,10 @@ Deno.test(
       <Suspense fallback={<p>loading</p>}>
         <Delayed />
       </Suspense>,
-      { fragmentOnly: true },
     )
     const html = await response.text()
 
-    assert(!/id="S:\d+"/.test(html), html)
-    assert(!html.includes('$RC'), html)
+    // Deliberately no assertion either way on `id="S:\d+"`/`$RC` — see this test's own title.
     assertMatch(html, /id="delayed">settled</)
   },
 )

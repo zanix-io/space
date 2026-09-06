@@ -69,16 +69,17 @@ import Counter from '../comets/counter.tsx'
 ```
 
 **No client entry to write.** Every full-document response's own bootstrap script
-(`hydrateComets()`/`hydrateErrorBoundaries()`/`initOrbit()`, correctly `nonce`'d for a strict
-`script-src` CSP) is generated and wired in automatically — the same reasoning that already makes a
-Comet's own registration automatic (`'use comet'`, no manual step). `hydrateErrorBoundaries()`
-attaches interactivity to any `error.tsx` Fallback the page's own SSR pass already rendered — see
+(`initClientEntry()`, correctly `nonce`'d for a strict `script-src` CSP) is generated and wired in
+automatically — the same reasoning that already makes a Comet's own registration automatic
+(`'use comet'`, no manual step). Under the hood, `initClientEntry()` runs `hydrateComets()`, then
+`hydrateErrorBoundaries()`, then `initOrbit()`. `hydrateErrorBoundaries()` attaches interactivity to
+any `error.tsx` Fallback the page's own SSR pass already rendered — see
 [`docs/routing.md`](./routing.md#layouts-loading-and-error-segments) for the full recovery contract.
 Only set `SpaceAppConfig.clientEntry` (a real source file of your own) when a project genuinely
 needs EXTRA client-side code — analytics, a global error handler:
 
 ```ts
-// space.app.ts — only if you need more than hydrateComets()/initOrbit()
+// space.app.ts — only if you need more than initClientEntry() runs
 export default defineSpaceApp({
   name: 'storefront',
   clientEntry: './src/main.client.ts', // replaces the auto-generated default entirely
@@ -86,7 +87,20 @@ export default defineSpaceApp({
 ```
 
 ```ts
-// src/main.client.ts — your own file is then fully responsible for calling these itself
+// src/main.client.ts — your own file is then fully responsible for calling this itself
+import { initClientEntry } from '@zanix/space/client'
+
+initClientEntry()
+// ...then your own extra code, e.g. analytics.init()
+```
+
+Need to interleave code between the three calls, or configure `initOrbit`'s own `prefetch` option?
+`initClientEntry(options)` forwards `options` straight to `initOrbit` (so
+`initClientEntry({ prefetch: false })` is the same as calling `initOrbit({ prefetch: false })`
+directly) — but if you need the three calls separated, `hydrateComets`/`hydrateErrorBoundaries`/
+`initOrbit` stay independently exported from the same barrel:
+
+```ts
 import { hydrateComets, hydrateErrorBoundaries, initOrbit } from '@zanix/space/client'
 
 hydrateComets()

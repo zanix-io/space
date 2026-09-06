@@ -6,6 +6,7 @@ import { getPrefetchedFragment, initPrefetch, rescanPrefetchTargets } from './pr
 import type { PrefetchOptions } from './prefetch.ts'
 import { detachPersistedComets, reuseRetainedComets } from './comet-persistence.ts'
 import { registerPersistTransitionNames } from './comet-persist-transition.ts'
+import { getActiveCspNonce } from './active-nonce.ts'
 
 const TITLE_TAG = /<title>([^<]*)<\/title>/i
 // Matches a whole `<link ...>` tag as long as `rel="stylesheet"` appears somewhere in its
@@ -189,6 +190,53 @@ export async function ensureStylesheetsLoaded(html: string): Promise<string> {
 }
 
 /**
+ * Replaces every `<script>` inside `root` — a `<template>`'s own, still-detached `content`
+ * fragment, right after `template.innerHTML` just parsed it — with a freshly-created one carrying
+ * the same attributes and text, in place. This is the real fix for React's own streaming Suspense
+ * reveal mechanism (`$RC`) never running once a fragment lands via `template.innerHTML`/
+ * `replaceChildren`: per the HTML Living Standard, a script parsed that way (or moved out of a
+ * `<template>`'s inert `content` fragment) is marked "already started" the moment it's parsed, and
+ * never executes again regardless of where it's moved to afterward — a placeholder `$RC` was
+ * supposed to reveal stays hidden forever, silently, since nothing about this is a failure any of
+ * `performSwap`'s own error handling would ever see.
+ *
+ * A brand-new element (never parsed, never "already started") DOES execute the instant it becomes
+ * connected to a live document — the well-established workaround this function applies. Doing the
+ * replacement HERE, while `root` is still detached, is what makes the later
+ * `outlet.replaceChildren(template.content)` (`performSwap`) execute every one of these scripts
+ * automatically, in the exact order they already appear in: a `DocumentFragment`'s own children
+ * connect one at a time, in tree order, and an inline classic script with no `src` runs
+ * SYNCHRONOUSLY the moment it becomes connected — never deferred to a later microtask that could
+ * let a subsequent sibling connect first. That ordering guarantee is exactly what React's own
+ * reveal protocol depends on: an early script defining `$RC`/`$RB` must run before a later one that
+ * calls `$RC(...)`, and that call's own `document.getElementById` lookups need the placeholder and
+ * its replacement content to already be connected right next to it — both true here as a
+ * consequence of plain in-order connection, nothing this function does explicitly.
+ *
+ * `nonce` is deliberately never copied from the original — a fragment response never carries a
+ * per-request nonce that matches the CURRENTLY ACTIVE document's own (Orbit only ever swaps the
+ * outlet, never the whole document — the identical problem `getActiveCspNonce()`'s own doc already
+ * describes for a Comet generating new nonce'd content client-side). Every fresh script gets that
+ * active nonce instead, or none at all on a page with no nonce-based CSP configured.
+ *
+ * Exported so a dedicated `happy-dom`-backed test can exercise it directly (same setup
+ * `ensureStylesheetsLoaded`'s own suite already established), not only indirectly through a full
+ * `performSwap`.
+ */
+export function reviveFragmentScripts(root: DocumentFragment): void {
+  const nonce = getActiveCspNonce()
+  for (const original of root.querySelectorAll('script')) {
+    const script = document.createElement('script')
+    for (const { name, value } of original.attributes) {
+      if (name !== 'nonce') script.setAttribute(name, value)
+    }
+    if (nonce !== undefined) script.nonce = nonce
+    script.textContent = original.textContent
+    original.replaceWith(script)
+  }
+}
+
+/**
  * The CURRENTLY ACTIVE document's own resolved CSP signature — embedded once, at full-document
  * render time, as a `<meta>` tag (see `csp-signature.ts`'s own module doc for the full "why").
  * Read fresh off the DOM on every call rather than cached: this never actually changes for the
@@ -308,6 +356,10 @@ async function performSwap(href: string, replace: boolean): Promise<void> {
   // touches the real document.
   const template = document.createElement('template')
   template.innerHTML = readyBody
+  // See `reviveFragmentScripts`'s own doc — must run before `template.content` is ever moved into
+  // the live document (`swap` below), so every script it contains (React's own streaming Suspense
+  // reveal mechanism included) is a fresh, non-inert element the moment it gets there.
+  reviveFragmentScripts(template.content)
 
   // Registers each `persist`-tagged boundary's own `view-transition-name` — see
   // `comet-persist-transition.ts`'s own doc for the full mechanism. This MUST run before
@@ -441,7 +493,8 @@ function onPopState(): void {
 /**
  * Enables Orbit — instant client-side navigation between pages already served by this same app,
  * with no full document reload after the first one. Call once, from this app's client entry,
- * alongside `hydrateComets()`.
+ * alongside `hydrateComets()` — or call `initClientEntry(options)` (`client-entry-init.ts`) to run
+ * this together with `hydrateComets()`/`hydrateErrorBoundaries()` in one line.
  *
  * Progressive enhancement, not a requirement: every internal `<a>` already works as a normal link
  * before this runs (and still works if a click falls through any of `shouldInterceptNavigation`'s

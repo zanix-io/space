@@ -1,10 +1,23 @@
 import { assert, assertEquals } from '@std/assert'
 import { build } from 'vite'
 import type { Rollup } from 'vite'
+import deno from '@deno/vite-plugin'
 import { getTemporaryFolder } from '@zanix/helpers'
 import { cometPlugin } from 'modules/bundler/comet-plugin.ts'
 
 const TMP_ROOT = getTemporaryFolder(import.meta.url)
+
+/**
+ * Real network resolution against `jsr.io`, same convention `deno-optimize-deps-alias.test.ts`'s
+ * own "leaves a specifier that resolves to a remote JSR module alone" test already establishes for
+ * exactly this class of case — a real `@deno/vite-plugin` resolution of a genuinely remote
+ * specifier can't be faithfully reproduced by a hand-written stub (confirmed empirically: a plain
+ * `resolveId`/`load` stub standing in for `@deno/vite-plugin`'s own wrapped id hits an unrelated
+ * Rollup tree-shaking difference for a synthetic, disconnected entry with no real importer — never
+ * the actual thing this test needs to verify).
+ */
+const REMOTE_COMET_URL =
+  'https://jsr.io/@zanix/space/1.5.0/src/modules/comets/submit-guard-react.tsx'
 
 /**
  * Real `vite build()` runs, not mocks — this is the one place in this package's suite that
@@ -133,6 +146,54 @@ Deno.test(
         !message.includes('NUL byte') && !message.includes('unexpected'),
         `expected no raw realpath crash, got: ${message}`,
       )
+    } finally {
+      await Deno.remove(root, { recursive: true })
+    }
+  },
+)
+
+Deno.test(
+  'cometPlugin: a Comet whose own SOURCE FILE resolves through a remote specifier (e.g. a ' +
+    'ready-made Comet this package itself ships, used from a jsr:-installed consumer) gets a ' +
+    'real comets-manifest.json entry keyed by its plain, resolved URL — never a crash on ' +
+    "@deno/vite-plugin's own wrapped id, and never keyed by that wrapped id either. Exercised " +
+    "against this package's own real, published SubmitGuard source (immutable once published, " +
+    'so this never drifts against a moving target)',
+  async () => {
+    const root = await Deno.makeTempDir({ dir: TMP_ROOT })
+    try {
+      // A ready-made Comet is always registered as a known entry (`build-client.ts`'s own doc),
+      // so the plain resolved URL itself is the `rollupOptions.input` value, exactly as that
+      // wiring does — never the wrapped id `@deno/vite-plugin`'s own resolver produces for it.
+      const result = await build({
+        root,
+        logLevel: 'silent',
+        build: {
+          write: false,
+          minify: false,
+          rollupOptions: { input: { comet: REMOTE_COMET_URL } },
+        },
+        plugins: [deno(), cometPlugin({ knownEntryPaths: [REMOTE_COMET_URL] })],
+      })
+
+      const { output } = (Array.isArray(result) ? result[0] : result) as Rollup.RollupOutput
+      const chunks = output.filter((entry): entry is Rollup.OutputChunk => entry.type === 'chunk')
+      const assets = output.filter((entry) => entry.type === 'asset')
+
+      const cometChunk = chunks.find((chunk) =>
+        chunk.moduleIds.some((id) => id.includes(REMOTE_COMET_URL))
+      )
+      assert(cometChunk, 'expected a chunk for the remote comet entry')
+      assert(cometChunk.code.includes('SubmitGuard'), cometChunk.code)
+
+      const manifestAsset = assets.find((asset) => asset.fileName === 'comets-manifest.json')
+      assert(manifestAsset, 'expected a comets-manifest.json asset')
+      const manifest = JSON.parse(manifestAsset.source as string)
+      assertEquals(manifest[REMOTE_COMET_URL], `/${cometChunk.fileName}`)
+      // The wrapped, NUL-prefixed id `@deno/vite-plugin` actually resolves this specifier to must
+      // never leak into the manifest as its own (unmatched) key — confirmed by asserting the
+      // manifest holds EXACTLY the one, plain-URL-keyed entry a real runtime lookup can use.
+      assertEquals(Object.keys(manifest), [REMOTE_COMET_URL])
     } finally {
       await Deno.remove(root, { recursive: true })
     }

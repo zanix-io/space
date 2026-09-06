@@ -103,25 +103,6 @@ export type RenderToResponseOptions = {
    * shell) — a fatal error still makes this function resolve with a 500 `Response`, it does not
    * reject; use this callback to log/report it. */
   onError?: (error: unknown) => void
-  /**
-   * Set for an Orbit fragment response — never for a full document. A real browser parses a
-   * streamed document progressively, so a Suspense boundary that resolves after the initial shell
-   * arrives as a hidden placeholder plus a later `<script>` that reveals it (React's own `$RC`
-   * mechanism); that script runs the moment it's parsed. Orbit's own swap (`orbit.ts`) instead
-   * `fetch()`es the WHOLE response, then inserts it via `template.innerHTML`/`replaceChildren` —
-   * and a `<script>` parsed that way is marked already-started and never executes, per the HTML
-   * Living Standard. Left unfixed, the placeholder never gets revealed: the real content sits in
-   * the DOM, fully present, permanently hidden, with no error anywhere.
-   *
-   * Awaiting the stream's own `allReady` before ever reading from it — confirmed empirically, not
-   * assumed — makes React emit the settled content directly (`<!--$-->...<!--/$-->`, plain HTML
-   * comments, always inert to `innerHTML`) instead of the placeholder/reveal-script pair, since
-   * nothing has consumed the stream's early chunks yet by the time every boundary resolves. A
-   * fragment gains nothing from streaming in the first place — Orbit's own client already buffers
-   * the whole response via `response.text()` before touching the DOM — so this trades away
-   * progressive delivery only where it was never actually used.
-   */
-  fragmentOnly?: boolean
 }
 
 /**
@@ -168,7 +149,6 @@ export async function renderToResponse(
     link,
     devClient,
     onError,
-    fragmentOnly,
   } = options
   const cache: RequestCache = new Map()
   let onErrorCalled = false
@@ -316,12 +296,6 @@ export async function renderToResponse(
         },
       },
     )
-
-    // See `RenderToResponseOptions.fragmentOnly`'s own doc for why this specifically has to
-    // happen BEFORE the stream is ever read (by this function's own caller, once the `Response`
-    // below is returned) — awaiting it after the first read would be too late, the placeholder
-    // would already be on its way out.
-    if (fragmentOnly) await stream.allReady
 
     // `renderToReadableStream`'s own `onError` fires for every error, recoverable or not — a
     // component caught by an error boundary (or a Suspense boundary that later settles) still

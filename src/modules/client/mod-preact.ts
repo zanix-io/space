@@ -22,6 +22,10 @@ export { hydrateComets } from './hydrate-comets-preact.ts'
  * — see `hydrate-error-boundaries-preact.ts`'s own doc for why Preact needs no leftover-marker
  * detection the way `@zanix/space/client`'s own counterpart does. */
 export { hydrateErrorBoundaries } from './hydrate-error-boundaries-preact.ts'
+/** Runs this app's whole client-entry boot sequence in one call — `hydrateComets()`,
+ * `hydrateErrorBoundaries()`, then `initOrbit(options)`. See `client-entry-init.ts`'s own doc for
+ * the full rationale (shared, renderer-agnostic, between both barrels). */
+export { initClientEntry } from './client-entry-init-preact.ts'
 export {
   /** Runs a Comet's hydration according to its own `CometStrategy` (`load`/`idle`/`visible`/
    * `media`/`none`). */

@@ -40,8 +40,8 @@ for a data-phase throw.
 content inside a `Suspense` boundary (Space always adds one where `error.tsx` exists), so a failing
 segment stays a `200` instead of a shell-breaking `500` — but `render()`'s own `hasError` branch
 never actually runs during that same server response: React instead ships a postponed-recovery
-marker and finishes that one segment on the client. Every auto-generated client entry already calls
-`hydrateErrorBoundaries()` alongside `hydrateComets()`/`initOrbit()` (see
+marker and finishes that one segment on the client. Every auto-generated client entry already runs
+`hydrateErrorBoundaries()` alongside `hydrateComets()`/`initOrbit()`, via `initClientEntry()` (see
 [`docs/comets.md`](./comets.md#wiring-it-up)) for exactly this — it finds that marker and mounts the
 real `error.tsx` Fallback fresh, no extra wiring needed. Preact has no such gap to begin with:
 `preact-render-to-string`'s synchronous render recovers into an already-mounted boundary directly,

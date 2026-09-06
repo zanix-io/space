@@ -57,7 +57,8 @@ async function hydrateBoundary(boundary: HTMLElement): Promise<void> {
  * Hydrates every Comet boundary under `root`, each on its own declared `CometStrategy` timing (see
  * `scheduleCometHydration`, which decides *when*; this decides *what* — dynamically importing the
  * boundary's own module and mounting/hydrating it). Meant to be called once, after the initial
- * page load, from this app's own client entry module.
+ * page load, from this app's own client entry module — or via `initClientEntry()`
+ * (`client-entry-init.ts`), which calls this alongside `hydrateErrorBoundaries()`/`initOrbit()`.
  *
  * Not unit-tested directly — beyond `scheduleCometHydration`'s own strategy-timing logic (which
  * is), this is a thin shim over real browser/React APIs (`document.querySelectorAll`,

@@ -4,6 +4,7 @@ import { createServer } from 'vite'
 import deno from '@deno/vite-plugin'
 import { getTemporaryFolder } from '@zanix/helpers'
 import { denoOptimizeDepsAliasPlugin } from 'modules/bundler/deno-optimize-deps-alias.ts'
+import { setClientEntry } from 'modules/render/client-entry.ts'
 
 const TMP_ROOT = getTemporaryFolder(import.meta.url)
 
@@ -201,6 +202,69 @@ Deno.test(
           '/helper.ts',
         )
         assert(result?.code.includes('/.vite/deps/react-dom.js'), result?.code)
+      })
+    } finally {
+      await removeTempDirWithRetry(root)
+    }
+  },
+)
+
+Deno.test(
+  'denoOptimizeDepsAliasPlugin: discovers a specifier reached only through a real ' +
+    "SpaceAppConfig.clientEntry override — never reachable from any Comet's own import graph, " +
+    'the real gap this closes (a Monaco Web Worker setup surfaced it as an opaque "Could not ' +
+    'create web worker(s)" failure before this fix)',
+  { ignore: !shouldRunEnvSensitiveTests },
+  async () => {
+    const root = await Deno.makeTempDir({ dir: TMP_ROOT })
+    try {
+      // No Comet anywhere in this project imports `react-dom` — only `main.client.ts`, a
+      // `clientEntry` override, does. Before this fix, `discoverComets(root)` never saw this file
+      // at all, so `react-dom` (and any transitive CJS dependency of its own) never reached
+      // `optimizeDeps.include`.
+      await Deno.writeTextFile(
+        join(root, 'main.client.ts'),
+        `import { version } from 'react-dom'\nconsole.log(version)\n`,
+      )
+      setClientEntry('./main.client.ts')
+      await withDevServer(root, (server) => {
+        assert(
+          server.config.environments.client.optimizeDeps.include?.includes('react-dom'),
+          'expected react-dom to be discovered through the clientEntry override',
+        )
+        return Promise.resolve()
+      })
+    } finally {
+      // Global module state (`client-entry.ts`'s own `clientEntryPath`) — every other test in
+      // this file relies on `getClientEntry()` returning `undefined` (never set), so leaving this
+      // set here would silently break every test declared AFTER this one in the same run.
+      setClientEntry(undefined)
+      await removeTempDirWithRetry(root)
+    }
+  },
+)
+
+Deno.test(
+  'denoOptimizeDepsAliasPlugin: with no clientEntry override configured (the auto-generated ' +
+    'default), the discovery walk runs exactly as it did before this file gained clientEntry ' +
+    'support — no wasted resolution attempt against the synthetic virtual entry id',
+  { ignore: !shouldRunEnvSensitiveTests },
+  async () => {
+    const root = await Deno.makeTempDir({ dir: TMP_ROOT })
+    try {
+      await Deno.writeTextFile(
+        join(root, 'counter.tsx'),
+        `'use comet'\nimport { useState } from 'react'\nexport default function Counter() { const [n] = useState(0); return n }\n`,
+      )
+      // Deliberately NOT calling `setClientEntry` — `getClientEntry()` returns `undefined`, the
+      // same state every other test in this file already runs under.
+      await withDevServer(root, (server) => {
+        assert(
+          server.config.environments.client.optimizeDeps.include?.includes('react'),
+          "expected react to still be discovered through the Comet's own import, unaffected by " +
+            'there being no clientEntry override at all',
+        )
+        return Promise.resolve()
       })
     } finally {
       await removeTempDirWithRetry(root)

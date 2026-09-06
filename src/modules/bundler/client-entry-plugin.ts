@@ -6,20 +6,20 @@ const MANIFEST_FILE_NAME = 'client-entry-manifest.json'
 
 /**
  * The auto-generated client entry's own source — every real client entry this framework ever needs
- * is, and only ever needs to be, `hydrateComets(); hydrateErrorBoundaries(); initOrbit();` (see
- * `docs/comets.md`'s and `docs/orbit.md`'s own client-entry examples for the first/last of these).
- * `hydrateErrorBoundaries` exists identically in BOTH client barrels (see the client barrel parity
- * test) — Preact's own implementation is real work (attaching interactivity to markup its SSR pass
- * already rendered correctly), never a no-op, so this call is never renderer-conditional the way
- * picking WHICH barrel to import from already is. Picking the right renderer's own barrel here is
- * what `client-barrel-guard.ts` exists to CATCH a mismatch on for a user-authored entry — this one
- * is generated from the same `RendererKind` `spacePlugin({ renderer })` itself was given, so it can
- * never disagree with it.
+ * is, and only ever needs to be, `initClientEntry()` (see `client-entry-init.ts`'s own doc for what
+ * that runs: `hydrateComets()`, `hydrateErrorBoundaries()`, then `initOrbit()`, in that order —
+ * also documented as the manual fallback shape in `docs/comets.md`/`docs/orbit.md` for a project
+ * that overrides `SpaceAppConfig.clientEntry`). `hydrateErrorBoundaries` exists identically in BOTH
+ * client barrels (see the client barrel parity test) — Preact's own implementation is real work
+ * (attaching interactivity to markup its SSR pass already rendered correctly), never a no-op, so
+ * this is never renderer-conditional the way picking WHICH barrel to import from already is.
+ * Picking the right renderer's own barrel here is what `client-barrel-guard.ts` exists to CATCH a
+ * mismatch on for a user-authored entry — this one is generated from the same `RendererKind`
+ * `spacePlugin({ renderer })` itself was given, so it can never disagree with it.
  */
 function clientEntrySource(renderer: RendererKind): string {
   const barrel = renderer === 'preact' ? '@zanix/space/client/preact' : '@zanix/space/client'
-  return `import { hydrateComets, hydrateErrorBoundaries, initOrbit } from '${barrel}'\n` +
-    'hydrateComets()\nhydrateErrorBoundaries()\ninitOrbit()\n'
+  return `import { initClientEntry } from '${barrel}'\ninitClientEntry()\n`
 }
 
 /** Options for {@linkcode clientEntryPlugin}. */

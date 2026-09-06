@@ -2,7 +2,15 @@ import { assert, assertEquals } from '@std/assert'
 import { join } from '@std/path'
 import { getTemporaryFolder } from '@zanix/helpers'
 import { buildSpaceClient } from 'modules/bundler/build-client.ts'
-import { CLIENT_ENTRY_VIRTUAL_ID } from 'modules/render/client-entry.ts'
+import {
+  CLIENT_ENTRY_VIRTUAL_ID,
+  loadClientEntryManifest,
+  loadClientEntryProductionKey,
+  resolveClientEntryUrl,
+  setClientEntry,
+  setClientEntryManifest,
+  setClientEntryProductionKey,
+} from 'modules/render/client-entry.ts'
 
 const TMP_ROOT = getTemporaryFolder(import.meta.url)
 
@@ -91,6 +99,44 @@ Deno.test(
 
       const code = await Deno.readTextFile(join(result.outDir, builtUrl.replace(/^\//, '')))
       assert(code.includes('custom-client-entry-marker'), code)
+    })
+  },
+)
+
+Deno.test(
+  'an explicit clientEntry override actually resolves through a real production runtime lookup — the build side (client-entry-manifest.json, keyed by realpath) and the runtime side (resolveClientEntryUrl, via loadClientEntryProductionKey) agree on the same key',
+  async () => {
+    await withTempDir(async (root) => {
+      await Deno.writeTextFile(
+        join(root, 'main.client.ts'),
+        `console.log('custom-client-entry-marker')\n`,
+      )
+
+      const result = await buildSpaceClient({
+        root,
+        clientEntry: './main.client.ts',
+        css: { tailwind: false },
+      })
+
+      try {
+        setClientEntry('./main.client.ts')
+        await loadClientEntryManifest(join(result.outDir, 'client-entry-manifest.json'))
+        await loadClientEntryProductionKey(root)
+
+        const clientEntryUrl = resolveClientEntryUrl()
+        assert(
+          clientEntryUrl,
+          'resolveClientEntryUrl() returned undefined — the runtime lookup ' +
+            'never found the build-time manifest entry',
+        )
+
+        const code = await Deno.readTextFile(join(result.outDir, clientEntryUrl.replace(/^\//, '')))
+        assert(code.includes('custom-client-entry-marker'), code)
+      } finally {
+        setClientEntry(undefined)
+        setClientEntryManifest(undefined)
+        setClientEntryProductionKey(undefined)
+      }
     })
   },
 )

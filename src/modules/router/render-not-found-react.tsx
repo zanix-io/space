@@ -43,13 +43,14 @@ export function renderNotFoundResponse(
   if (fragmentOnly) {
     // Same shape a page's own Orbit fragment takes (`render-page-react.tsx`): the resolved title as
     // literal text for `orbit.ts`'s own `extractFragmentTitle`, and nothing else — a fragment is
-    // never a document.
+    // never a document. `fragmentOnly: true` for the same reason too — see
+    // `RenderToResponseOptions.fragmentOnly`'s own doc.
     return renderToResponse(
       <>
         {resolvedHead.title && <title>{resolvedHead.title}</title>}
         {outlet}
       </>,
-      {},
+      { fragmentOnly: true },
     )
   }
 

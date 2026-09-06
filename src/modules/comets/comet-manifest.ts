@@ -81,6 +81,48 @@ export function getCometManifest(): CometManifest | undefined {
   return manifest
 }
 
+/** Maps a source file's own extension to the `DenoMediaType` string `@deno/vite-plugin`'s real
+ * resolver (`dist/resolver.js`, `toDenoSpecifier`) tags a wrapped virtual module id with — see
+ * {@linkcode toBrowserDenoSpecifier}'s own doc for why this is hand-derived here instead of
+ * importing that type. `.tsx`/`.jsx` matter in practice: every ready-made Comet this package ships
+ * (`SubmitGuard`, `FormDraftPersistence`, ...) is itself a `.tsx` file, and tagging it `TypeScript`
+ * instead of `TSX` produces a specifier `@deno/vite-plugin` doesn't recognize as the same module it
+ * already resolved, breaking the whole point of this function. Defaults to `JavaScript` for
+ * anything else (`.js`/`.mjs`/`.cjs`, or no recognized extension at all) — the same default
+ * `resolveDeno` itself falls back to (`resolved.loader ?? "JavaScript"`) when Deno's own loader
+ * reports none. */
+function denoLoaderFor(sourcePath: string): string {
+  if (sourcePath.endsWith('.tsx')) return 'TSX'
+  if (sourcePath.endsWith('.jsx')) return 'JSX'
+  if (sourcePath.endsWith('.json')) return 'Json'
+  if (sourcePath.endsWith('.ts')) return 'TypeScript'
+  return 'JavaScript'
+}
+
+/** Vite's own stable, public convention for exposing a virtual/remote module id as a browser-
+ * requestable URL — the browser-facing counterpart of `@deno/vite-plugin`'s own `toDenoSpecifier`
+ * (`\0deno::<loader>::<id>::<resolved>#deno`, confirmed against that package's real
+ * `dist/resolver.js` source, not reverse-engineered): `/@id/` prefix, with the leading `\0` byte
+ * replaced by the literal string `__x00__` (a real byte is invalid in a URL) — the exact shape
+ * `@deno/vite-plugin`'s own resolver already produces for a plain `import` of the same remote
+ * module, and the exact shape `dev-engine.ts`'s own `unwrapViteId` already reverses on the way in.
+ * `id`/`resolved` are the identical `sourcePath` here (this function only ever wraps an ALREADY
+ * fully-resolved remote URL — there's no separate "original bare specifier" to preserve, unlike
+ * `resolveDeno`'s own general case).
+ *
+ * Deliberately hand-written here, not imported from `@deno/vite-plugin/resolver` (already a real
+ * dependency `dev-engine.ts` uses) or shared with that file's own `unwrapViteId`: THIS file is
+ * reachable from a Comet's own client bundle (`comet-persist-transition.ts` imports
+ * `hashSourceKey` from here — see `discoverComets`' own doc for why every Comet importing
+ * `defineComet` puts this whole file in that bundle's own module graph), and both
+ * `@deno/vite-plugin` and `dev-engine.ts` carry real, heavy `vite` value dependencies this file
+ * must never reach. The format itself is three lines of string-templating — cheaper to duplicate
+ * than to risk that leak for.
+ */
+function toBrowserDenoSpecifier(sourcePath: string): string {
+  return `/@id/__x00__deno::${denoLoaderFor(sourcePath)}::${sourcePath}::${sourcePath}#deno`
+}
+
 /**
  * Resolves a comet's real client-servable URL from its own source location.
  *
@@ -88,22 +130,27 @@ export function getCometManifest(): CometManifest | undefined {
  *   in it, falling back to the raw value if that specific comet has no entry (a comet whose file
  *   never actually got built, e.g. a stale manifest — safer to degrade than to throw at request
  *   time over a build/deploy skew this function has no way to fix).
- * - **With no manifest loaded** (development), two cases:
+ * - **With no manifest loaded** (development), three cases:
  *   - The common one — the source file lives INSIDE `devRoot` (an app's own Comet or `error.tsx`,
  *     always somewhere under its own project): Vite's dev server already serves every project file
  *     at its own root-relative path, so the filesystem-root prefix is simply stripped — no
  *     manifest, no hashing, no build step involved.
- *   - The file lives OUTSIDE `devRoot` — this package's own built-in `default-error-view.tsx`/
- *     `default-error-view-preact.ts` (`render-page-react.tsx`'s/`render-page-preact.ts`'s own
- *     "no error.tsx anywhere" fallback) being the one real case today: it lives inside
- *     `@zanix/space`'s OWN install location, never an app's `routesDir`. Confirmed empirically as a
- *     real, reproduced `404` before this branch existed: the un-prefixed absolute filesystem path
- *     (`/Users/.../space/src/modules/router/default-error-view.tsx`) went straight into the
- *     browser's own `GET`, which no route in a plain dev server ever answers. Vite's dev server
- *     already has a real, documented answer for exactly this — its own `/@fs/<absolute-path>`
- *     convention for serving a file outside the project root — and `dev-asset-handler.ts`'s own
- *     `looksLikeDevAssetRequest` already recognizes that prefix (it was simply never PRODUCED by
- *     this function before, only ever consumed on the way in for Vite's own internal requests).
+ *   - The source resolves to a remote `http://`/`https://` URL — every one of this package's own
+ *     ready-made Comets (`SubmitGuard`, `FormDraftPersistence`, ...), used directly from
+ *     `@zanix/space/comet/react`/`/preact` the way this package's own docs recommend, resolves this
+ *     way for any consumer installing `@zanix/space` as a plain `jsr:` dependency (i.e. every
+ *     consumer without a locally-linked/vendored checkout) — `import.meta.url`, evaluated
+ *     server-side under Deno, is itself a real `https://jsr.io/...` specifier there, never a
+ *     `file://` path. Vite's dev server has no filesystem path to serve this by at all — the
+ *     browser-facing wrapped-virtual-module convention {@linkcode toBrowserDenoSpecifier} builds
+ *     is what `@deno/vite-plugin`'s own resolver already recognizes for the identical module.
+ *   - The file lives OUTSIDE `devRoot`, on the local filesystem — this package's own built-in
+ *     `default-error-view.tsx`/`default-error-view-preact.ts` (`render-page-react.tsx`'s/
+ *     `render-page-preact.ts`'s own "no error.tsx anywhere" fallback) being the one real case
+ *     today: it lives inside `@zanix/space`'s OWN install location, never an app's `routesDir`.
+ *     Vite's dev server has a real, documented answer for exactly this — its own
+ *     `/@fs/<absolute-path>` convention for serving a file outside the project root — and
+ *     `dev-asset-handler.ts`'s own `looksLikeDevAssetRequest` already recognizes that prefix.
  *
  * @param sourceUrl - The comet's own `import.meta.url`, as passed to `defineComet`.
  * @param devRoot - The Vite project root, used to derive the dev-mode fallback path. Defaults to
@@ -117,6 +164,10 @@ export function resolveCometModuleUrl(
   const sourcePath = normalizeSourceKey(sourceUrl)
 
   if (manifest) return manifest[sourcePath] ?? sourceUrl
+
+  if (sourcePath.startsWith('http://') || sourcePath.startsWith('https://')) {
+    return toBrowserDenoSpecifier(sourcePath)
+  }
 
   const rootPath = normalizeSourceKey(
     devRoot.startsWith('file://') ? devRoot : new URL(`file://${devRoot}`).href,

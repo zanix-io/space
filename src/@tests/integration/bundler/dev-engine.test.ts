@@ -2,6 +2,7 @@ import { assert, assertEquals } from '@std/assert'
 import { join } from '@std/path'
 import { getTemporaryFolder } from '@zanix/helpers'
 import { createSpaceDevEngine, type SsrModuleChangedEvent } from 'modules/bundler/dev-engine.ts'
+import { resolveCometModuleUrl } from 'modules/comets/comet-manifest.ts'
 
 const TMP_ROOT = getTemporaryFolder(import.meta.url)
 
@@ -314,6 +315,45 @@ Deno.test(
           // to a real, servable url — not just "some JS came back".
           assert(asset.code.includes('/helper.ts'), asset.code)
           assert(asset.code.includes('Counter'), asset.code)
+        } finally {
+          await engine.close()
+        }
+      },
+    )
+  },
+)
+
+Deno.test(
+  'createSpaceDevEngine: transformClientAsset serves a real ready-made Comet whose own ' +
+    'import.meta.url resolves to a remote https://jsr.io/... specifier — every one of this ' +
+    "package's own ready-made Comets (SubmitGuard, FormDraftPersistence, ...), used the way this " +
+    "package's own docs recommend, for a consumer installing @zanix/space as a plain jsr: " +
+    'dependency (not a locally-linked/vendored checkout)',
+  async () => {
+    await withTempProject(
+      async () => {},
+      async (root) => {
+        const engine = await createSpaceDevEngine({ root, isRouteEntry })
+        try {
+          // A real remote `.ts` module, resolved the same way a ready-made Comet's own
+          // `import.meta.url` resolves under Deno when `@zanix/space` is a plain `jsr:` dependency
+          // — standing in for `form-draft-persistence-react.tsx` itself without needing this
+          // package's own published JSR release to test against.
+          const remoteSourceUrl = 'https://jsr.io/@std/path/1.1.6/basename.ts'
+          const browserUrl = resolveCometModuleUrl(remoteSourceUrl, root)
+          // Real evidence this is genuinely exercising the remote-specifier branch, not silently
+          // falling through to the local-filesystem `/@fs/` case (which would 404 exactly like the
+          // bug this test guards against).
+          assert(
+            browserUrl.startsWith('/@id/__x00__deno::'),
+            `expected a wrapped Deno virtual-module id, got: ${browserUrl}`,
+          )
+          assert(!browserUrl.startsWith('/@fs'), browserUrl)
+
+          const asset = await engine.transformClientAsset(browserUrl)
+
+          assert(asset, `expected real transformed code, got null for: ${browserUrl}`)
+          assert(asset.code.includes('function basename'), asset.code)
         } finally {
           await engine.close()
         }

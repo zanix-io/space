@@ -51,8 +51,9 @@ export function renderLoaderErrorResponse(
 
   if (fragmentOnly) {
     // Same shape a page's own Orbit fragment takes (`render-page-react.tsx`) — no `<title>` here,
-    // since `error.tsx` contributes no head of its own.
-    return renderToResponse(outlet, {})
+    // since `error.tsx` contributes no head of its own. `fragmentOnly: true` for the same reason
+    // too — see `RenderToResponseOptions.fragmentOnly`'s own doc.
+    return renderToResponse(outlet, { fragmentOnly: true })
   }
 
   const document: DocumentModel = {

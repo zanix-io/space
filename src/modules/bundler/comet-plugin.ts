@@ -198,7 +198,18 @@ export function cometPlugin(options: CometPluginOptions = {}): Plugin {
         return null
       }
       if (SERVER_ONLY_DIRECTIVE.test(code)) {
-        serverOnlySourceIds.add(await Deno.realPath(id))
+        // A module resolved through a remote JSR package (`@deno/vite-plugin`'s own
+        // `deno::TypeScript::https://...`-shaped id for it) isn't a real on-disk path —
+        // `Deno.realPath` throws on it instead of resolving. Falling back to the raw `id` in that
+        // case still lets `findChainToComet`'s own `matchesKnownSource` match it correctly (it
+        // tries the raw id first, before ever attempting a realpath itself), rather than crashing
+        // the whole build for a case the `'server-only'` violation message is specifically meant
+        // to handle cleanly.
+        try {
+          serverOnlySourceIds.add(await Deno.realPath(id))
+        } catch {
+          serverOnlySourceIds.add(id)
+        }
       }
       return null
     },

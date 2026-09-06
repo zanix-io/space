@@ -1,4 +1,4 @@
-import type { SsrModuleChangedEvent } from 'modules/bundler/dev-engine.ts'
+import type { SsrModuleChangedEvent } from 'modules/bundler/dev-engine-types.ts'
 import { ProgramModule, Socket, ZanixWebSocket } from '@zanix/server'
 import { SPACE_DEV_SOCKET_ROUTE } from './dev-socket-route.ts'
 

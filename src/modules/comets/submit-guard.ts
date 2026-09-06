@@ -27,6 +27,12 @@ export type SubmitGuardOptions = {
    * @default true
    */
   disableControls?: boolean
+  /** Text to show on every submit-triggering control the moment the first real submission fires —
+   * a `<button>`'s `textContent`, an `<input type="submit">`'s `value` — restored automatically
+   * alongside a bfcache restore (or an early cleanup) exactly like `disableControls`' own restore.
+   * Independent of `disableControls`: applies even when that option is `false`. Omit for no label
+   * swap. */
+  pendingLabel?: string
 }
 
 const SUBMIT_CONTROL_SELECTOR = 'button:not([type="button"]):not([type="reset"]), ' +
@@ -51,19 +57,33 @@ const SUBMIT_CONTROL_SELECTOR = 'button:not([type="button"]):not([type="reset"])
  * load (`persisted: false`, including this listener's own very first attach) leaves both untouched,
  * since nothing has been disabled yet on a fresh instance.
  *
- * @returns A cleanup function — detaches both listeners and re-enables any control this call
- * disabled, for the (uncommon) case a consumer detaches without the page actually navigating away
- * (e.g. `SpacePageController`'s own `redirect` never applies, a test harness, or a comet unmount
- * that isn't a real page transition). Matches a `useEffect` callback's own return contract
- * directly: `useEffect(() => attachSubmitGuard(options), deps)`.
+ * @returns A cleanup function — detaches both listeners and re-enables/relabels any control this
+ * call disabled or relabeled, for the (uncommon) case a consumer detaches without the page
+ * actually navigating away (e.g. `SpacePageController`'s own `redirect` never applies, a test
+ * harness, or a comet unmount that isn't a real page transition). Matches a `useEffect` callback's
+ * own return contract directly: `useEffect(() => attachSubmitGuard(options), deps)`.
  */
 export function attachSubmitGuard(options: SubmitGuardOptions): () => void {
-  const { formId, disableControls = true } = options
+  const { formId, disableControls = true, pendingLabel } = options
   const form = globalThis.document?.getElementById(formId)
   if (!(form instanceof HTMLFormElement)) return () => {}
 
   let submitting = false
   let disabled: Array<HTMLButtonElement | HTMLInputElement> = []
+  // Only ever populated when `pendingLabel` is given — a control's original label, keyed by the
+  // control itself, so it can be restored verbatim regardless of what the swap overwrote it with.
+  let originalLabels: Map<HTMLButtonElement | HTMLInputElement, string> | null = null
+
+  // Keyed off `HTMLInputElement` specifically (never `HTMLButtonElement`) since `SUBMIT_CONTROL_
+  // SELECTOR` only ever matches a `<button>` or an `<input type="submit">` — and `HTMLInputElement`
+  // is the one of the two constructors every DOM environment this module runs in (real browsers,
+  // and this package's own `happy-dom`-backed test bridge) reliably exposes as a REAL, distinct
+  // global, so `instanceof` here never silently mismatches the way checking for the other
+  // constructor by name risks.
+  const swapLabel = (control: HTMLButtonElement | HTMLInputElement, label: string) => {
+    if (control instanceof HTMLInputElement) control.value = label
+    else control.textContent = label
+  }
 
   const handleSubmit = (event: Event) => {
     if (submitting) {
@@ -71,11 +91,24 @@ export function attachSubmitGuard(options: SubmitGuardOptions): () => void {
       return
     }
     submitting = true
-    if (!disableControls) return
-    disabled = Array.from(
+    if (!disableControls && !pendingLabel) return
+    const controls = Array.from(
       form.querySelectorAll<HTMLButtonElement | HTMLInputElement>(SUBMIT_CONTROL_SELECTOR),
     ).filter((control) => !control.disabled)
-    for (const control of disabled) control.disabled = true
+    if (disableControls) {
+      disabled = controls
+      for (const control of disabled) control.disabled = true
+    }
+    if (pendingLabel) {
+      originalLabels = new Map()
+      for (const control of controls) {
+        originalLabels.set(
+          control,
+          control instanceof HTMLInputElement ? control.value : control.textContent ?? '',
+        )
+        swapLabel(control, pendingLabel)
+      }
+    }
   }
 
   const handlePageShow = (event: Event) => {
@@ -83,6 +116,10 @@ export function attachSubmitGuard(options: SubmitGuardOptions): () => void {
     submitting = false
     for (const control of disabled) control.disabled = false
     disabled = []
+    if (originalLabels) {
+      for (const [control, label] of originalLabels) swapLabel(control, label)
+      originalLabels = null
+    }
   }
 
   form.addEventListener('submit', handleSubmit)
@@ -92,5 +129,9 @@ export function attachSubmitGuard(options: SubmitGuardOptions): () => void {
     form.removeEventListener('submit', handleSubmit)
     globalThis.removeEventListener('pageshow', handlePageShow)
     for (const control of disabled) control.disabled = false
+    if (originalLabels) {
+      for (const [control, label] of originalLabels) swapLabel(control, label)
+      originalLabels = null
+    }
   }
 }

@@ -269,8 +269,19 @@ never reaching the server a second time.
 Relies on this framework's own "Real HTTP, not an RPC" contract: a submission that goes through
 always ends in a real navigation — the next page, or a freshly re-rendered `422` — so the whole
 document, including this Comet's own in-flight flag, is torn down and reloaded fresh regardless of
-outcome. There is deliberately no reset/timeout path — a real form submission never leaves this
-Comet's own state stale to clean up.
+outcome. There is deliberately no reset/timeout path for THAT case — a real form submission never
+leaves this Comet's own state stale to clean up on its own.
+
+**Resets on a real browser back/forward-cache (bfcache) restore, too** — the one case where a
+guarded page's own frozen state genuinely would otherwise go stale: the ORIGIN page (the one
+`SubmitGuard` is attached to) can itself come back from bfcache after a visitor navigates back to
+it, with its disabled controls and in-flight state frozen exactly as they were the instant `submit`
+fired — nothing re-runs a React/Preact `useEffect`/its cleanup on a bfcache restore, since the whole
+realm is frozen and thawed rather than torn down and remounted. `attachSubmitGuard` also listens for
+`pageshow`, and resets both the disabled controls and the in-flight flag on a real restore
+(`event.persisted === true`) — a fresh load (`persisted: false`) leaves both untouched, since
+nothing has been disabled yet on a fresh instance — without it, a guarded form's submit button would
+stay disabled forever after a "back" navigation.
 
 `attachSubmitGuard` (`@zanix/space/comet`) is the hook-free primitive both `SubmitGuard` Comets wire
 into their own `useEffect`.

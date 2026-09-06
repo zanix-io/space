@@ -75,6 +75,70 @@ Deno.test(
   },
 )
 
+Deno.test(
+  "cometPlugin: a 'server-only' module reached through a non-filesystem id (e.g. a remote " +
+    "JSR-resolved specifier `Deno.realPath` can't resolve) reports the violation instead of " +
+    'crashing the build',
+  async () => {
+    const root = await Deno.makeTempDir({ dir: TMP_ROOT })
+    try {
+      await Deno.mkdir(`${root}/comets`, { recursive: true })
+      await Deno.writeTextFile(
+        `${root}/comets/counter.tsx`,
+        "'use comet'\nimport { secret } from 'virtual:remote-server-only'\n" +
+          'export function Counter() { return secret }\n',
+      )
+      await Deno.writeTextFile(
+        `${root}/main.ts`,
+        "import { Counter } from './comets/counter.tsx'\nconsole.log(Counter())\n",
+      )
+
+      // Stands in for a real remote JSR specifier (`deno::TypeScript::https://jsr.io/...`) that
+      // `@deno/vite-plugin`'s own resolver can hand `transform` — any `id` `Deno.realPath` can't
+      // resolve to a real on-disk path reproduces the same crash, without needing a real network
+      // fetch to prove it.
+      const remoteServerOnlyPlugin = {
+        name: 'stub-remote-server-only',
+        resolveId(source: string) {
+          if (source === 'virtual:remote-server-only') return 'virtual:remote-server-only'
+        },
+        load(id: string) {
+          if (id === 'virtual:remote-server-only') return "'server-only'\nexport const secret = 1\n"
+        },
+      }
+
+      let thrown: unknown
+      try {
+        await build({
+          root,
+          logLevel: 'silent',
+          build: {
+            write: false,
+            minify: false,
+            rollupOptions: { input: `${root}/main.ts` },
+          },
+          plugins: [remoteServerOnlyPlugin, cometPlugin()],
+        })
+      } catch (error) {
+        thrown = error
+      }
+
+      assert(thrown, 'expected the build to fail on the server-only violation')
+      const message = String((thrown as { message?: string })?.message ?? thrown)
+      assert(
+        message.includes('Server-only module imported into client Comet'),
+        `expected the clean violation message, got: ${message}`,
+      )
+      assert(
+        !message.includes('NUL byte') && !message.includes('unexpected'),
+        `expected no raw realpath crash, got: ${message}`,
+      )
+    } finally {
+      await Deno.remove(root, { recursive: true })
+    }
+  },
+)
+
 Deno.test('cometPlugin: a file with no "use comet" directive is left alone entirely', async () => {
   const root = await Deno.makeTempDir({ dir: TMP_ROOT })
   try {

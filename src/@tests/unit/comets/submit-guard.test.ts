@@ -7,13 +7,17 @@ const globals = globalThis as any
 
 function buildForm(
   id: string,
-  buttons: Array<{ tag?: 'button' | 'input'; type?: string }> = [{}],
+  buttons: Array<{ tag?: 'button' | 'input'; type?: string; label?: string }> = [{}],
 ): HTMLFormElement {
   const form = globals.document.createElement('form')
   form.id = id
   for (const button of buttons) {
     const el = globals.document.createElement(button.tag ?? 'button')
     if (button.type) el.type = button.type
+    if (button.label !== undefined) {
+      if (button.tag === 'input') el.value = button.label
+      else el.textContent = button.label
+    }
     form.appendChild(el)
   }
   globals.document.body.appendChild(form)
@@ -236,3 +240,97 @@ Deno.test('attachSubmitGuard: cleanup also detaches the pageshow listener', () =
 
   assert(pageShow.removed())
 })
+
+Deno.test(
+  "attachSubmitGuard: pendingLabel swaps a <button>'s textContent and an <input type=submit>'s value",
+  () => {
+    setUp()
+    const form = buildForm('g11', [
+      { tag: 'button', label: 'Save' },
+      { tag: 'input', type: 'submit', label: 'Send' },
+    ])
+    const detach = attachSubmitGuard({ formId: 'g11', pendingLabel: 'Saving…' })
+
+    fireSubmit(form)
+
+    const [button, input] = Array.from(form.querySelectorAll('button, input')) as [
+      HTMLButtonElement,
+      HTMLInputElement,
+    ]
+    assertEquals(button.textContent, 'Saving…')
+    assertEquals(input.value, 'Saving…')
+    detach()
+  },
+)
+
+Deno.test(
+  'attachSubmitGuard: pendingLabel applies even when disableControls is false',
+  () => {
+    setUp()
+    const form = buildForm('g12', [{ tag: 'button', label: 'Save' }])
+    const detach = attachSubmitGuard({
+      formId: 'g12',
+      disableControls: false,
+      pendingLabel: 'Saving…',
+    })
+
+    fireSubmit(form)
+
+    const button = form.querySelector('button') as HTMLButtonElement
+    assertEquals(button.textContent, 'Saving…')
+    assertFalse(button.disabled)
+    detach()
+  },
+)
+
+Deno.test(
+  'attachSubmitGuard: cleanup restores the original label alongside re-enabling the control',
+  () => {
+    setUp()
+    const form = buildForm('g13', [{ tag: 'button', label: 'Save' }])
+    const detach = attachSubmitGuard({ formId: 'g13', pendingLabel: 'Saving…' })
+
+    fireSubmit(form)
+    const button = form.querySelector('button') as HTMLButtonElement
+    assertEquals(button.textContent, 'Saving…')
+
+    detach()
+
+    assertEquals(button.textContent, 'Save')
+  },
+)
+
+Deno.test(
+  'attachSubmitGuard: a bfcache-restore pageshow restores the original label, not just control state',
+  () => {
+    setUp()
+    const form = buildForm('g14', [{ tag: 'button', label: 'Save' }])
+    const pageShow = capturePageShowHandler(() =>
+      attachSubmitGuard({ formId: 'g14', pendingLabel: 'Saving…' })
+    )
+
+    fireSubmit(form)
+    const button = form.querySelector('button') as HTMLButtonElement
+    assertEquals(button.textContent, 'Saving…')
+
+    pageShow.fire(true)
+
+    assertEquals(button.textContent, 'Save')
+    pageShow.detach()
+  },
+)
+
+Deno.test(
+  'attachSubmitGuard: no pendingLabel means no label swap at all',
+  () => {
+    setUp()
+    const form = buildForm('g15', [{ tag: 'button', label: 'Save' }])
+    const detach = attachSubmitGuard({ formId: 'g15' })
+
+    fireSubmit(form)
+
+    const button = form.querySelector('button') as HTMLButtonElement
+    assertEquals(button.textContent, 'Save')
+    detach()
+  },
+)

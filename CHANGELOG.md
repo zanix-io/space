@@ -5,6 +5,69 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-09-05
+
+### Added
+
+- **`SubmitGuard`/`attachSubmitGuard` accept a new `pendingLabel` option** — swaps every
+  submit-triggering control's visible label (a `<button>`'s `textContent`, an
+  `<input type="submit">`'s `value`) to `pendingLabel` the instant a guarded form's first real
+  submission fires, restored on a real bfcache restore or an early cleanup, alongside the existing
+  disabled-controls restore. Independent of `disableControls` — applies even when that option is
+  `false`. `SubmitGuard`/`ManagedForm` inherit it automatically, since both already forward their
+  whole options object into `attachSubmitGuard` generically.
+
+### Fixed
+
+- **`zanix space build` crashed with an opaque
+  `TypeError: file name contained an unexpected NUL
+  byte` instead of reporting a clean
+  `'server-only'` boundary violation, whenever the violating module was reached through another
+  published JSR package** (e.g. `@zanix/space-ui/runtime` composing `Image`/`ImgButton`, both
+  reaching `@zanix/space/assets-manifest.ts`) — `comet-plugin.ts`'s build-time `'server-only'`
+  detection called `Deno.realPath(id)` unconditionally, which throws on a
+  `deno::TypeScript::https://...`-shaped virtual specifier instead of resolving a real filesystem
+  path. Now falls back to the raw, un-realpath'd id in that case, which `findChainToComet`'s own
+  match already tries first — the violation is still correctly attributed and reported.
+- **`defineSpaceApp` — the single most commonly imported symbol in this package — materialized
+  `sharp`, `vite`, `@tailwindcss/vite`, `@vanilla-extract/vite-plugin`, `postcss-modules`, and
+  `@deno/vite-plugin` for every consumer, regardless of configuration.** Two independent leaks from
+  the root `.` entry point: (1) the `sitemap: 'auto'` dev-mode branch did
+  `await import('@zanix/space/vite')` with a literal string argument — a literal dynamic-import
+  specifier is resolved just as eagerly by `deno check`/`deno test`/`deno cache` as a static import,
+  regardless of whether that branch ever runs; now routed through a non-literal
+  `import.meta.resolve()` constant. (2) `socket-exports.ts` re-exported `SsrModuleChangedEvent`'s
+  type directly from `dev-engine.ts`, whose own real `vite`/`@deno/vite-plugin` value imports
+  resolve the moment that type is referenced; the interface now lives in its own dependency-free
+  `dev-engine-types.ts` file.
+- **Every ready-made Comet this package ships (`FormDraftPersistence`, `SubmitGuard`,
+  `ScrollRestoration`, `UnsavedChangesGuard`, `NetworkStatus`, `ManagedForm`) failed to hydrate
+  under `zanix space dev` for any consumer installing `@zanix/space` as a plain `jsr:` dependency**
+  — `resolveCometModuleUrl`'s dev-mode fallback only ever handled a source file living inside the
+  project root or elsewhere on the local filesystem (`/@fs/...`), never one resolved to a remote
+  `https://jsr.io/...` specifier — the normal case for a ready-made Comet's own `import.meta.url`
+  under a real `jsr:` install. That case fell through to the local-filesystem branch, producing an
+  unresolvable `/@fshttps://...` URL the browser's dynamic `import()` 404s on. Now resolves to the
+  same wrapped virtual-module specifier (`/@id/__x00__deno::<loader>::<url>::<url>#deno`)
+  `@deno/vite-plugin`'s own resolver already produces for a plain import of the same module.
+- **(React renderer only) A page whose SSR render genuinely straddles more than one stream flush
+  went permanently blank when reached via Orbit client-side navigation, with no error anywhere** —
+  React's streaming SSR emits a Suspense boundary that settles after the initial shell as a hidden
+  placeholder (`<div hidden id="S:n">`) plus a later `<script>` that reveals it (React's own `$RC`
+  mechanism). Orbit's fragment swap (`orbit.ts`) inserts the fetched fragment via
+  `template.innerHTML`/`replaceChildren`, and per the HTML Living Standard a `<script>` parsed that
+  way is marked already-started and never executes — the placeholder's hidden state was never
+  lifted, leaving fully-rendered content permanently invisible. Essentially every route is at least
+  one `Suspense` boundary deep (`composeSegments`'s own unconditional safety-net wrap for a segment
+  with no `error.tsx`), so any page "big enough" to cross a flush boundary could hit this. Fixed by
+  awaiting the render stream's own `allReady` before returning an Orbit fragment response (a new
+  `fragmentOnly` option on `renderToResponse`) — confirmed, not assumed, that this makes React
+  settle the boundary inline (`<!--$-->...<!--/$-->`, plain HTML comments, always inert to
+  `innerHTML`) instead of emitting the placeholder/reveal-script pair at all; a fragment gains
+  nothing from streaming in the first place, since Orbit's own client already buffers the whole
+  response before ever touching the DOM. The Preact renderer was never affected: Preact core has no
+  `Suspense` at all, and its own SSR path is deliberately synchronous and unstreamed.
+
 ## [1.4.2] - 2026-09-05
 
 ### Fixed

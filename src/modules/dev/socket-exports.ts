@@ -10,10 +10,11 @@
  * still re-exports everything, unchanged, for `zanix space dev`'s own real needs — this file exists
  * only so `.` can reach this one subset of it without the rest.
  *
- * `vite`/`@deno/vite-plugin` remain reachable from here regardless: `SsrModuleChangedEvent` (below)
- * is `broadcastSsrModuleChanged`'s own parameter type, defined in `../bundler/dev-engine.ts`, whose
- * own real value imports resolve like any other file's the moment its type is referenced — the same
- * `import type` reachability rule that applies everywhere else in this package.
+ * `SsrModuleChangedEvent` (below) is `broadcastSsrModuleChanged`'s own parameter type, sourced from
+ * `../bundler/dev-engine-types.ts` — a dedicated, dependency-free file split out of
+ * `../bundler/dev-engine.ts` specifically so resolving this type never also resolves that file's
+ * own real `vite`/`@deno/vite-plugin` value imports (see that file's own doc for the full
+ * reasoning; this used to be a real, confirmed leak from `.` before the split).
  *
  * @module
  */
@@ -24,4 +25,4 @@ export {
 } from './space-dev-socket.ts'
 export { ZanixWebSocket } from '@zanix/server'
 export type { SocketPrototype } from '@zanix/server'
-export type { SsrModuleChangedEvent } from '../bundler/dev-engine.ts'
+export type { SsrModuleChangedEvent } from '../bundler/dev-engine-types.ts'

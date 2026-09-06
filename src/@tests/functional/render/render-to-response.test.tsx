@@ -1,4 +1,4 @@
-import { Suspense } from 'react'
+import { Suspense, use } from 'react'
 import { preconnect, preload } from 'react-dom'
 import { assert, assertEquals, assertMatch } from '@std/assert'
 import { renderToResponse } from '../../../../mod-react.ts'
@@ -397,5 +397,34 @@ Deno.test(
     // the presence of an error boundary by itself (React never even reaches one for a shell error).
     assertEquals(response.status, 200)
     assert(reported instanceof Error && reported.message === 'boom')
+  },
+)
+
+Deno.test(
+  'renderToResponse: fragmentOnly resolves a genuinely async Suspense boundary to its settled ' +
+    'content directly — no placeholder, no reveal script, since an Orbit fragment swap never ' +
+    'executes an inserted <script> at all',
+  async () => {
+    // A real timer, not a hand-resolved promise: `fragmentOnly` awaits the stream's own
+    // `allReady` internally, inside `renderToResponse` itself, so correctness here does not
+    // depend on exactly when this resolves relative to the caller — unlike the previous test,
+    // there is no ordering to control for.
+    function Delayed() {
+      const value = use(
+        new Promise<string>((resolve) => setTimeout(() => resolve('settled'), 20)),
+      )
+      return <p id='delayed'>{value}</p>
+    }
+    const response = await renderToResponse(
+      <Suspense fallback={<p>loading</p>}>
+        <Delayed />
+      </Suspense>,
+      { fragmentOnly: true },
+    )
+    const html = await response.text()
+
+    assert(!/id="S:\d+"/.test(html), html)
+    assert(!html.includes('$RC'), html)
+    assertMatch(html, /id="delayed">settled</)
   },
 )

@@ -65,6 +65,27 @@ import { setValidationConfig } from 'modules/validation/config-registry.ts'
  * without depending on any consumer's import map at all. */
 const LOG_CONTROLLER_SPECIFIER = import.meta.resolve('../log-api/controllers/log.controller.ts')
 
+/** Same reasoning/pattern as {@linkcode LOG_CONTROLLER_SPECIFIER} immediately above, for a
+ * different reachable dependency: `modules/bundler/mod.ts` (`@zanix/space/vite`'s own entry file)
+ * pulls in this package's whole Vite/Rollup plugin composition — Vite itself, `@tailwindcss/vite`,
+ * `@vanilla-extract/vite-plugin`, `postcss-modules`, `sharp` (transitively, via the assets/media
+ * plugins this same barrel also exports) — none of which a plain runtime/production `defineSpaceApp`
+ * caller has any business materializing. The call site below (`sitemap === 'auto'`'s dev-only
+ * branch) was ALREADY written as a dynamic `await import('@zanix/space/vite')`, correctly reasoning
+ * that this should only cost anything in dev — but a LITERAL string argument to a dynamic `import()`
+ * is exactly as eagerly resolved by `deno check`/`deno test`/`deno cache` (and, transitively, any
+ * consumer's own tooling) as a static top-level import: confirmed via a real, isolated `deno info
+ * --json` reproduction that merely importing `defineSpaceApp` — the single most commonly imported
+ * symbol in this package, used by literally every `space.app.ts` — materialized `sharp`, `vite`,
+ * `@tailwindcss/vite`, `@vanilla-extract/vite-plugin`, and their whole transitive `npm:` closure,
+ * regardless of whether `sitemap: 'auto'` was ever configured or dev mode ever ran. Routing the
+ * SAME dynamic import through this non-literal constant instead closes that gap: `deno info --json`
+ * against this exact entry point, before/after, confirmed zero `npm:` packages reachable once this
+ * change is in place, with the dev-mode behavior itself completely unchanged (still a real, correct
+ * `import('@zanix/space/vite')` at actual runtime — `import.meta.resolve()` only defeats STATIC
+ * analysis, never changes what module a real dynamic `import()` call loads). */
+const VITE_MODULE_SPECIFIER = import.meta.resolve('../bundler/mod.ts')
+
 // Re-exported (not just imported) because `defineSpaceApp` below returns it — see
 // `typings/manifest.ts`'s own doc comment for why referenced public types must themselves be
 // public. `ZANIX_APP_DEFINITION_BRAND` (a value, not a type) is re-exported alongside it because
@@ -349,7 +370,7 @@ export function defineSpaceApp(config: SpaceAppConfig): ZanixAppDefinition {
           // "trust nothing on disk, always reflect current source" rule `clientBuildDir`'s own
           // manifest-loading above already follows for dev.
           registerSitemap(async () => {
-            const { deriveAutoSitemapEntries, discoverPages } = await import('@zanix/space/vite')
+            const { deriveAutoSitemapEntries, discoverPages } = await import(VITE_MODULE_SPECIFIER)
             return deriveAutoSitemapEntries(await discoverPages(resolvedRoutesDir))
           })
         } else {

@@ -1,11 +1,4 @@
-import type {
-  EnvironmentModuleNode,
-  HotPayload,
-  HotUpdateOptions,
-  Plugin,
-  PluginOption,
-  ViteDevServer,
-} from 'vite'
+import type { EnvironmentModuleNode, HotPayload, Plugin, PluginOption, ViteDevServer } from 'vite'
 import { createServer, createServerModuleRunner } from 'vite'
 import deno from '@deno/vite-plugin'
 import { isDenoSpecifier, parseDenoSpecifier } from '@deno/vite-plugin/resolver'
@@ -21,41 +14,19 @@ import { nativeRuntimeModulesPlugin } from './native-runtime-modules.ts'
 import { USE_COMET_DIRECTIVE } from './comet-directive.ts'
 import { formatServerOnlyViolation, SERVER_ONLY_DIRECTIVE } from './server-only-directive.ts'
 
-// `HotUpdateOptions`/`Plugin`/`PluginOption` are intentionally NOT re-exported here, same
-// reasoning as `space-plugin.ts`'s own `Plugin` doc comment: all are deeply recursive
-// Vite/Rolldown vendor types this package doesn't own. `changeType`/`plugins` referencing them is
-// an accepted, structural `deno doc --lint` finding, not a gap in this package's own
-// documentation.
+// `Plugin`/`PluginOption` are intentionally NOT re-exported here, same reasoning as
+// `space-plugin.ts`'s own `Plugin` doc comment: both are deeply recursive Vite/Rolldown vendor
+// types this package doesn't own. `plugins` referencing them is an accepted, structural
+// `deno doc --lint` finding, not a gap in this package's own documentation.
 
-/**
- * Reported once per file change that affects the `ssr` environment's module graph — never for
- * the `client` environment (see {@linkcode createSpaceDevEngine}'s own doc for why).
- */
-export interface SsrModuleChangedEvent {
-  /** Absolute path of the file Vite detected as changed. */
-  file: string
-  /** Whether the file was created, edited, or deleted. */
-  changeType: HotUpdateOptions['type']
-  /** Route-boundary module ids reachable from `file`, per {@linkcode computeAffectedRoutes}. */
-  affectedRoutes: string[]
-  /**
-   * Whether `file` itself (not one of `affectedRoutes`) starts with the `'use comet'` directive —
-   * lets a caller tell "the route's own file, or a server-only dependency (a `layout.tsx`, a
-   * `loader`), changed — a connected browser genuinely needs a fresh document" apart from "only a
-   * Comet changed, and it already reports its own `client-module-changed` update separately (see
-   * `onClientModuleChanged`'s own doc) — that alone is enough to bring a connected page up to
-   * date, without discarding whatever client-only state (a Comet's own `useState`, a form draft)
-   * a full reload would".
-   *
-   * A Comet is reachable from the `ssr` environment's own module graph too (its initial HTML is
-   * still server-rendered), so editing one fires `onSsrModuleChanged` exactly the same as editing
-   * the route file itself would — this field is what lets a caller choose to still refresh this
-   * app's own route registry/compiled dispatch table (so the NEXT real, fresh request reflects the
-   * edit) while skipping only the "tell an already-connected browser to reload" side effect for
-   * this one case.
-   */
-  isComet: boolean
-}
+// `import type` (a local binding, for this file's own `SsrModuleChangedEvent` references below)
+// PLUS `export type` (so every existing external consumer of `SsrModuleChangedEvent` FROM this
+// file keeps working unchanged) — not defined here anymore: a caller that only needs the TYPE
+// (`socket-exports.ts`'s own `.` (root) re-export chief among them) never has to resolve THIS
+// file's own real value imports (`vite`, `@deno/vite-plugin`) just to reference it. See
+// `dev-engine-types.ts`'s own doc for the full reasoning.
+import type { SsrModuleChangedEvent } from './dev-engine-types.ts'
+export type { SsrModuleChangedEvent }
 
 /** Options for {@linkcode createSpaceDevEngine}. */
 export interface SpaceDevEngineOptions {

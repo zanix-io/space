@@ -439,7 +439,7 @@ export async function renderPageResponse<Params>(
 
   return renderToResponse(
     element,
-    document === undefined ? { onError } : {
+    document === undefined ? { onError, fragmentOnly: true } : {
       onError,
       initialState: document.initialState,
       nonce: document.nonce,

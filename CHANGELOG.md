@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`zanix space dev`-only: a Space page's own `catch (e) { if (e instanceof HttpError && ...) }`
+  never ran for an `HttpError` thrown by a NATIVELY-resolved package's own internals** (e.g.
+  `@zanix/auth`'s `totp.ts` throwing `new HttpError('FORBIDDEN', { code: 'INVALID_TOTP' })` for a
+  wrong TOTP code) — the raw, unhandled error reached the client instead of the page's own intended
+  redirect, a real, reproduced production incident, never in `zanix space build` + `deno run` (one
+  native evaluation of everything, no Vite, no split). Root cause: `@zanix/auth` is on
+  `NATIVE_RUNTIME_MODULES`, so its own internal `import { HttpError } from '@zanix/errors'` resolved
+  through the native side, but a page's own, separately Vite-SSR-evaluated
+  `import { HttpError } from '@zanix/errors'` did not — `@zanix/errors` (a `@zanix/utils` subpath,
+  aliased in every `zanix new`-scaffolded project's own `deno.jsonc`) was not on the list, so
+  `e instanceof HttpError` compared against two reference-different classes, always `false`, even
+  though the thrown object's serialized shape (`name`/`status`/`code`) matched exactly. Fixed by
+  adding `'@zanix/errors'` to `NATIVE_RUNTIME_MODULES` — confirmed empirically that the literal
+  specifier text a project file's own `import ... from '@zanix/errors'` produces at this plugin's
+  `resolveId` hook is the alias itself, never rewritten to `'@zanix/utils/errors'` beforehand, so
+  the entry names the alias directly rather than relying on `@zanix/utils`'s own subpath-matching
+  (which would also be unreachable in practice — the real `@zanix/utils` package has no root export
+  at all).
+
 ## [1.5.0] - 2026-09-05
 
 ### Added

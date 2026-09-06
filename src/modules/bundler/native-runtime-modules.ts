@@ -165,18 +165,62 @@ import type { Plugin } from 'vite'
  * `DlqProvider` class reference registered natively via `@zanix/datamaster/core` — see that test's
  * own doc for the exact failure this entry closes.
  *
+ * `@zanix/utils` is on this list too — a real, reproduced `instanceof` split, not the same
+ * container-lookup mechanism the four packages above share
+ *
+ * `@zanix/validator` (`@zanix/utils`'s own `IsString`/`BaseRTO` decorators) does NOT need this
+ * entry — see the "not every package belongs here" paragraph below, and
+ * `native-runtime-modules-validator.test.ts` — but `@zanix/errors` (also a `@zanix/utils` subpath,
+ * aliased in every `zanix new`-scaffolded project's own `deno.jsonc` as `"@zanix/errors": "jsr:
+ * @zanix/utils@^X/errors"`, exactly as this package's own top-level `imports` block aliases it
+ * too) shares a DIFFERENT, real vulnerability with the four container-lookup packages above,
+ * through a different mechanism: `instanceof`. A real, reproduced production incident, not a
+ * hypothetical: a consuming app's own Space page's `catch (e) { if (e instanceof HttpError &&
+ * e.status.code === 'FORBIDDEN') return redirectResponse(...) }` never ran for an `HttpError`
+ * thrown by `@zanix/auth`'s own internals (`totp.ts`'s `authenticate` throwing `new
+ * HttpError('FORBIDDEN', { code: 'INVALID_TOTP' })` for a wrong TOTP code) — the raw, unhandled
+ * error reached the client instead of the page's intended redirect. Root cause: `@zanix/auth` IS
+ * on this list, so its OWN internal `import { HttpError } from '@zanix/errors'` resolves through
+ * the NATIVE side; the PAGE file's own, separately Vite-SSR-evaluated `import { HttpError } from
+ * '@zanix/errors'` did not (`@zanix/errors` was not yet on this list), landing on a SECOND,
+ * reference-different `HttpError` class. `e instanceof HttpError` is `false` across two different
+ * classes even when the thrown object's serialized shape (`name`, `status`, `code`) is identical —
+ * confirmed never to reproduce in production (one native evaluation of everything, no Vite, no
+ * split). A sibling page whose OWN interactor throws its OWN `HttpError` directly (never crossing
+ * through a natively-resolved package like `@zanix/auth`) is unaffected either way: both the throw
+ * site and the catch site go through the SAME Vite-SSR evaluation together, so they already share
+ * one `HttpError` class regardless of this entry — the split only bites a throw that originates
+ * inside a package already on this list. `native-runtime-modules-errors.test.ts` confirms both the
+ * reference-identity fix and the cross-copy `instanceof` check directly.
+ *
+ * `@zanix/utils` bare is deliberately NOT added (only `@zanix/errors` is) — confirmed EMPIRICALLY
+ * (a `resolveId` probe log against a real project file's own `import { HttpError } from
+ * '@zanix/errors'`) that the literal specifier text reaching this plugin's `resolveId` for that
+ * import is `'@zanix/errors'` itself — the ALIAS name a project's own `deno.jsonc` declares —
+ * never rewritten to `'@zanix/utils/errors'` (or a `jsr:@zanix/utils@^X/errors` form
+ * `isNativeRuntimeSpecifier`'s own `JSR_OR_NPM_SPECIFIER_RE` would normalize) before this plugin's
+ * `resolveId` gets a turn; that normalization only ever fires for a THIRD-PARTY package's own
+ * nested import of a dependency it declares its own version range for (see
+ * `isNativeRuntimeSpecifier`'s own doc), never for a project's own top-level file's import-map
+ * alias. A bare `'@zanix/utils'` entry would also be a dead one regardless: the real `@zanix/utils`
+ * package has no root (`.`) export at all (`import('@zanix/utils')` itself fails with `Unknown
+ * export '.'`), so it could only ever match a third-party package's own nested
+ * `@zanix/utils/<subpath>` import — a path no real code in this ecosystem currently takes.
+ *
  * Not every `@zanix/*` package belongs here on the strength of this pattern alone, though —
- * `@zanix/utils` (`@zanix/validator`'s `IsString`/`BaseRTO` decorators specifically) does not
- * share this vulnerability: `classValidation`'s real validation logic is closure-captured directly
- * onto each accessor at class-definition time, never looked up through a cross-module registry, so
- * it survives the identical split unharmed (see `native-runtime-modules-validator.test.ts` — the
- * one real gap there, `classMetadata`'s static field introspection, doesn't share this
- * container-lookup mechanism at all and reaches no request-handling path). `@zanix/admin` and
- * `@zanix/app` expose no real, non-type, non-primitive import through a `ssrLoadModule`-reached
- * file in `console` (this ecosystem's real consumer app) — nothing to reproduce a failure against.
- * A package earns an entry here only once its OWN identity-sensitive mechanism and a real (or
- * realistically reachable) import path through this engine's SSR graph are both confirmed, the
- * same bar every entry above already meets.
+ * `@zanix/validator`'s `IsString`/`BaseRTO` decorators specifically do not share EITHER
+ * vulnerability above: `classValidation`'s real validation logic is closure-captured directly
+ * onto each accessor at class-definition time, never looked up through a cross-module registry
+ * NOR compared via `instanceof`, so it survives the identical split unharmed (see
+ * `native-runtime-modules-validator.test.ts` — the one real gap there, `classMetadata`'s static
+ * field introspection, doesn't share this container-lookup mechanism at all and reaches no
+ * request-handling path). This is exactly why `@zanix/utils` earns its entry through
+ * `@zanix/errors`'s `instanceof` exposure specifically, not through `@zanix/validator`'s. `@zanix/
+ * admin` and `@zanix/app` expose no real, non-type, non-primitive import through a
+ * `ssrLoadModule`-reached file in `console` (this ecosystem's real consumer app) — nothing to
+ * reproduce a failure against. A package earns an entry here only once its OWN identity-sensitive
+ * mechanism and a real (or realistically reachable) import path through this engine's SSR graph
+ * are both confirmed, the same bar every entry above already meets.
  *
  * **Adding a package here has a required, paired change in `@zanix/cli`, not just this file.**
  * `RealImportEvaluator.runExternalModule` (`ssr-module-evaluator.ts`) does a plain native
@@ -204,6 +248,7 @@ export const NATIVE_RUNTIME_MODULES = [
   '@zanix/datamaster',
   '@zanix/asyncmq',
   '@zanix/notifications',
+  '@zanix/errors',
   'react',
   'react-dom',
   'preact',

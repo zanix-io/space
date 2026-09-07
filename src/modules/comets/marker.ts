@@ -22,7 +22,7 @@ export const COMET_MEDIA_ATTR = 'data-comet-media'
  * path itself. */
 export const COMET_MODULE_ATTR = 'data-comet-module'
 /** Which export of that module is the component — `defineComet` computes this from the
- * component's own `.name`, never author-supplied. */
+ * component's own `.name`, or from its optional explicit `name` argument when given. */
 export const COMET_EXPORT_ATTR = 'data-comet-export'
 /** This instance's own props, JSON-serialized — must be JSON-serializable, same constraint as
  * `renderToResponse`'s `initialState` option. When an app opts into

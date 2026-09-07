@@ -36,7 +36,16 @@ import { getActiveRenderer } from '../router/active-renderer.ts'
  * - `Component` exported under its own name (`export function Counter() {}`, not a default
  *   export) — `defineComet` reads `Component.name` to know which export the client should grab
  *   after dynamically importing this same module; the wrapped component below is what becomes the
- *   default export instead, so the two never collide.
+ *   default export instead, so the two never collide. A top-level named function/const carries this
+ *   name all the way through `zanix space build`'s default minification (and its `--obfuscate`
+ *   pass), because neither has a reason to touch an identifier that's also the module's own public
+ *   export. A function nested inside another (e.g. one a factory returns: `function
+ *   createNavDrawer() { return function NavDrawer() {...} }`) has no such external reference
+ *   protecting it — its `.name` is exactly the kind of local identifier minification's default
+ *   name-mangling or `--obfuscate` strips, even though the outer binding it's assigned to keeps its
+ *   own name and the same code still works under `--no-minify`/`zanix space dev`. Pass `name`
+ *   explicitly (below) for exactly that case, rather than relying on the runtime name surviving
+ *   the build.
  * - `sourceUrl` — always `import.meta.url`, written at this exact call site (inside the comet's own
  *   file — calling `defineComet` from anywhere else captures the wrong file's identity). This is
  *   what lets `resolveCometModuleUrl` correlate this source file to whatever hashed URL its client
@@ -57,17 +66,25 @@ import { getActiveRenderer } from '../router/active-renderer.ts'
  * type-check here directly, and neither renderer is the default.
  *
  * @param Component - The component to make hydratable. Must be a named function/const (not
- * anonymous) — its own `.name` is how the client knows what to import back out of this module.
- * Typed as {@linkcode CometComponent}: a React component, a Preact component, or a class component
- * of either, with its own props still inferred (see that type's own doc).
+ * anonymous) — its own `.name` is how the client knows what to import back out of this module,
+ * unless `name` below is given explicitly. Typed as {@linkcode CometComponent}: a React component,
+ * a Preact component, or a class component of either, with its own props still inferred (see that
+ * type's own doc).
  * @param sourceUrl - This file's own `import.meta.url`. Never a value computed or passed in from
  * anywhere else.
+ * @param name - The export name the client should import back out of this module, overriding
+ * `Component.name`. Required for a component whose real name only exists at the source level (a
+ * named function expression returned from a factory) rather than as a top-level declaration —
+ * `zanix space build`'s default minification and its `--obfuscate` pass each have their own reason
+ * to rename a purely local identifier, so `Component.name` can come back empty by the time this
+ * runs in the client's built chunk even though the exact same call works under `--no-minify` and
+ * under `zanix space dev`, neither of which touches identifier names at all.
  * @returns A component accepting `Component`'s own props plus `CometProps` — use it exactly like
  * the original component, adding `comet`/`cometMedia` at any call site that needs to override the
  * default (`'load'`). Usable directly in either renderer's own JSX (see
  * {@linkcode CometBoundaryComponent}).
- * @throws {InternalError} If `Component` has no name (e.g. an anonymous arrow function) — there
- * would be nothing for the client to import back out of this module.
+ * @throws {InternalError} If neither `name` nor `Component.name` resolves to a non-empty string —
+ * there would be nothing for the client to import back out of this module.
  *
  * @example
  * ```tsx
@@ -78,16 +95,33 @@ import { getActiveRenderer } from '../router/active-renderer.ts'
  * export function Counter({ initial }: { initial: number }) {/* ... *\/ }
  * export default defineComet(Counter, import.meta.url)
  * ```
+ *
+ * @example
+ * ```tsx
+ * // comets/nav-drawer.tsx — a factory-returned component, name given explicitly
+ * 'use comet'
+ * import { defineComet } from '@zanix/space/comet'
+ *
+ * function createNavDrawer() {
+ *   return function NavDrawer(props: NavDrawerProps) {/* ... *\/ }
+ * }
+ * export const NavDrawer = createNavDrawer()
+ * export default defineComet(NavDrawer, import.meta.url, 'NavDrawer')
+ * ```
  */
 export function defineComet<P extends object>(
   Component: CometComponent<P>,
   sourceUrl: string,
+  name?: string,
 ): CometBoundaryComponent<P & CometProps> {
-  const exportName = Component.name
+  const exportName = name || Component.name
   if (!exportName) {
     throw new InternalError(
       'defineComet() requires a named component — an anonymous function has nothing for the ' +
-        'client to import back out of this module.',
+        'client to import back out of this module. Pass the export name explicitly as a third ' +
+        "argument (defineComet(Component, sourceUrl, 'ComponentName')) when Component.name " +
+        "can't be trusted to survive a production build, such as a named function expression " +
+        'returned from a factory.',
       { meta: { sourceUrl } },
     )
   }

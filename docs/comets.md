@@ -28,7 +28,14 @@ export default defineComet(Counter, import.meta.url)
 - **`export function Counter`** — a _named_ export, never anonymous. `defineComet` reads
   `Counter.name` to know what the client should import back out of this same module once it's
   fetched; the wrapped version below becomes the file's default export instead, so the two never
-  collide.
+  collide. A top-level named function/const keeps this name through `zanix space build`'s default
+  minification and its `--obfuscate` pass — neither has a reason to touch an identifier that's also
+  the module's own public export. A component that's instead a named function _expression_ returned
+  from a factory (`function createWidget() { return function Widget() {...} }`) has no such
+  protection: minification and `--obfuscate` can both strip that inner name, even though the exact
+  same code works under `--no-minify` and `zanix space dev`. Pass the real export name as
+  `defineComet`'s third argument for that case — `defineComet(Widget, import.meta.url, 'Widget')` —
+  instead of relying on `Widget.name` to survive the build.
 - **`import.meta.url`** — always written at this exact call site. It's this file's own identity,
   correlated to whatever hashed URL its client build actually produced.
 

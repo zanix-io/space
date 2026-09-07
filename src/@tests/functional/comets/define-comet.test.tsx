@@ -198,6 +198,55 @@ Deno.test('defineComet: throws for an anonymous component', () => {
   )
 })
 
+// A factory-returned named function expression (`function outer() { return function Inner() {} }`)
+// has no top-level declaration protecting its name, so a production build's minifier/obfuscator can
+// strip it — the exact case an explicit `name` argument exists for. `Object.defineProperty` below
+// reproduces that stripped-name runtime shape directly, without depending on an actual build.
+function strippedName<T extends (...args: never[]) => unknown>(fn: T): T {
+  Object.defineProperty(fn, 'name', { value: '' })
+  return fn
+}
+
+Deno.test(
+  'defineComet: an explicit third argument resolves the export name when Component.name is ' +
+    'empty, instead of throwing',
+  async () => {
+    const NavDrawer = strippedName(({ label }: { label: string }) => <nav>{label}</nav>)
+    const Comet = defineComet(NavDrawer, FIXTURE_SOURCE_URL, 'NavDrawer')
+
+    const response = await renderToResponse(<Comet label='menu' comet='visible' />)
+    const html = stripHydrationComments(await response.text())
+
+    assert(html.includes('data-comet-export="NavDrawer"'), html)
+    assert(html.includes('<nav>menu</nav>'), html)
+  },
+)
+
+Deno.test(
+  'defineComet: an explicit third argument still throws when it is empty and Component.name is ' +
+    'also empty — the override does not bypass the requirement, only relocate it',
+  () => {
+    assertThrows(
+      () => defineComet(strippedName(() => null), FIXTURE_SOURCE_URL, ''),
+      InternalError,
+      'defineComet() requires a named component',
+    )
+  },
+)
+
+Deno.test(
+  'defineComet: an explicit third argument takes precedence over a non-empty Component.name',
+  async () => {
+    const Comet = defineComet(Counter, FIXTURE_SOURCE_URL, 'RenamedCounter')
+
+    const response = await renderToResponse(<Comet initial={2} comet='visible' />)
+    const html = stripHydrationComments(await response.text())
+
+    assert(html.includes('data-comet-export="RenamedCounter"'), html)
+    assertFalse(html.includes('data-comet-export="Counter"'), html)
+  },
+)
+
 Deno.test(
   'defineComet: unserializable props (a circular reference) fail with a clear, Space-authored ' +
     'InternalError naming the Comet — not a raw JSON.stringify TypeError escaping the render ' +

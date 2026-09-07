@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-09-07
+
+### Added
+
+- **`defineComet` accepts an optional third `name` argument, overriding `Component.name`** — closes
+  a real, confirmed production defect: a Comet whose component is a named function _expression_
+  returned from a factory (e.g. `@zanix/space-ui`'s own `NavDrawer`,
+  `function
+  createNavDrawer() { return function NavDrawer() {...} }`) has no top-level declaration
+  protecting that name, so `zanix space build`'s default minification and its `--obfuscate` pass can
+  each strip it — `Component.name` comes back empty inside the client's own bundled chunk, and
+  `defineComet`'s existing guard throws during that chunk's own module evaluation. The initial
+  server-rendered HTML still looks correct (every `data-comet-*` attribute present), but hydration
+  never completes and nothing reaches the page's own console (the rejection is caught and logged
+  separately, by `hydrateComets`'s `.catch()`, well after the boundary has already failed). The
+  exact same component already worked under `--no-minify`/`zanix space dev`, since neither renames
+  identifiers — pass the real export name explicitly
+  (`defineComet(Component, sourceUrl, 'ComponentName')`) for a factory-returned component instead of
+  relying on its runtime `.name` to survive a production build.
+
+### Fixed
+
+- **A fragment response's own streaming Suspense reveal script (React's `$RC`/`$RB`) carried no
+  `nonce` attribute at all, silently rejected by `orbit.ts`'s own nonce-verification gate
+  (`reviveFragmentScripts`) and left permanently inert** — a real, confirmed production defect: an
+  Orbit-navigated page whose Comet content genuinely suspends past the first stream flush collapsed
+  to whatever had already rendered, with a normal `200` response and no error anywhere (a full page
+  reload of the identical route always rendered correctly, since a full document's own render DOES
+  pass its `nonce` through). Root cause: `renderPageResponse`'s own fragment branch
+  (`render-page-react.tsx`) called `renderToResponse` with no `nonce` option at all — reasoned as
+  page-independent, the same as the initial-state script/stylesheet links/PWA head a fragment
+  genuinely never needs, but React's own internally-generated reveal-machinery scripts are a real,
+  per-render output the fragment's own SSR pass can still produce, and they need a nonce matching
+  that SAME response's own `Content-Security-Policy` header (already generated for the fragment
+  regardless of this omission) to survive `reviveFragmentScripts`' own verification gate. Fixed by
+  passing the same `nonce` already used for the CSP header into the fragment's own
+  `renderToResponse` call too. The Preact renderer was never affected: Preact core emits no such
+  reveal script of its own, so its render path's own `nonce` omission for a fragment has always been
+  correct.
+
 ## [1.7.0] - 2026-09-06
 
 ### Fixed

@@ -380,11 +380,22 @@ export async function renderPageResponse<Params>(
   )
   // A fragment is only ever inserted into an already-hydrated (or about to be) page by Orbit's own
   // client runtime — it never needs the initial-state script a full document's own hydration reads,
-  // nor therefore the nonce that script would otherwise need, nor a stylesheet link, PWA head,
-  // theme override, or dev client script: all page-independent (or, for the dev client, already
-  // connected from the full document it's swapping into), already in effect on the page it's
-  // swapping into. Its own resolved `<title>` (if any) is already embedded directly in `element` by
-  // `composeSegments` above — `meta`/`link` stay full-document-only, same reasoning.
+  // nor a stylesheet link, PWA head, theme override, or dev client script: all page-independent (or,
+  // for the dev client, already connected from the full document it's swapping into), already in
+  // effect on the page it's swapping into. Its own resolved `<title>` (if any) is already embedded
+  // directly in `element` by `composeSegments` above — `meta`/`link` stay full-document-only, same
+  // reasoning.
+  //
+  // `nonce` is NOT one of those page-independent things, though — passed to `renderToResponse`
+  // below regardless of `fragmentOnly` (see the return statement's own call). A fragment's own
+  // React render can still produce genuinely inline scripts of its own (the streaming Suspense
+  // reveal mechanism — `$RC`/`$RB` — for any boundary that doesn't resolve before the first flush),
+  // and those need the SAME nonce this response's own `Content-Security-Policy` header declares
+  // (computed once, above, from the exact same `nonce` value, unconditionally of `fragmentOnly`):
+  // `orbit.ts`'s own `reviveFragmentScripts` only revives a script whose nonce matches the
+  // fragment's own header, so a reveal script with no nonce at all is rejected and never runs —
+  // the one Suspense boundary it belongs to stays an inert placeholder forever, with no error
+  // anywhere (the response itself is a normal `200`).
   // The renderer-agnostic description of this document (`render/document-model.ts`) — built from
   // the SAME resolution helpers `render-page-preact.ts` calls, in the same order, so both renderers
   // start from identical inputs and differ only in how they serialize them. Never built for a
@@ -439,7 +450,7 @@ export async function renderPageResponse<Params>(
 
   return renderToResponse(
     element,
-    document === undefined ? { onError } : {
+    document === undefined ? { onError, nonce } : {
       onError,
       initialState: document.initialState,
       nonce: document.nonce,

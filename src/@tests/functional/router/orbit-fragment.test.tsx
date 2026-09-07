@@ -1,7 +1,8 @@
 // Installs a renderer, exactly as a real app does: `@zanix/space` itself ships none, so a
 // test that renders must import the entry point it is testing against.
 import '../../../../mod-react.ts'
-import { assert, assertEquals, assertFalse } from '@std/assert'
+import { assert, assertEquals, assertFalse, assertMatch } from '@std/assert'
+import { Suspense, use } from 'react'
 import { bootstrapServers, webServerManager } from '@zanix/server'
 import { ORBIT_FRAGMENT_HEADER, ORBIT_OUTLET_ATTR } from 'modules/router/orbit-protocol.ts'
 import { loadRoutes, Page, SpacePageController } from 'modules/router/mod.ts'
@@ -15,6 +16,34 @@ import { stripHydrationComments } from '../../support/strip-hydration-comments.t
 function Greeting() {
   return <p>hello</p>
 }
+
+/** Genuinely suspends (a real `use()` over a real pending promise) long enough that at least one
+ * sibling boundary's own content already flushed first — the real shape that produces React's own
+ * streaming placeholder (`<template id="B:n">`) plus its later `$RC`/`$RB` reveal script, not just
+ * a same-tick resolution `renderToResponse` would inline directly with no script at all. */
+function Delayed({ ms, id }: { ms: number; id: string }) {
+  const value = use(new Promise<string>((resolve) => setTimeout(() => resolve('ready'), ms)))
+  return <p id={id}>{value}</p>
+}
+
+function StreamingPage() {
+  return (
+    <div>
+      <Suspense fallback={<p>loading a</p>}>
+        <Delayed ms={10} id='a' />
+      </Suspense>
+      <Suspense fallback={<p>loading b</p>}>
+        <Delayed ms={30} id='b' />
+      </Suspense>
+    </div>
+  )
+}
+
+@Page('orbit-fragment-streaming-fixture')
+class OrbitFragmentStreamingPage extends SpacePageController {
+  public override component = StreamingPage
+}
+void OrbitFragmentStreamingPage
 
 @Page('orbit-fragment-fixture')
 class OrbitFragmentPage extends SpacePageController {
@@ -211,5 +240,52 @@ Deno.test(
     assertEquals(title, 'Fragment Fixture Title')
     assert(!body.includes('<title'), body)
     assert(body.includes('<p>hello</p>'), body)
+  },
+)
+
+Deno.test(
+  "Orbit fragment negotiation: a fragment's own streaming Suspense reveal script (React's `$RC`) " +
+    "carries the SAME nonce as that exact response's own Content-Security-Policy header — a real, " +
+    "reproduced regression otherwise: orbit.ts's own reviveFragmentScripts only revives a script " +
+    "whose nonce matches the fragment's own header, so a reveal script with no nonce at all (what " +
+    'a fragment render produces if its own nonce is never threaded through, unlike a full ' +
+    "document's) is silently rejected and never runs — the boundary it belongs to stays an inert, " +
+    'hidden placeholder forever, with no error anywhere and a normal 200 response',
+  async () => {
+    const page = new OrbitFragmentStreamingPage(mockHandlerContext())
+
+    const fragmentResponse = await page.handleGet(
+      mockHandlerContext({
+        req: new Request('http://localhost/', {
+          headers: { [ORBIT_FRAGMENT_HEADER]: '1' },
+        }),
+      }),
+    )
+    const csp = fragmentResponse.headers.get('Content-Security-Policy')
+    assert(csp, 'expected a Content-Security-Policy header on the fragment response too')
+    const nonce = csp.match(/'nonce-([^']+)'/)?.[1]
+    assert(nonce, 'expected to extract a nonce from the fragment CSP header')
+
+    const html = await fragmentResponse.text()
+    // Both boundaries resolve inside the buffered fragment body regardless of streaming shape
+    // (`response.text()` only ever returns once the whole stream ends) — the real question is
+    // whether React's OWN reveal-machinery scripts, if this page's streaming shape produced any,
+    // carry the matching nonce. `data-testid`-free plain `<script>` tags with no `nonce` attribute
+    // at all would mean the regression is back.
+    assert(html.includes('id="a">ready'), html)
+    assert(html.includes('id="b">ready'), html)
+    // At least one real inline `<script>` must carry the matching nonce — never zero. A reveal
+    // script with NO `nonce` attribute at all (this file's own `matchAll` below still finds the
+    // `<script>` tag itself, just without a nonce to check) is exactly what the regression looked
+    // like: present in the body, silently rejected client-side, never asserted as a hard failure
+    // by a check that only verifies nonce VALUES it happens to find rather than requiring one.
+    let noncedScriptCount = 0
+    for (const scriptTag of html.matchAll(/<script(\s[^>]*)?>/g)) {
+      const attrs = scriptTag[1] ?? ''
+      assert(attrs.includes('nonce='), `expected every inline <script> to carry a nonce: ${attrs}`)
+      assertMatch(attrs, new RegExp(`\\bnonce="${nonce}"`))
+      noncedScriptCount++
+    }
+    assert(noncedScriptCount > 0, `expected at least one inline <script> in the fragment: ${html}`)
   },
 )

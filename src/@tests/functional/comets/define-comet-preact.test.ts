@@ -80,8 +80,9 @@ export function Counter({ start }: { start: number }) {
 function defineCometPreact<P extends object>(
   Component: (props: P) => unknown,
   sourceUrl: string,
+  name?: string,
 ): ComponentTypeReact<P & CometProps> {
-  return defineComet(Component as unknown as ComponentTypeReact<P>, sourceUrl)
+  return defineComet(Component as unknown as ComponentTypeReact<P>, sourceUrl, name)
 }
 
 const WIDGET_SOURCE_URL = `file://${Deno.cwd()}/comets/preact-widget.tsx`
@@ -227,6 +228,35 @@ Deno.test(
       assert(html.includes('count:41'), html)
       assert(html.includes('<button type="button">count:41</button>'), html)
       assert(html.includes('data-comet-export="Counter"'), html)
+    } finally {
+      reset()
+    }
+  },
+)
+
+// A factory-returned named function expression has no top-level declaration protecting its name,
+// so a production build's minifier/obfuscator can strip it — the exact case an explicit `name`
+// argument exists for. `Object.defineProperty` below reproduces that stripped-name runtime shape
+// directly, without depending on an actual build.
+function strippedName<T extends (...args: never[]) => unknown>(fn: T): T {
+  Object.defineProperty(fn, 'name', { value: '' })
+  return fn
+}
+
+Deno.test(
+  'defineComet (preact): an explicit third argument resolves the export name when Component.name ' +
+    'is empty, instead of throwing — same contract as the React path',
+  async () => {
+    setCometManifest({ [WIDGET_KEY]: '/assets/preact-widget-hash.js' })
+    try {
+      const NavDrawer = strippedName((props: { label: string }) =>
+        createElement('nav', null, props.label)
+      )
+      const Comet = defineCometPreact(NavDrawer, WIDGET_SOURCE_URL, 'NavDrawer')
+      const html = await renderPreact(createElement(Comet as never, { label: 'menu' }))
+
+      assert(html.includes('data-comet-export="NavDrawer"'), html)
+      assert(html.includes('<nav>menu</nav>'), html)
     } finally {
       reset()
     }

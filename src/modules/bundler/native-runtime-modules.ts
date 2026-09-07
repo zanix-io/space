@@ -367,9 +367,19 @@ const JSR_OR_NPM_SPECIFIER_RE = /^(?:jsr|npm):(@[^/@]+\/[^/@]+|[^/@]+)@[^/]*(\/.
  * real, confirmed `npm:react@^19.2.0` specifier from this same `NavDrawer` probe, never exercised
  * before now because nothing on this list previously composed another package with its own hooks).
  */
-function isNativeRuntimeSpecifier(id: string): boolean {
+/** Undoes a `jsr:`/`npm:`-qualified specifier back to its bare `name`/`name/subpath` form (see
+ * {@linkcode JSR_OR_NPM_SPECIFIER_RE}'s own doc) — the same normalization
+ * {@linkcode isNativeRuntimeSpecifier} relies on, exported so `RealImportEvaluator
+ * .runExternalModule` (`ssr-module-evaluator.ts`) can classify a recovered specifier the identical
+ * way, regardless of which form it arrives in. A no-op for a specifier that was never qualified to
+ * begin with. */
+export function normalizeNativeRuntimeSpecifier(id: string): string {
   const jsrOrNpmMatch = JSR_OR_NPM_SPECIFIER_RE.exec(id)
-  const normalized = jsrOrNpmMatch ? `${jsrOrNpmMatch[1]}${jsrOrNpmMatch[2] ?? ''}` : id
+  return jsrOrNpmMatch ? `${jsrOrNpmMatch[1]}${jsrOrNpmMatch[2] ?? ''}` : id
+}
+
+function isNativeRuntimeSpecifier(id: string): boolean {
+  const normalized = normalizeNativeRuntimeSpecifier(id)
   return NATIVE_RUNTIME_MODULES.some((pkg) =>
     normalized === pkg || normalized.startsWith(`${pkg}/`)
   )

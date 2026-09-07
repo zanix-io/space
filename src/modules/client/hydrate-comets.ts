@@ -12,10 +12,20 @@ import {
   COMET_REUSED_ATTR,
   COMET_STRATEGY_ATTR,
 } from '../comets/marker.ts'
+import { hashSourceKey } from '../comets/comet-manifest.ts'
+// Imported directly, never through `comet-id-scope.ts`'s own per-renderer registry — that
+// registry exists for `define-comet.ts`, which renders under WHICHEVER renderer is active in one
+// process (this package's own test suite runs both). This file is already committed to React at
+// the module level (`createElement`/`hydrateRoot` above are the same direct, static imports), so
+// its Preact counterpart (`hydrate-comets-preact.ts`) is the one that ever loads the OTHER
+// Provider — exactly the same reasoning that keeps this file's own `createElement` a direct import
+// instead of `getCometElementFactory()`.
+import { CometIdScopeProvider } from '../comets/comet-id-scope-react.tsx'
 import { parseCometProps } from '../render/serialization-codec.ts'
 import { scheduleCometHydration } from './schedule-comet-hydration.ts'
 import { registerPersistHandle } from './comet-persistence.ts'
 import { setCometHydrator } from './hydrator-registry.ts'
+import { isNestedComet } from './nested-comet-guard.ts'
 
 async function hydrateBoundary(boundary: HTMLElement): Promise<void> {
   const moduleUrl = boundary.getAttribute(COMET_MODULE_ATTR)
@@ -23,8 +33,17 @@ async function hydrateBoundary(boundary: HTMLElement): Promise<void> {
 
   const exportName = boundary.getAttribute(COMET_EXPORT_ATTR) || 'default'
   const strategy = (boundary.getAttribute(COMET_STRATEGY_ATTR) || 'load') as CometStrategy
-  const props = parseCometProps(boundary.getAttribute(COMET_PROPS_ATTR))
+  const rawProps = boundary.getAttribute(COMET_PROPS_ATTR)
+  const props = parseCometProps(rawProps)
   const persistKey = boundary.getAttribute(COMET_PERSIST_ATTR)
+
+  // The SAME instance scope `define-comet.ts` computed server-side — `COMET_ID_ATTR` is already
+  // that call's own `sourceHash`, and `rawProps` (read here BEFORE `parseCometProps`, never
+  // re-serialized) is the exact same string `serializedProps` published, so hashing it here
+  // reproduces the identical value. See `comet-id-scope-react.tsx`'s own doc for the full "why".
+  const instanceScope = `${boundary.getAttribute(COMET_ID_ATTR) ?? ''}-${
+    hashSourceKey(rawProps ?? '')
+  }`
 
   const module = await import(/* @vite-ignore */ moduleUrl) as Record<
     string,
@@ -32,7 +51,11 @@ async function hydrateBoundary(boundary: HTMLElement): Promise<void> {
     any
   >
   const Component = module[exportName]
-  const element = createElement(Component, props)
+  const element = createElement(
+    CometIdScopeProvider,
+    { value: instanceScope },
+    createElement(Component, props),
+  )
 
   // Both branches produce the same real `Root` — `createRoot`/`hydrateRoot` differ only in
   // whether they hydrate existing SSR markup or mount fresh, never in the `Root` API surface
@@ -45,9 +68,19 @@ async function hydrateBoundary(boundary: HTMLElement): Promise<void> {
     registerPersistHandle(boundary, {
       // `nextProps` is `unknown` at the OrbitPersistHandle boundary on purpose — this module
       // doesn't know the component's own prop type any more than the dynamic `import()` above
-      // does; `Component` is already `any`-typed for the same reason.
-      // deno-lint-ignore no-explicit-any
-      reuse: (nextProps) => root.render(createElement(Component, nextProps as any)),
+      // does; `Component` is already `any`-typed for the same reason. `instanceScope` is closed
+      // over from the ORIGINAL mount above, never recomputed from `nextProps` — this instance's
+      // own id-scope stays fixed for its whole persisted lifetime, matching the same contract a
+      // real hydration root's own `useId()` counter would.
+      reuse: (nextProps) =>
+        root.render(
+          createElement(
+            CometIdScopeProvider,
+            { value: instanceScope },
+            // deno-lint-ignore no-explicit-any
+            createElement(Component, nextProps as any),
+          ),
+        ),
       dispose: () => root.unmount(),
     })
   }
@@ -80,6 +113,11 @@ export function hydrateComets(root: ParentNode = document): void {
       boundary.removeAttribute(COMET_REUSED_ATTR)
       return
     }
+
+    // A Comet composed inside ANOTHER Comet's own content hydrates transitively, as part of that
+    // outer boundary's own `hydrateRoot` call — see `nested-comet-guard.ts`'s own doc for the real
+    // conflict a second, independent call here produces.
+    if (isNestedComet(boundary)) return
 
     const strategy = (boundary.getAttribute(COMET_STRATEGY_ATTR) || 'load') as CometStrategy
     if (strategy === 'none') return

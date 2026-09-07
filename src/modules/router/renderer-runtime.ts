@@ -31,6 +31,8 @@ import type { LoaderErrorRenderer } from './loader-error-renderer-registry.ts'
 import { setLoaderErrorRenderer } from './loader-error-renderer-registry.ts'
 import type { CometElementFactory } from '../comets/element-factory.ts'
 import { setCometElementFactory } from '../comets/element-factory.ts'
+import type { CometIdScopeProvider } from '../comets/comet-id-scope.ts'
+import { setCometIdScopeProvider } from '../comets/comet-id-scope.ts'
 
 /**
  * Everything one renderer must provide for this framework to render anything at all — the complete
@@ -47,6 +49,9 @@ export type RendererRuntime = {
   /** This renderer's own `createElement`, used to build a Comet boundary. See
    * {@linkcode CometElementFactory}. */
   createElement: CometElementFactory
+  /** This renderer's own Comet id-scope Provider, used by `useCometStableId`. See
+   * {@linkcode CometIdScopeProvider}. */
+  idScopeProvider: CometIdScopeProvider
 }
 
 let installedRenderer: RendererKind | undefined
@@ -70,6 +75,7 @@ export function installRendererRuntime(kind: RendererKind, runtime: RendererRunt
   setNotFoundRenderer(runtime.renderNotFound)
   setLoaderErrorRenderer(runtime.renderLoaderError)
   setCometElementFactory(kind, runtime.createElement)
+  setCometIdScopeProvider(kind, runtime.idScopeProvider)
   installedRenderer = kind
 }
 

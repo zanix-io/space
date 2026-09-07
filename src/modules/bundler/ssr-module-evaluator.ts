@@ -1,7 +1,10 @@
 import type { EvaluatedModuleNode, ModuleEvaluator, ModuleRunnerContext } from 'vite/module-runner'
 import { join, toFileUrl } from '@std/path'
 import { isDenoSpecifier, parseDenoSpecifier } from '@deno/vite-plugin/resolver'
-import { fromNativeRuntimeSentinel } from './native-runtime-modules.ts'
+import {
+  fromNativeRuntimeSentinel,
+  normalizeNativeRuntimeSpecifier,
+} from './native-runtime-modules.ts'
 import { getSharedLoader } from './deno-loader.ts'
 import { resolveDenoAt } from './deno-specifier-resolver.ts'
 
@@ -149,28 +152,41 @@ export class RealImportEvaluator implements ModuleEvaluator {
   // `znxruntime://<specifier>` id specifically so they arrive HERE, as an externalized module,
   // instead of being transformed/inlined like a normal dependency — see that file's own doc for the
   // full module-identity fix this is the other half of. `fromNativeRuntimeSentinel` recovers the
-  // ORIGINAL bare specifier text.
+  // ORIGINAL specifier text — bare (`'@zanix/space'`) for a route file's own import, or
+  // `jsr:`/`npm:`-qualified (`'jsr:@zanix/space@^1.0.0/comet'`) when it comes from WITHIN a
+  // third-party package's own source, resolved through THAT package's own declared range (see
+  // `native-runtime-modules.ts`'s own `JSR_OR_NPM_SPECIFIER_RE` doc). `normalizeNativeRuntimeSpecifier`
+  // undoes that qualification either way, so the `@zanix/*` check and the resolution below both see
+  // the same bare form regardless of which shape it arrived in.
   //
-  // Only a `@zanix/*` specifier is resolved via `resolveDenoAt` (with `getSharedLoader`'s own
+  // A `@zanix/*` specifier is resolved via `resolveDenoAt` (with `getSharedLoader`'s own
   // node-platform loader, scoped to `this.#root` — the SERVED PROJECT, never this package's own
-  // directory) — against THAT project's own declared version, exactly the way its `space.app.ts`
-  // already resolves the same package. A native `import()` of that resolved URL then hits Deno's
-  // own process-wide module cache and returns the SAME instance the project's own code already
-  // loaded — never a second copy pinned to whatever the running `zanix space dev` process happens
-  // to have cached for an unrelated project. Everything else (`react`/`preact`, an ordinary
-  // external like `node:async_hooks`) keeps the plain `import(specifier)` this evaluator always
-  // had: an npm package is already safe without this — Deno's own `nodeModulesDir: "auto"`
-  // flattens the SERVED PROJECT's whole dependency tree into one shared `node_modules`, so a bare
-  // `import('react')` already resolves to the same instance regardless of which config asked —
-  // and resolving it down to an already-expanded file path here would skip Deno's own built-in
-  // CJS-to-ESM interop for a bare npm specifier, a real, confirmed regression for exactly that case.
+  // directory) against the BARE, normalized form — the exact same specifier text the project's own
+  // direct `@zanix/space`/`@zanix/space/react` imports already resolve through its own top-level
+  // `imports` entry, so a third-party package's own internal `@zanix/space` dependency converges on
+  // the identical instance instead of depending on Deno's own cross-range deduplication. A native
+  // `import()` of that resolved URL then hits Deno's own process-wide module cache and returns the
+  // SAME instance the project's own code already loaded — never a second copy pinned to whatever
+  // the running `zanix space dev` process happens to have cached for an unrelated project.
+  // Everything else (`react`/`preact`, an ordinary external like `node:async_hooks`) keeps the
+  // plain `import(specifier)` this evaluator always had: an npm package is already safe without
+  // this — Deno's own `nodeModulesDir: "auto"` flattens the SERVED PROJECT's whole dependency tree
+  // into one shared `node_modules`, so a bare `import('react')` already resolves to the same
+  // instance regardless of which config asked — and resolving it down to an already-expanded file
+  // path here would skip Deno's own built-in CJS-to-ESM interop for a bare npm specifier, a real,
+  // confirmed regression for exactly that case.
   public async runExternalModule(filepath: string): Promise<unknown> {
     const specifier = fromNativeRuntimeSentinel(filepath)
-    if (specifier === null || !specifier.startsWith('@zanix/')) {
-      return import(specifier ?? filepath)
-    }
+    if (specifier === null) return import(filepath)
+    const normalized = normalizeNativeRuntimeSpecifier(specifier)
+    if (!normalized.startsWith('@zanix/')) return import(specifier)
     const loader = await getSharedLoader(this.#root)
-    const resolved = await resolveDenoAt(specifier, loader, undefined)
+    const resolved = await resolveDenoAt(normalized, loader, undefined)
+    // Falls back to the ORIGINAL specifier, never `normalized` — a bare `'@zanix/space/comet'`
+    // has no guaranteed meaning against the ambient process on its own (that's the exact gap this
+    // whole method exists to route around), while the original, possibly `jsr:`-qualified text
+    // (`'jsr:@zanix/space@^1.0.0/comet'`) always resolves via Deno's own generic JSR mechanism
+    // regardless of any import map, the same safety net this evaluator always had.
     return import(resolved?.id ?? specifier)
   }
 }

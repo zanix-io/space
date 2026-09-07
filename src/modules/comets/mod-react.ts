@@ -11,6 +11,10 @@
  * Does not install React's page renderer — that's still `@zanix/space/react`'s own job, imported
  * once from an app's main module regardless of whether this subpath is ever used.
  *
+ * Also carries `useCometStableId`, a hook rather than a Comet — a drop-in replacement for React's
+ * own `useId()` for any component that might render inside a ready-made Comet's own isolated
+ * hydration root. See its own doc (`comet-id-scope-react.tsx`) for the full contract.
+ *
  * @module
  */
 export { default as FormDraftPersistence } from './form-draft-persistence-react.tsx'
@@ -25,3 +29,4 @@ export { default as NetworkStatus } from './network-status-react.tsx'
 export type { NetworkStatusOptions } from './network-status.ts'
 export { default as ManagedForm } from './managed-form-react.tsx'
 export type { ManagedFormOptions } from './managed-form.ts'
+export { useCometStableId } from './comet-id-scope-react.tsx'

@@ -11,10 +11,16 @@ import {
   COMET_REUSED_ATTR,
   COMET_STRATEGY_ATTR,
 } from '../comets/marker.ts'
+import { hashSourceKey } from '../comets/comet-manifest.ts'
+// Imported directly, never through `comet-id-scope.ts`'s own per-renderer registry — see
+// `hydrate-comets.ts`'s own identical import for the full "why" (this file is already committed
+// to Preact at the module level, same as that one is to React).
+import { CometIdScopeProvider } from '../comets/comet-id-scope-preact.tsx'
 import { parseCometProps } from '../render/serialization-codec.ts'
 import { scheduleCometHydration } from './schedule-comet-hydration.ts'
 import { registerPersistHandle } from './comet-persistence.ts'
 import { setCometHydrator } from './hydrator-registry.ts'
+import { isNestedComet } from './nested-comet-guard.ts'
 
 async function hydrateBoundary(boundary: HTMLElement): Promise<void> {
   const moduleUrl = boundary.getAttribute(COMET_MODULE_ATTR)
@@ -22,8 +28,15 @@ async function hydrateBoundary(boundary: HTMLElement): Promise<void> {
 
   const exportName = boundary.getAttribute(COMET_EXPORT_ATTR) || 'default'
   const strategy = (boundary.getAttribute(COMET_STRATEGY_ATTR) || 'load') as CometStrategy
-  const props = parseCometProps(boundary.getAttribute(COMET_PROPS_ATTR))
+  const rawProps = boundary.getAttribute(COMET_PROPS_ATTR)
+  const props = parseCometProps(rawProps)
   const persistKey = boundary.getAttribute(COMET_PERSIST_ATTR)
+
+  // The SAME instance scope `define-comet.ts` computed server-side — see `hydrate-comets.ts`'s
+  // own identical derivation for the full "why".
+  const instanceScope = `${boundary.getAttribute(COMET_ID_ATTR) ?? ''}-${
+    hashSourceKey(rawProps ?? '')
+  }`
 
   const module = await import(/* @vite-ignore */ moduleUrl) as Record<
     string,
@@ -31,7 +44,11 @@ async function hydrateBoundary(boundary: HTMLElement): Promise<void> {
     any
   >
   const Component = module[exportName]
-  const element = createElement(Component, props)
+  const element = createElement(
+    CometIdScopeProvider,
+    { value: instanceScope },
+    createElement(Component, props),
+  )
 
   if (strategy === 'only') render(element, boundary)
   else hydrate(element, boundary)
@@ -44,9 +61,19 @@ async function hydrateBoundary(boundary: HTMLElement): Promise<void> {
   if (persistKey) {
     registerPersistHandle(boundary, {
       // `nextProps` is `unknown` at the OrbitPersistHandle boundary on purpose — same reasoning
-      // as the dynamic `import()`/`Component` typing above.
-      // deno-lint-ignore no-explicit-any
-      reuse: (nextProps) => render(createElement(Component, nextProps as any), boundary),
+      // as the dynamic `import()`/`Component` typing above. `instanceScope` is closed over from
+      // the ORIGINAL mount above, never recomputed from `nextProps` — see `hydrate-comets.ts`'s
+      // own identical reuse closure for the full "why".
+      reuse: (nextProps) =>
+        render(
+          createElement(
+            CometIdScopeProvider,
+            { value: instanceScope },
+            // deno-lint-ignore no-explicit-any
+            createElement(Component, nextProps as any),
+          ),
+          boundary,
+        ),
       dispose: () => render(null, boundary),
     })
   }
@@ -79,6 +106,11 @@ export function hydrateComets(root: ParentNode = document): void {
       boundary.removeAttribute(COMET_REUSED_ATTR)
       return
     }
+
+    // A Comet composed inside ANOTHER Comet's own content hydrates transitively, as part of that
+    // outer boundary's own `hydrate()` call — see `nested-comet-guard.ts`'s own doc for the real
+    // conflict a second, independent call here produces.
+    if (isNestedComet(boundary)) return
 
     const strategy = (boundary.getAttribute(COMET_STRATEGY_ATTR) || 'load') as CometStrategy
     if (strategy === 'none') return

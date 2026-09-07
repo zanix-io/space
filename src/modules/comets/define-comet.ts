@@ -13,6 +13,7 @@ import {
 import { hashSourceKey, normalizeSourceKey, resolveCometModuleUrl } from './comet-manifest.ts'
 import { getCometElementFactory } from './element-factory.ts'
 import type { CometElementFactory } from './element-factory.ts'
+import { getCometIdScopeProvider } from './comet-id-scope.ts'
 import { stringifyForWire } from '../render/serialization-codec.ts'
 import { getCometCssHrefs } from '../render/css-manifest.ts'
 import { getActiveRenderer } from '../router/active-renderer.ts'
@@ -112,6 +113,10 @@ export function defineComet<P extends object>(
 
     if (comet === 'none') return h(Component, componentProps)
 
+    // Computed once, reused both for `COMET_ID_ATTR`'s own public value below and for this
+    // instance's own id-scope (`instanceScope`) — the same hash, never recomputed.
+    const sourceHash = hashSourceKey(normalizeSourceKey(sourceUrl))
+
     // This comet's OWN CSS (its `.module.css` imports, correlated at build time — see
     // `cssPlugin`'s own doc) — `[]` when it has none, or in dev (Vite's own dev-time module graph
     // already injects a loaded comet's CSS Module client-side with zero help needed here).
@@ -154,6 +159,19 @@ export function defineComet<P extends object>(
       )
     }
 
+    // This instance's own id-scope — `sourceHash` alone (shared by every instance of this same
+    // Comet on the page) would collide whenever two instances hydrate with the SAME scope, so
+    // `useCometStableId` calls in both would compute the same value; folding in a hash of this
+    // instance's own serialized props disambiguates any two instances that don't share identical
+    // props, the overwhelming majority of real cases (a NavDrawer's own `label`, a list's own
+    // `items`, ...). Two instances with BYTE-IDENTICAL props are a known, narrow residual — they'd
+    // still hydrate correctly (server and client agree on the same value either way), just with the
+    // same generated ids, exactly like this file's own already-accepted Preact `<link>` duplication
+    // above. Deterministic on both sides because `serializedProps` is the same string a Comet's own
+    // `COMET_PROPS_ATTR` marker publishes and `hydrateComets` reads back verbatim, never
+    // re-serialized.
+    const instanceScope = `${sourceHash}-${hashSourceKey(serializedProps)}`
+
     const cssLinks = cometCssRefs.map((ref) => {
       const href = typeof ref === 'string' ? ref : ref.href
       const media = typeof ref === 'string' ? undefined : ref.media
@@ -173,7 +191,7 @@ export function defineComet<P extends object>(
         // A hash of the source path, never the raw path itself — see `hashSourceKey`'s own doc
         // for why: the raw value would leak the server's local filesystem layout into every
         // page's public HTML.
-        [COMET_ID_ATTR]: hashSourceKey(normalizeSourceKey(sourceUrl)),
+        [COMET_ID_ATTR]: sourceHash,
         [COMET_STRATEGY_ATTR]: comet,
         [COMET_MEDIA_ATTR]: cometMedia,
         [COMET_MODULE_ATTR]: resolveCometModuleUrl(sourceUrl),
@@ -184,7 +202,17 @@ export function defineComet<P extends object>(
       cssLinks,
       // `comet="only"` mounts fresh on the client (createRoot, never hydrateRoot) — rendering the
       // real component here too would just be thrown away and risk a hydration mismatch.
-      comet === 'only' ? null : h(Component, componentProps),
+      //
+      // Wrapped in this instance's own id-scope Provider both here and in `hydrateBoundary`'s own
+      // matching call (`hydrate-comets.ts`/`-preact.ts`) — the two are this boundary's only two
+      // real renders of `Component`, server and client, and both need the SAME scope for
+      // `useCometStableId` to agree between them. See `comet-id-scope-react.tsx`'s own doc for the
+      // full "why".
+      comet === 'only' ? null : h(
+        getCometIdScopeProvider(),
+        { value: instanceScope },
+        h(Component, componentProps),
+      ),
     )
   }
 

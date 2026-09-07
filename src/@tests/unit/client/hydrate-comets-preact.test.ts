@@ -9,6 +9,7 @@ import { hydrateComets } from 'modules/client/mod-preact.ts'
 import { detachPersistedComets, reuseRetainedComets } from 'modules/client/comet-persistence.ts'
 import {
   COMET_EXPORT_ATTR,
+  COMET_ID_ATTR,
   COMET_MEDIA_ATTR,
   COMET_MODULE_ATTR,
   COMET_PERSIST_ATTR,
@@ -31,12 +32,21 @@ console.error = () => {}
 function fakeBoundary(
   attrs: Record<string, string> = {},
   reused = false,
+  nestedInsideAnotherComet = false,
 ): HTMLElement & { calls: string[] } {
   const attributes = new Map(Object.entries(attrs))
   let isReused = reused
   const calls: string[] = []
   const boundary = {
     calls,
+    // `isNestedComet` (`nested-comet-guard.ts`) reads this, never `boundary` itself — matches its
+    // own doc: it walks up from the PARENT, so a boundary is never mistaken for its own ancestor.
+    parentElement: {
+      closest: (selector: string) => {
+        calls.push(`closest:${selector}`)
+        return nestedInsideAnotherComet ? {} : null
+      },
+    },
     hasAttribute(name: string): boolean {
       calls.push(`has:${name}`)
       return name === COMET_REUSED_ATTR ? isReused : attributes.has(name)
@@ -86,6 +96,21 @@ Deno.test(
   },
 )
 
+Deno.test(
+  'hydrateComets (preact): a boundary nested inside ANOTHER Comet boundary is skipped entirely ' +
+    "— the outer boundary's own hydration already reaches it transitively; a second, " +
+    'independent hydrate() call here is a real, reproduced conflict (see nested-comet-guard.ts)',
+  () => {
+    const boundary = fakeBoundary({}, false, true)
+    hydrateComets(fakeRoot([boundary]))
+
+    assert(boundary.calls.includes(`closest:[${COMET_ID_ATTR}]`))
+    assertFalse(
+      boundary.calls.includes(`get:${COMET_STRATEGY_ATTR}`),
+      'a nested boundary must never even reach the strategy check',
+    )
+  },
+)
 Deno.test(
   "hydrateComets (preact): strategy 'none' is skipped without ever reading the media attribute",
   () => {

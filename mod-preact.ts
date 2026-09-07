@@ -29,6 +29,7 @@
 import { createElement } from 'preact'
 import { installRendererRuntime } from 'modules/router/renderer-runtime.ts'
 import type { CometElementFactory } from 'modules/comets/element-factory.ts'
+import { CometIdScopeProvider } from 'modules/comets/comet-id-scope-preact.tsx'
 import { renderPageResponse } from 'modules/router/render-page-preact.ts'
 import { renderNotFoundResponse } from 'modules/router/render-not-found-preact.ts'
 import { renderLoaderErrorResponse } from 'modules/router/render-loader-error-preact.ts'
@@ -46,6 +47,7 @@ export function installPreactRuntime(): void {
     // See `@zanix/space/react`'s own identical assertion for why this one exists and what it does
     // and does not claim.
     createElement: createElement as CometElementFactory,
+    idScopeProvider: CometIdScopeProvider,
   })
 }
 

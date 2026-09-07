@@ -43,6 +43,7 @@
     "jsr:@zanix/asyncmq@0.8": "0.8.0",
     "jsr:@zanix/auth@1": "1.1.1",
     "jsr:@zanix/cli@*": "2.0.8",
+    "jsr:@zanix/cli@2.0.9-alpha.6": "2.0.9-alpha.6",
     "jsr:@zanix/datamaster@^1.7.0": "1.9.0",
     "jsr:@zanix/datamaster@^1.9.0": "1.9.0",
     "jsr:@zanix/server@4": "4.2.0",
@@ -278,6 +279,12 @@
         "jsr:@zanix/utils@^4.1.0",
         "npm:es-module-lexer",
         "npm:graphql"
+      ]
+    },
+    "@zanix/cli@2.0.9-alpha.6": {
+      "integrity": "272e0ce8ed7b6a2169644073a85163fa0c69e00558511183703092cce3300ab6",
+      "dependencies": [
+        "jsr:@std/jsonc@1.0.2"
       ]
     },
     "@zanix/datamaster@1.9.0": {

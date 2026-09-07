@@ -33,6 +33,7 @@
 import { createElement } from 'react'
 import { installRendererRuntime } from 'modules/router/renderer-runtime.ts'
 import type { CometElementFactory } from 'modules/comets/element-factory.ts'
+import { CometIdScopeProvider } from 'modules/comets/comet-id-scope-react.tsx'
 import { renderPageResponse } from 'modules/router/render-page-react.tsx'
 import { renderNotFoundResponse } from 'modules/router/render-not-found-react.tsx'
 import { renderLoaderErrorResponse } from 'modules/router/render-loader-error-react.tsx'
@@ -59,6 +60,7 @@ export function installReactRuntime(): void {
     // signature is directly assignable to it (confirmed for both). This asserts the call shape, which
     // both really do satisfy; it hides no incompatibility.
     createElement: createElement as CometElementFactory,
+    idScopeProvider: CometIdScopeProvider,
   })
 }
 

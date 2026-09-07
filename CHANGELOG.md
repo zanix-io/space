@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-09-06
+
+### Fixed
+
+- **`hydrateComets`/`hydrateComets` (Preact) called `hydrateRoot()`/`hydrate()` a second,
+  independent time on a Comet boundary nested inside ANOTHER Comet's own content** — a real,
+  reproduced conflict (React throws a hydration-mismatch error; Preact fights its own already-live
+  reconciliation state), since the outer boundary's own hydration already reaches a nested one
+  transitively. Fixed by skipping any boundary whose nearest Comet ancestor is itself already a
+  Comet (`nested-comet-guard.ts`'s `isNestedComet`) before ever reading its strategy.
+
+### Added
+
+- **`useCometStableId`** (`@zanix/space/comet/react`, `@zanix/space/comet/preact`) — a drop-in
+  replacement for the renderer's own `useId()` that stays correct inside a ready-made Comet's own
+  isolated hydration root. `useId()`'s guarantee (the same value on the server render and the client
+  hydration) holds only WITHIN one hydration root, counting from wherever that root's own render
+  starts — a Comet hydrates as its own, separate root, so the server's whole-document render assigns
+  it whatever ordinal it lands on among every `useId()` call on the page, while the client's
+  isolated hydration starts that counter fresh at zero for just that one boundary. The two can never
+  coincide by construction (the real, reproduced `@zanix/space-ui` NavDrawer `aria-controls`
+  mismatch). `defineComet` now wraps a Comet's own content in a per-instance id-scope Context
+  (derived from the Comet's source and its own serialized props, so it's identical on both the
+  server render and the client's matching hydration/persist-reuse wrap); `useCometStableId` reads
+  that scope when present and falls back to a plain, zero-overhead `useId()` passthrough everywhere
+  else — every component in a normal, non-Comet page tree.
+
 ## [1.6.2] - 2026-09-06
 
 ### Fixed

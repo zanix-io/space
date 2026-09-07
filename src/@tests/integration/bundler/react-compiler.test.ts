@@ -74,20 +74,27 @@ Deno.test(
       assert(cometChunk, `expected a counter-* chunk, got: ${jsFiles.join(', ')}`)
 
       const code = await Deno.readTextFile(join(assetsDir, cometChunk))
-      // No `external` config for react in `build-client.ts` (same as every other comet build) —
-      // Rolldown bundles `react/compiler-runtime`'s contents inline rather than leaving a literal
-      // import specifier, so the real evidence is React's own `useMemoCache` helper (confirmed
-      // present in the ACTUAL bundled `react` source itself, `__COMPILER_RUNTIME`'s own `c`
-      // function) being called from the compiled component — never present in an uncompiled build.
-      assert(
-        code.includes('useMemoCache'),
-        `expected React Compiler's runtime helper, got:\n${code}`,
-      )
-      // The generated cache-slot pattern React Compiler's own output always uses (`$[0]`-style
-      // indexing over a `useMemoCache(n)` array) — confirms an actual per-component memoization
-      // cache was generated, not just that the runtime helper is reachable somewhere in React
-      // itself.
+      // The generated cache-slot pattern React Compiler's own output always uses (`t[0]!==`-style
+      // indexing over a `useMemoCache(n)` array), read directly from a destructured import — this
+      // is what actually proves the comet's OWN chunk was compiled, regardless of which chunk the
+      // runtime helper itself physically lives in (Rolldown's own chunk-splitting can share it
+      // across every comet importing it, rather than duplicating it into each one — a real,
+      // desirable optimization once more than one consumer exists, not a build defect).
       assert(/\[0\]\s*!==/.test(code), `expected a real memo-cache-array read, got:\n${code}`)
+      // No `external` config for react in `build-client.ts` (same as every other comet build) —
+      // React's own `useMemoCache` helper (`__COMPILER_RUNTIME`'s own `c` function) is bundled
+      // somewhere in the real build output, never left as an unresolved import specifier. Checked
+      // across every emitted chunk, not just the comet's own — Rolldown is free to place a shared
+      // dependency like this one in whichever chunk its own splitting heuristics choose.
+      const allChunks = await Promise.all(
+        jsFiles.map((f) => Deno.readTextFile(join(assetsDir, f))),
+      )
+      assert(
+        allChunks.some((chunk) => chunk.includes('useMemoCache')),
+        `expected React Compiler's runtime helper somewhere in the build output, got chunks:\n${
+          jsFiles.join(', ')
+        }`,
+      )
       // Static content survived the compile untouched.
       assert(code.includes('data-testid'), code)
       assert(code.includes('increment'), code)

@@ -3,9 +3,9 @@ import { COMET_ID_ATTR } from '../comets/marker.ts'
 /**
  * Whether `boundary` sits inside ANOTHER Comet boundary — i.e. an app composed one `defineComet`
  * component directly inside another's own rendered content. Shared, renderer-agnostic (pure DOM
- * traversal, no React/Preact API), reused by both `hydrateComets` implementations
- * (`hydrate-comets.ts`/`hydrate-comets-preact.ts`) — same reasoning `marker.ts` itself is already
- * shared unmodified between the two.
+ * traversal, no React/Preact API), reused by both `hydrateComets` implementations — one per
+ * renderer, each its own file — same reasoning `marker.ts` itself is already shared unmodified
+ * between the two.
  *
  * A nested boundary must never get its OWN, independent `hydrateRoot`/`hydrate` call: the OUTER
  * boundary's own hydration already reaches it — `Component` (whatever `defineComet` wraps) is a

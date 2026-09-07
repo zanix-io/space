@@ -1,3 +1,4 @@
+import type { ClassConstructor } from '@zanix/server'
 import type { SsrModuleChangedEvent } from 'modules/bundler/dev-engine-types.ts'
 import { ProgramModule, Socket, ZanixWebSocket } from '@zanix/server'
 import { SPACE_DEV_SOCKET_ROUTE } from './dev-socket-route.ts'
@@ -15,6 +16,53 @@ export { SPACE_DEV_SOCKET_ROUTE }
 
 /** `RegistryContainer` key `SpaceDevSocket` uses to track its own currently-open connections. */
 const CONNECTIONS_REGISTRY_KEY = 'zanix-space-dev-sockets'
+
+/**
+ * `globalThis`-backed, not a plain module-scoped variable — deliberately, and the one exception to
+ * this package's own convention (`dev-engine-registry.ts`'s plain `let` registries) of assuming a
+ * single canonical module instance per process. `@Socket(...)` below runs unconditionally at THIS
+ * MODULE's own top level, the instant anything imports it — so unlike those registries (plain
+ * functions, safe to call again from a fresh module instance), a second EVALUATION of this exact
+ * file is what breaks: `RouteContainer.defineTargetRoutes` (`@zanix/server`) throws `Route path
+ * "socket=>${SPACE_DEV_SOCKET_ROUTE}" is already defined` the moment a second `SpaceDevSocket`
+ * class tries to register the same fixed path — and a plain module-scoped variable would be
+ * useless here anyway: a genuinely fresh module instance starts with fresh top-level state, so it
+ * would always read back `undefined`, never the PREVIOUS instance's own value. A repeated
+ * evaluation like this happens whenever many independent, isolated `space.app.ts` imports share
+ * one process — the shape a real project's own test suite legitimately produces, importing
+ * `space.app.ts` (and therefore this module, reachable from `@zanix/space`'s own root barrel) many
+ * times over, in isolation. No single real `zanix space build`/`zanix space dev` invocation ever
+ * produces it, since each is its own fresh OS process. `Symbol.for(...)`, not a plain string
+ * property, so this can never collide with anything else that happens to read/write `globalThis`.
+ */
+const PREVIOUS_TARGET_KEY = Symbol.for('zanix:space:dev-socket:previous-target')
+
+type GlobalWithPreviousTarget = typeof globalThis & {
+  [PREVIOUS_TARGET_KEY]?: ClassConstructor
+}
+
+/**
+ * Evicts whichever `SpaceDevSocket` class registered `SPACE_DEV_SOCKET_ROUTE` last time THIS exact
+ * module got evaluated, if any — mirroring `page-decorator.ts`'s own `withPendingReplacement`/
+ * `registerPage` eviction for an explicit `@Page(path)` reimport (see that module's own doc for the
+ * identical underlying problem: a route decorator that registers synchronously, during import
+ * itself, has no chance to compare identities against a stale registration the way a pathless
+ * `@Page()`'s deferred registration can). Safe to evict unconditionally, no identity check needed
+ * unlike `@Page`'s own eviction: `SPACE_DEV_SOCKET_ROUTE` is a single, fixed, framework-internal
+ * constant — nothing else ever legitimately registers a socket at this exact path, so "something is
+ * already registered here" can only ever mean "an earlier evaluation of this same module, now
+ * stale." `ProgramModule.unregisterRoutes` is a plain, public, documented API for exactly this
+ * "dev-server reimports a decorated class" case (see its own doc) — no `@zanix/server` change
+ * needed. A no-op the very first time any process ever reaches this module (`previous` is
+ * `undefined`), so a real, single production boot is entirely unaffected.
+ */
+function evictStaleRegistration(): void {
+  const store = globalThis as GlobalWithPreviousTarget
+  const previous = store[PREVIOUS_TARGET_KEY]
+  if (previous) ProgramModule.unregisterRoutes(previous, 'socket')
+}
+
+evictStaleRegistration()
 
 /**
  * The real notification channel `zanix space dev` pushes over — never Vite's own client HMR
@@ -53,7 +101,11 @@ export class SpaceDevSocket extends ZanixWebSocket {
   public push(payload: unknown): void {
     this.socket.send(JSON.stringify(payload))
   }
-}
+} // Recorded AFTER the class above successfully registers — never before, and never on a throw —
+// so a genuine, unrelated collision (were one ever possible) still surfaces normally instead of
+// silently overwriting the bookkeeping with a class that never actually got registered.
+
+;(globalThis as GlobalWithPreviousTarget)[PREVIOUS_TARGET_KEY] = SpaceDevSocket
 
 /**
  * Sends an `ssr-module-changed` notification to every currently-connected {@linkcode SpaceDevSocket}

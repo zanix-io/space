@@ -658,7 +658,7 @@ export async function createSpaceDevEngine(
   // generated `.ts` files (`RealImportEvaluator`'s own doc), removed on `close()` below.
   const evalDir = await Deno.makeTempDir({ prefix: 'zanix-space-dev-ssr-' })
   const runner = createServerModuleRunner(server.environments.ssr, {
-    evaluator: new RealImportEvaluator(evalDir),
+    evaluator: new RealImportEvaluator(evalDir, options.root),
   })
 
   // Strips a dep-optimizer version query (`?v=<hash>` or `&v=<hash>`) from an otherwise-untouched

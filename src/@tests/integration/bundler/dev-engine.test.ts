@@ -1036,12 +1036,22 @@ Deno.test(
         await Deno.readTextFile(fromFileUrl(new URL('../../../../deno.jsonc', import.meta.url))),
       ) as { imports: Record<string, string> }
       const reactModPath = fromFileUrl(new URL('../../../../mod-react.ts', import.meta.url))
+      const cometModPath = fromFileUrl(
+        new URL('../../../../src/modules/comets/mod.ts', import.meta.url),
+      )
       await Deno.writeTextFile(
         join(root, 'deno.json'),
         JSON.stringify({
           imports: {
             ...ownDenoJsonc.imports,
             '@zanix/space/react': reactModPath,
+            // NavDrawer's own internal `import { defineComet } from '@zanix/space/comet'`
+            // reaches `runExternalModule` as the fully-qualified `jsr:@zanix/space@^1.0.0/comet`
+            // (its own declared range, never the bare text it wrote) — resolved against a REAL
+            // project's own lockfile, already deduplicated to the same `@zanix/space` instance its
+            // direct `@zanix/space/react` import above uses. This throwaway root has no such
+            // lockfile, so it needs the identical local override, keyed by that exact string.
+            'jsr:@zanix/space@^1.0.0/comet': cometModPath,
             '@zanix/space-ui/runtime/nav-drawer': 'jsr:@zanix/space-ui@2.0.0/runtime/nav-drawer',
           },
         }),

@@ -283,3 +283,32 @@ Deno.test({
     }
   },
 })
+
+Deno.test(
+  'SpaceDevSocket: reimporting this exact module as a genuinely fresh instance evicts the STALE ' +
+    'class first, instead of throwing "Route path ... is already defined" — regression guard for ' +
+    "a real crash confirmed via `@zanix/cli`'s own test suite (never reachable from a single real " +
+    '`zanix space build`/`zanix space dev` process, which never reimports this module — only ' +
+    'possible when many independent, isolated `space.app.ts` imports share one process, exactly ' +
+    'what a test suite does). `?query`-suffixed dynamic imports are the same cache-busting shape a ' +
+    "dev-server reimport (or `cli`'s own isolated `@deno/loader` `Workspace` per test fixture) " +
+    'produces — genuinely distinct module instances, never a cache hit.',
+  async () => {
+    const url = new URL('../../../modules/dev/space-dev-socket.ts', import.meta.url).href
+    const first = await import(`${url}?regression-reimport-1`)
+    const second = await import(`${url}?regression-reimport-2`)
+
+    assert(
+      first.SpaceDevSocket !== second.SpaceDevSocket,
+      'expected two genuinely distinct classes — a same-instance import would prove nothing',
+    )
+    assert(
+      !ProgramModule.routes.hasRoutesForTarget(first.SpaceDevSocket, 'socket'),
+      'expected the first (now-stale) class to have been evicted by the second import',
+    )
+    assert(
+      ProgramModule.routes.hasRoutesForTarget(second.SpaceDevSocket, 'socket'),
+      'expected the second (fresh) class to be the one currently registered',
+    )
+  },
+)

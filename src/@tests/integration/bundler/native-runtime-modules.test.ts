@@ -202,3 +202,58 @@ Deno.test(
     }
   },
 )
+
+Deno.test(
+  'nativeRuntimeModulesPlugin end-to-end: a PATHLESS @Page() — the case the explicit-path test ' +
+    "above deliberately sidesteps — registers a real route through a bare '@zanix/space' import, " +
+    "exactly as a real route file writes it. See native-runtime-modules.ts's own header doc for " +
+    'the ambient-resolution regression this guards (`runExternalModule` resolving against ' +
+    'whatever the served project itself declares, via `getSharedLoader`/`resolveDenoAt` — a plain ' +
+    '`deno test` run here already resolves its own package name correctly regardless, so this ' +
+    'test alone cannot detect a regression in that resolver; see ssr-module-evaluator.test.ts for ' +
+    'the test that does).',
+  async () => {
+    const root = await Deno.makeTempDir({ dir: TMP_ROOT })
+    try {
+      const pageFilePath = join(root, 'page.tsx')
+      await Deno.writeTextFile(
+        pageFilePath,
+        [
+          `import '${import.meta.resolve('../../../../mod-react.ts')}'`,
+          "import { Page, SpacePageController } from '@zanix/space'",
+          '',
+          'function View() {',
+          '  return <p>native-runtime-modules-pathless-ok</p>',
+          '}',
+          '',
+          '@Page()',
+          'export default class PathlessIdentityCheckPage extends SpacePageController {',
+          '  public override component = View',
+          '}',
+          '',
+        ].join('\n'),
+      )
+
+      const engine = await createSpaceDevEngine({ root, isRouteEntry })
+      try {
+        await loadRoutes(root, {
+          importModule: (filePath) => engine.ssrLoadModule(`/${relative(root, filePath)}`),
+        })
+
+        const servers = await bootstrapServers({ ssr: { port: 20613 } })
+        try {
+          const res = await fetch('http://localhost:20613/')
+          assertEquals(res.status, 200)
+          const html = await res.text()
+          assert(html.includes('native-runtime-modules-pathless-ok'), html)
+        } finally {
+          await webServerManager.stop(servers)
+        }
+      } finally {
+        await engine.close()
+      }
+    } finally {
+      await Deno.remove(root, { recursive: true })
+    }
+  },
+)

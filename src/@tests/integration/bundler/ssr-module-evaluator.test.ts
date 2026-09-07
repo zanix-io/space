@@ -1,5 +1,7 @@
-import { assertEquals } from '@std/assert'
+import { assert, assertEquals } from '@std/assert'
+import { join } from '@std/path'
 import { toDenoSpecifier } from '@deno/vite-plugin/resolver'
+import { HttpError } from '@zanix/errors'
 import { getTemporaryFolder } from '@zanix/helpers'
 import { RealImportEvaluator } from 'modules/bundler/ssr-module-evaluator.ts'
 import type { EvaluatedModuleNode, ModuleRunnerContext } from 'vite/module-runner'
@@ -45,7 +47,7 @@ Deno.test(
   async () => {
     const dir = await Deno.makeTempDir({ dir: TMP_ROOT })
     try {
-      const evaluator = new RealImportEvaluator(dir)
+      const evaluator = new RealImportEvaluator(dir, dir)
       const realResolvedUrl =
         'https://jsr.io/@zanix/space-ui/2.0.0/src/components/NavDrawer/index.ts'
       const wrappedId = toDenoSpecifier('TSX', realResolvedUrl, realResolvedUrl)
@@ -82,7 +84,7 @@ Deno.test(
   async () => {
     const dir = await Deno.makeTempDir({ dir: TMP_ROOT })
     try {
-      const evaluator = new RealImportEvaluator(dir)
+      const evaluator = new RealImportEvaluator(dir, dir)
       const localMetaUrl = 'file:///project/src/routes/page.tsx'
       const context = makeContext(localMetaUrl)
 
@@ -110,7 +112,7 @@ Deno.test(
   async () => {
     const dir = await Deno.makeTempDir({ dir: TMP_ROOT })
     try {
-      const evaluator = new RealImportEvaluator(dir)
+      const evaluator = new RealImportEvaluator(dir, dir)
       const localMetaUrl = 'file:///project/%00deno::TypeScript::/some/cached/local/file.ts'
       const context = makeContext(localMetaUrl)
       const wrappedId = toDenoSpecifier(
@@ -130,6 +132,33 @@ Deno.test(
         (context as any).__vite_ssr_exports__.metaUrl,
         localMetaUrl,
       )
+    } finally {
+      await Deno.remove(dir, { recursive: true })
+    }
+  },
+)
+
+Deno.test(
+  "runExternalModule: a served project's own declared version wins over this package's own — " +
+    'resolves `@zanix/errors` against the project root passed to the constructor, not this ' +
+    "package's own `deno.jsonc` nor whatever the surrounding process happens to have cached",
+  async () => {
+    const dir = await Deno.makeTempDir({ dir: TMP_ROOT })
+    try {
+      await Deno.writeTextFile(
+        join(dir, 'deno.json'),
+        JSON.stringify({ imports: { '@zanix/errors': 'jsr:@zanix/utils@4.0.0/errors' } }),
+      )
+
+      const evaluator = new RealImportEvaluator(dir, dir)
+      const sentinel = `znxruntime://${encodeURIComponent('@zanix/errors')}`
+      const mod = await evaluator.runExternalModule(sentinel) as { HttpError: typeof HttpError }
+
+      assert(
+        mod.HttpError !== HttpError,
+        "expected the project's own pinned 4.0.0 HttpError, not this package's own",
+      )
+      assertEquals(new mod.HttpError('FORBIDDEN').name, 'HttpError')
     } finally {
       await Deno.remove(dir, { recursive: true })
     }

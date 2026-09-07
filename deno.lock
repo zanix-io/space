@@ -300,6 +300,16 @@
         "jsr:@zanix/utils@^4.1.0"
       ]
     },
+    "@zanix/space@1.6.1": {
+      "integrity": "5780604b30c3d4e0e160e771422f39b916d63613551c56d45a95a6505ff15956",
+      "dependencies": [
+        "jsr:@std/path@0.224",
+        "jsr:@zanix/utils@^4.1.0"
+      ]
+    },
+    "@zanix/utils@4.0.0": {
+      "integrity": "2ef04a760e011829ff14e198d6e5fc947ae0cf2615b519c1954ddb78b7b376e6"
+    },
     "@zanix/utils@4.2.0": {
       "integrity": "11a2053930b25de2d0fc7f920c1c05d8c1915bd95d769d9a994bc5e89dadc79f",
       "dependencies": [

@@ -2,6 +2,8 @@ import type { EvaluatedModuleNode, ModuleEvaluator, ModuleRunnerContext } from '
 import { join, toFileUrl } from '@std/path'
 import { isDenoSpecifier, parseDenoSpecifier } from '@deno/vite-plugin/resolver'
 import { fromNativeRuntimeSentinel } from './native-runtime-modules.ts'
+import { getSharedLoader } from './deno-loader.ts'
+import { resolveDenoAt } from './deno-specifier-resolver.ts'
 
 /**
  * Replaces Vite's own default SSR module evaluator (`ESModulesEvaluator`, from
@@ -49,10 +51,12 @@ import { fromNativeRuntimeSentinel } from './native-runtime-modules.ts'
  */
 export class RealImportEvaluator implements ModuleEvaluator {
   #dir: string
+  #root: string
   #counter = 0
 
-  constructor(dir: string) {
+  constructor(dir: string, root: string) {
     this.#dir = dir
+    this.#root = root
   }
 
   public async runInlinedModule(
@@ -141,15 +145,32 @@ export class RealImportEvaluator implements ModuleEvaluator {
   // limitation this class exists for never applies to an externalized module in the first place.
   //
   // ONE deliberate exception: `native-runtime-modules.ts`'s own `nativeRuntimeModulesPlugin`
-  // resolves `@zanix/space`/`@zanix/server` (and their subpaths) to a synthetic
+  // resolves `@zanix/*`/`react`/`preact` (and their subpaths) to a synthetic
   // `znxruntime://<specifier>` id specifically so they arrive HERE, as an externalized module,
   // instead of being transformed/inlined like a normal dependency — see that file's own doc for the
   // full module-identity fix this is the other half of. `fromNativeRuntimeSentinel` recovers the
-  // ORIGINAL bare specifier text and this does a plain native `import()` of THAT, instead of the
-  // synthetic url — resolved by Deno against the exact same import map the native `zanix space dev`
-  // process already loaded `@zanix/space`/`@zanix/server` through, so this returns the SAME,
-  // reference-identical module instance the native side already holds, not a second copy.
-  public runExternalModule(filepath: string): Promise<unknown> {
-    return import(fromNativeRuntimeSentinel(filepath) ?? filepath)
+  // ORIGINAL bare specifier text.
+  //
+  // Only a `@zanix/*` specifier is resolved via `resolveDenoAt` (with `getSharedLoader`'s own
+  // node-platform loader, scoped to `this.#root` — the SERVED PROJECT, never this package's own
+  // directory) — against THAT project's own declared version, exactly the way its `space.app.ts`
+  // already resolves the same package. A native `import()` of that resolved URL then hits Deno's
+  // own process-wide module cache and returns the SAME instance the project's own code already
+  // loaded — never a second copy pinned to whatever the running `zanix space dev` process happens
+  // to have cached for an unrelated project. Everything else (`react`/`preact`, an ordinary
+  // external like `node:async_hooks`) keeps the plain `import(specifier)` this evaluator always
+  // had: an npm package is already safe without this — Deno's own `nodeModulesDir: "auto"`
+  // flattens the SERVED PROJECT's whole dependency tree into one shared `node_modules`, so a bare
+  // `import('react')` already resolves to the same instance regardless of which config asked —
+  // and resolving it down to an already-expanded file path here would skip Deno's own built-in
+  // CJS-to-ESM interop for a bare npm specifier, a real, confirmed regression for exactly that case.
+  public async runExternalModule(filepath: string): Promise<unknown> {
+    const specifier = fromNativeRuntimeSentinel(filepath)
+    if (specifier === null || !specifier.startsWith('@zanix/')) {
+      return import(specifier ?? filepath)
+    }
+    const loader = await getSharedLoader(this.#root)
+    const resolved = await resolveDenoAt(specifier, loader, undefined)
+    return import(resolved?.id ?? specifier)
   }
 }

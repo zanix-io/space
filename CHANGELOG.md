@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.6.2] - 2026-09-06
+
+### Fixed
+
+- **`zanix space dev`: a pathless `@Page()` could silently register ZERO routes** — only the
+  built-in `/assets/:path*` catch-all, every page 404ing with no thrown error — the moment a
+  project's own `@zanix/space` pin got ahead of whatever version its globally-installed `@zanix/cli`
+  shim had cached. The same class of bug could hit `@zanix/auth`/`@zanix/datamaster`/
+  `@zanix/asyncmq`/`@zanix/notifications`/`@zanix/server` too (a guard/interactor importing one
+  directly, resolving against a stale cached version instead of the serving project's own). Root
+  cause: `RealImportEvaluator.runExternalModule`'s bare `import(specifier)` resolved against
+  whichever import map governed the ambient `zanix space dev` process, never the served project's
+  own. Fixed by resolving every such import against the served project's own config instead
+  (`getSharedLoader`/`resolveDenoAt`, the same resolver already used for this package's other
+  SSR-side resolution needs). See `native-runtime-modules.ts`'s own header doc for the full
+  mechanism.
+
+- **`SpaceDevSocket` threw `Route path "socket=>..." is already defined` the moment its own module
+  got evaluated a second time in one process** — never reachable from a single real
+  `zanix space
+  dev`/`build` invocation (each its own fresh OS process), but real in a test harness
+  that imports `space.app.ts` many times in isolation (`@zanix/cli`'s own suite, each fixture its
+  own `@deno/
+  loader` `Workspace`). `@Socket(...)` registers unconditionally at module-evaluation
+  time, with no chance to compare identities against a stale registration the way a pathless
+  `@Page()`'s deferred registration already does. Fixed by tracking the previously-registered class
+  on `globalThis` (`Symbol.for(...)`, since a fresh module evaluation starts with fresh top-level
+  state — a plain module-scoped variable would always read back `undefined`) and evicting it before
+  the new class registers.
+
 ## [1.6.1] - 2026-09-06
 
 ### Security

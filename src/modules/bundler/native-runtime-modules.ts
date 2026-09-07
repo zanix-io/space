@@ -73,6 +73,40 @@ import type { Plugin } from 'vite'
  * `createSpaceDevEngine`, invisible to `load-routes.ts`/`page-decorator.ts`/every other router file,
  * exactly as production (`native import()`, no Vite involved at all) already behaves.
  *
+ * ## `runExternalModule` resolves against the SERVED PROJECT, never the ambient process
+ *
+ * A plain bare `import(specifier)` here resolves against whichever import map governs the AMBIENT
+ * `zanix space dev` process — `@zanix/cli`'s own globally-installed shim, never the project
+ * actually being served. A real regression for `@zanix/space` itself: the CLI shim locks its own
+ * resolution on first install and never floats to a newer compatible version later, so a project
+ * bumping its own `@zanix/space` pin past the shim's cached one gets a DIFFERENT module instance
+ * than the one actually running `defineSpaceApp`/`loadRoutes()` — two `page-decorator.ts`
+ * instances, each with its own `pendingPages` `WeakMap`. A pathless `@Page()` sets an entry on
+ * one; `resolvePendingPage()` reads the other, finds nothing, and the page 404s with no thrown
+ * error. An explicit `@Page(path)` is unaffected (its registration goes straight through
+ * `@zanix/server`'s `ProgramModule`), which is why this is specific to the pathless form. The same
+ * gap applies to every entry with no dependency declaration anywhere in this package's own
+ * `deno.jsonc` — `@zanix/auth`/`@zanix/datamaster`/`@zanix/asyncmq`/`@zanix/notifications` are
+ * deliberately absent from it (each scoped to `src/@tests/` only, to avoid materializing heavy
+ * transitive dependencies for every consumer that never imports them).
+ *
+ * Fixed by resolving every `@zanix/*` specifier through `getSharedLoader(root)`/`resolveDenoAt`
+ * (`deno-loader.ts`/`deno-specifier-resolver.ts`) — the SAME resolver `bare-specifier-resolve.ts`/
+ * `cjs-interop.ts` already use for this project's own SSR-side resolution needs, scoped to `root`
+ * (the project passed into `createSpaceDevEngine`, never this package's own directory). This
+ * resolves each specifier against whatever version the SERVED PROJECT itself declares — including
+ * `@zanix/space` itself, which every consumer already declares to use this package at all, so no
+ * self-reference is needed — matching the instance its own `space.app.ts`/guard/interactor files
+ * already import, regardless of what the ambient process happens to have cached. `react`/`preact`
+ * keep the plain ambient `import(specifier)` instead: an npm package is already safe without this
+ * (`nodeModulesDir: "auto"` flattens the served project's whole tree into one shared
+ * `node_modules`, so a bare `import('react')` already resolves identically regardless of which
+ * config asked), and routing it through this resolver anyway would return an already-expanded
+ * file path that skips Deno's own built-in CJS-to-ESM interop for a bare npm specifier. See
+ * `ssr-module-evaluator.test.ts`'s own `runExternalModule` test for a direct proof: a fake project
+ * declaring an older `@zanix/utils` pin than this package's own resolves to THAT pin's
+ * `HttpError`, not this package's.
+ *
  * ## `react`/`react-dom` are on this list too, for the identical reason
  *
  * `canonicalBareSpecifierResolvePlugin` alone is not sufficient here, even though it already
@@ -225,17 +259,12 @@ import type { Plugin } from 'vite'
  * mechanism and a real (or realistically reachable) import path through this engine's SSR graph
  * are both confirmed, the same bar every entry above already meets.
  *
- * **Adding a package here has a required, paired change in `@zanix/cli`, not just this file.**
- * `RealImportEvaluator.runExternalModule` (`ssr-module-evaluator.ts`) does a plain native
- * `import(specifier)` for every entry on this list, inside whatever process actually runs `zanix
- * space dev` — that process's OWN governing `deno.json(c)` is `@zanix/cli`'s, never a consuming
- * project's (one `deno run <entry>` invocation shares one governing resolver, rooted at the
- * entry's own config). A package added here with no matching entry in `cli`'s own `deno.jsonc`
- * `imports` fails that `import()` outright — `Import "<pkg>" not a dependency and not in import
- * map` — the exact, real gap `@zanix/notifications`/`@zanix/datamaster` shipped with here before
- * `cli` added matching entries for them (mirroring the one `@zanix/auth` already had). See `cli`'s
- * own `cli-dependency-compatibility` skill, "cli's own deno.jsonc — native-runtime-module
- * declarations" section, for the checklist this implies on that side.
+ * Adding a package here needs no paired change anywhere else: `RealImportEvaluator
+ * .runExternalModule` (`ssr-module-evaluator.ts`) resolves every entry against the SERVED
+ * PROJECT's own config (see this file's own "`runExternalModule` resolves against the SERVED
+ * PROJECT" section above), which already declares it — the same file that imports it is what
+ * triggered this diversion in the first place. `@zanix/cli`'s own `deno.jsonc` no longer needs a
+ * matching entry for this resolution to succeed.
  *
  * Exported (`./dev`, `modules/dev/mod.ts`) specifically so `cli`'s own regression guard
  * (`native-runtime-module-imports.test.ts`) can import this REAL array instead of hand-keeping its

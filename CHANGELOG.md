@@ -25,7 +25,38 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
   (`defineComet(Component, sourceUrl, 'ComponentName')`) for a factory-returned component instead of
   relying on its runtime `.name` to survive a production build.
 
+- **`SpaceAppConfig`/`defineSpaceApp` now accept an optional `behaviors` field, forwarded through to
+  the underlying `defineZanixApp()` call** — closes a real gap: `@zanix/app`'s own
+  `behaviors`/`resolveBehavior` composition mechanism (override a pure function/Comet without
+  forking the app that declares it) had no way to reach a `space` app at all, since `defineSpaceApp`
+  built its own `defineZanixApp({ name, version, dependencies, routes, setup, ...
+  })` call
+  internally, never threading a config's own `behaviors` through — no `space` app could declare a
+  `behaviors` slot, regardless of what it was for. `BehaviorDeclaration` is re-exported from this
+  package's own typings (`import type { BehaviorDeclaration } from '@zanix/app'`), reused rather
+  than duplicated, matching the existing re-export pattern already used for
+  `AppSetupContext`/`ConfigAccessor`/`RuntimeContext`.
+
 ### Fixed
+
+- **`@zanix/space/testing` gave no way to force `loadMessages()`'s LIVE `messagesDir` read in a
+  plain `deno test`, once an app's `defineSpaceApp()` config declared BOTH `messagesDir` and
+  `clientBuildDir` together (the realistic, documented production shape)** — a real, confirmed
+  defect: `loadMessages()`'s own `resolve()` only reads the live `messagesDir` source when
+  `isDevClientEnabled()` is `true`, a flag only `zanix space dev` itself ever sets; any other
+  execution context — including a plain `deno test` that imports `space.app.ts` and calls
+  `renderPageForTest` — instead reads `{clientBuildDir}/messages/...`, which only exists after a
+  real `zanix space build`. A consumer's own functional test therefore silently resolved an empty
+  catalog (`{}`) — every `formatMessage()` call fell back to rendering the raw message id, with no
+  error, only an easy-to-miss `logger.warn`
+  (`No message file for lang '<lang>' in any configured
+  messagesDir`). Fixed by exporting a new
+  `mockLiveMessages(enabled = true)` helper from `@zanix/space/testing`
+  (`modules/testing/mock-messages.ts`) that flips the same `isDevClientEnabled` gate
+  `zanix space dev` uses and clears `loadMessages()`'s own process-lifetime cache
+  (`resetMessagesCache`, also newly exported from the same entry point), so a consumer's test gets a
+  supported seam instead of the only prior workaround — running a real `zanix space build` before
+  `deno test`, an undocumented, easy-to-miss prerequisite with no error pointing at it when skipped.
 
 - **A fragment response's own streaming Suspense reveal script (React's `$RC`/`$RB`) carried no
   `nonce` attribute at all, silently rejected by `orbit.ts`'s own nonce-verification gate

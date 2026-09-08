@@ -17,6 +17,7 @@
  * @module
  */
 import type { AppSetupContext, ConfigAccessor, RuntimeContext } from '@zanix/app/runtime'
+import type { BehaviorDeclaration } from '@zanix/app'
 import type { PageHeaderOptions } from 'modules/router/space-page-controller.ts'
 import type { SitemapSource } from 'modules/seo/sitemap.ts'
 import type { SpaceRobotsConfig } from 'modules/seo/robots.ts'
@@ -39,14 +40,20 @@ import type { LogApiControllerOptions } from 'modules/log-api/controllers/log-co
 // only the types actually used, and this chain does terminate here (verified via `deno doc
 // --lint`, not assumed).
 export type { AppSetupContext, ConfigAccessor, RuntimeContext }
+// Re-exported for the same reason, by the same rule — `SpaceAppConfig.behaviors` below references
+// it directly (self-contained: `{ default, description? }`, no further transitive types of its
+// own), unlike `setup`'s three types above it never risked pulling in `AppDefinition`'s full
+// interface either way.
+export type { BehaviorDeclaration }
 
 /**
  * Author-facing configuration for a `@zanix/space` app — the parameter to `defineSpaceApp()`.
  *
  * Only `name` is required. Everything else either has a sensible default or is optional because
- * the app doesn't need it. `name`/`version`/`dependencies` mirror `AppDefinition`'s own field
- * types (primitives and a small self-contained shape — safe to state directly without pulling in
- * `@zanix/app`'s full interface, see `setup` below for the one field where that isn't true).
+ * the app doesn't need it. `name`/`version`/`dependencies`/`behaviors` mirror `AppDefinition`'s own
+ * field types (primitives and small self-contained shapes — safe to state/reference directly
+ * without pulling in `@zanix/app`'s full interface, see `setup` below for the one field where that
+ * isn't true).
  */
 export interface SpaceAppConfig {
   /** App identity — forwarded as-is to `defineZanixApp({ name })`. Must match `^[a-z][a-z0-9-]*$`
@@ -58,6 +65,18 @@ export interface SpaceAppConfig {
   /** Forwarded as-is to `defineZanixApp({ dependencies })` — declares which resource slots this
    * app needs, never a concrete resource name (that's the host's `uses` binding). */
   dependencies?: Record<string, { type: string; required?: boolean }>
+  /**
+   * Forwarded as-is to `defineZanixApp({ behaviors })` — pure functions/strategies this app
+   * declares as swappable by whoever composes it (`Zanix.start({ apps: { name: { behaviors } } })`,
+   * or `activateApps()`'s own `behaviors` parameter), without forking this app's own code. A
+   * component resolves its own slot via `resolveBehavior(appName, name)`/`ctx.behavior(name)`
+   * (`@zanix/app/runtime`) — see `app-behaviors-and-overrides` for the full mechanism and the
+   * style-only-override pattern (a component resolving a className/style value, not a whole
+   * replacement component). Until this field existed, no `@zanix/space` app could declare a
+   * behaviors slot at all — `defineSpaceApp` built its own fixed `defineZanixApp({...})` call with
+   * no pass-through for it, a real gap now closed the same way `dependencies` already was.
+   */
+  behaviors?: Record<string, BehaviorDeclaration>
   /** Root directory (or directories) `loadRoutes()` scans for `page.tsx` files, resolved
    * automatically as part of this app's own `setup(ctx)` — an author never calls `loadRoutes()` by
    * hand. Defaults to `'./routes'`; a directory that doesn't exist yet is treated as zero pages, not

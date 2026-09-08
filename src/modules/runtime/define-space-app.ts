@@ -143,6 +143,7 @@ export function defineSpaceApp(config: SpaceAppConfig): ZanixAppDefinition {
     name,
     version,
     dependencies,
+    behaviors,
     routesDir,
     assetsDir,
     clientBuildDir,
@@ -244,6 +245,7 @@ export function defineSpaceApp(config: SpaceAppConfig): ZanixAppDefinition {
     name,
     version,
     dependencies,
+    behaviors,
     routes: { prefix: '' },
     setup: async (ctx) => {
       // The one place the project's DECLARED renderer meets the INSTALLED implementation. This is

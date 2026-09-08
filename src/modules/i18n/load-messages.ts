@@ -39,8 +39,9 @@ const cache = new Map<string, Messages>()
 const inFlight = new Map<string, Promise<Messages>>()
 
 /** Test-only escape hatch — clears both the resolved-message cache and any in-flight resolution,
- * for test isolation between fixtures that reuse the same `lang`/`population` keys. Not exported
- * from this package's public entry points. */
+ * for test isolation between fixtures that reuse the same `lang`/`population` keys. Re-exported
+ * from `@zanix/space/testing` (see `mock-messages.ts`'s own doc) for a consumer app's own tests;
+ * this package's own test suite still imports it directly, by relative path. */
 export function resetMessagesCache(): void {
   cache.clear()
   inFlight.clear()

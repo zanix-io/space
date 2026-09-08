@@ -1,7 +1,7 @@
 // Installs a renderer, exactly as a real app does: `@zanix/space` itself ships none, so a
 // test that renders must import the entry point it is testing against.
 import '../../../../mod-react.ts'
-import { assert, assertEquals, assertFalse, assertMatch } from '@std/assert'
+import { assert, assertEquals, assertFalse } from '@std/assert'
 import { Suspense, use } from 'react'
 import { bootstrapServers, webServerManager } from '@zanix/server'
 import { ORBIT_FRAGMENT_HEADER, ORBIT_OUTLET_ATTR } from 'modules/router/orbit-protocol.ts'
@@ -283,7 +283,17 @@ Deno.test(
     for (const scriptTag of html.matchAll(/<script(\s[^>]*)?>/g)) {
       const attrs = scriptTag[1] ?? ''
       assert(attrs.includes('nonce='), `expected every inline <script> to carry a nonce: ${attrs}`)
-      assertMatch(attrs, new RegExp(`\\bnonce="${nonce}"`))
+      // A plain substring check, not a `RegExp` built from the nonce's own text — a real,
+      // reproduced flake otherwise: a base64-encoded nonce routinely contains `+` (and could
+      // contain other regex metacharacters), which `new RegExp(...)` interpolation never escapes.
+      // `V0+J8g==` compiled as a PATTERN reads its own `+` as "one or more of the preceding `0`",
+      // never matching the literal `+` character the real attribute text contains — confirmed via
+      // a real, isolated repro (`/\bnonce="V0+J8g=="/.test(' nonce="V0+J8g=="')` → `false`) before
+      // this fix, not assumed from reading the code alone.
+      assert(
+        attrs.includes(`nonce="${nonce}"`),
+        `expected inline <script>'s own nonce attribute to exactly match the fragment CSP nonce: ${attrs}`,
+      )
       noncedScriptCount++
     }
     assert(noncedScriptCount > 0, `expected at least one inline <script> in the fragment: ${html}`)

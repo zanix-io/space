@@ -57,6 +57,7 @@ Deno.test('defineSpaceApp: minimal config (only `name`) is valid', () => {
     'a page must resolve at the real site path, never namespaced under the app name',
   )
   assertEquals(app.definition.dependencies, {})
+  assertEquals(app.definition.behaviors, {})
   assert(
     typeof app.definition.setup === 'function',
     'setup always wraps loadRoutes(), even with no user-provided setup',
@@ -95,6 +96,31 @@ Deno.test('defineSpaceApp: forwards version/dependencies/setup as given', async 
 
 Deno.test('defineSpaceApp: an invalid name throws, same as defineZanixApp', () => {
   assertThrows(() => defineSpaceApp({ name: 'Not Valid' }))
+})
+
+/**
+ * Real regression coverage for a previously-missing pass-through: `defineSpaceApp` used to build
+ * its own fixed `defineZanixApp({...})` call with no `behaviors` field at all, so no `@zanix/space`
+ * app could ever declare a behaviors slot — a host's own `Zanix.start({ apps: { name: {
+ * behaviors } } })` override would throw, since the base app's manifest never declared the name
+ * being overridden (see `app-behaviors-and-overrides`'s own "an override can never retroactively
+ * apply to code that never declared the slot" rule). This only asserts the manifest carries the
+ * declaration through, unresolved — resolving it via `resolveBehavior`/`ctx.behavior` from inside
+ * an activated composition is `@zanix/app`'s own, already-tested mechanism, not re-verified here.
+ */
+Deno.test("defineSpaceApp: forwards behaviors as given, matching dependencies' own pass-through", () => {
+  const app = defineSpaceApp({
+    name: 'storefront',
+    behaviors: {
+      heroHeading: { default: () => 'Welcome', description: 'The storefront hero heading.' },
+    },
+  })
+
+  assertEquals(Object.keys(app.definition.behaviors ?? {}), ['heroHeading'])
+  assertEquals(
+    (app.definition.behaviors?.heroHeading as { default: () => string }).default(),
+    'Welcome',
+  )
 })
 
 Deno.test('defineSpaceApp: forwards headers into setDefaultPageHeaders, app-wide', () => {

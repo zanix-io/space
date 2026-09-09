@@ -1,5 +1,6 @@
 import { dirname, join, resolve as resolvePath } from '@std/path'
 import { type Loader, Workspace } from '@deno/loader'
+import { parse as parseJsonc } from '@std/jsonc'
 
 /** Walks up from `root` looking for the nearest `deno.json`/`deno.jsonc`, same algorithm
  * `@deno/vite-plugin`'s own (non-exported) `findDenoConfig` uses internally — replicated here,
@@ -73,4 +74,65 @@ export function getSharedLoader(root: string): Promise<Loader> {
     sharedLoadersByConfigPath.set(key, loaderPromise)
   }
   return loaderPromise
+}
+
+/**
+ * A SECOND, separate loader — rooted at `@zanix/space`'s OWN `deno.jsonc`, never a consuming
+ * project's — for a real, confirmed gap {@linkcode getSharedLoader} structurally cannot close no
+ * matter what `referrer` a caller threads through: `preact`, `@prefresh/core`, and `@prefresh/utils`
+ * are real dependencies of THIS package (declared in its own `deno.jsonc`), never of a real
+ * consuming project's own app code, which only ever reaches them transitively. A `Workspace` built
+ * from a consuming project's own root config never inherits a JSR dependency's own nested import
+ * map — confirmed empirically against a real, published `jsr:@zanix/space` dependency: even a
+ * `referrer` URL literal INSIDE that package's own module tree (`.../src/modules/bundler/
+ * space-plugin.ts`, the exact file that imports `preact`) still throws `Import "preact" not a
+ * dependency and not in import map` from a `Workspace` rooted anywhere else — real Deno-native
+ * `import()` resolves this correctly via `deno.lock`'s own per-package dependency graph, a
+ * mechanism `@deno/loader`'s own `Workspace.resolveSync` simply doesn't replicate. See
+ * `bare-specifier-resolve.ts`'s own doc for where this is actually used, and the real
+ * `Failed to resolve dependency`/hard `Module not found` failures it closes.
+ *
+ * `import.meta.url` (never a hardcoded version) locates `@zanix/space`'s own `deno.jsonc` relative
+ * to THIS file's own real, resolved location — a real JSR install or a local checkout, whichever
+ * is actually executing this code — so this always reflects the exact same `@zanix/space` instance
+ * a consuming project resolved, with nothing here to fall out of sync by hand. `fetch` reads it
+ * uniformly across both schemes (`file://` locally, `https://` against JSR in production) — `Deno`'s
+ * own filesystem APIs don't read a remote URL, but `fetch` does, for either one.
+ *
+ * `Workspace`'s own `configPath` option only accepts a real path/`file:` URL, never raw content —
+ * the fetched text is written to a throwaway temp file for the one construction call that needs it,
+ * left in place for this (long-lived, one-per-dev-session) loader's own lifetime rather than
+ * cleaned up eagerly: a single small file, no different in kind from `RealImportEvaluator`'s own
+ * `evalDir`.
+ *
+ * Primed once, at construction, with every `npm:`-scheme `imports` value this package's own
+ * manifest declares (never a hand-picked package list to keep in sync) via `addEntrypoints` —
+ * required before `resolveSync` can answer an `npm:` version constraint synchronously at all
+ * (confirmed empirically: an unprimed constraint throws `Could not find constraint '<pkg>@<range>'
+ * in the list of packages`, the same shape `resolveDeno`'s own `jsr:`/`http:` handling already
+ * works around for those two schemes via its own `addEntrypoints` call).
+ */
+let spaceOwnLoaderPromise: Promise<Loader> | undefined
+export function getSpaceOwnLoader(): Promise<Loader> {
+  if (!spaceOwnLoaderPromise) {
+    spaceOwnLoaderPromise = (async () => {
+      const configUrl = new URL('../../../deno.jsonc', import.meta.url)
+      const content = await (await fetch(configUrl)).text()
+      const parsed = parseJsonc(content) as { imports?: Record<string, string> }
+      const npmSpecifiers = Object.values(parsed.imports ?? {}).filter((value) =>
+        value.startsWith('npm:')
+      )
+      const tempConfigPath = await Deno.makeTempFile({ suffix: '.jsonc' })
+      await Deno.writeTextFile(tempConfigPath, content)
+      const loader = await new Workspace({
+        platform: 'node',
+        configPath: tempConfigPath,
+        noLock: true,
+      })
+        .createLoader()
+      if (npmSpecifiers.length > 0) await loader.addEntrypoints(npmSpecifiers)
+      return loader
+    })()
+  }
+  return spaceOwnLoaderPromise
 }

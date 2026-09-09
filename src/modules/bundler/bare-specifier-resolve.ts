@@ -3,7 +3,7 @@ import { ResolutionMode } from '@deno/loader'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { isAbsolute } from '@std/path'
 import { isDenoSpecifier } from '@deno/vite-plugin/resolver'
-import { getSharedLoader } from './deno-loader.ts'
+import { getSharedLoader, getSpaceOwnLoader } from './deno-loader.ts'
 
 /**
  * Fixes a module-identity bug in `@deno/vite-plugin@2.0.3`'s own resolver, not something this
@@ -197,6 +197,35 @@ import { getSharedLoader } from './deno-loader.ts'
  * or without a referrer, since the WHATWG resolution algorithm falls back to the same top-level
  * `imports` map either way. No new per-importer id divergence is introduced for any specifier a
  * project doesn't itself choose to scope differently.
+ *
+ * ## A second, separate gap this same function closes: `@zanix/space`'s own npm-only deps
+ *
+ * `preact`, `@prefresh/core`, and `@prefresh/utils` are real dependencies of `@zanix/space` itself
+ * (declared in ITS OWN `deno.jsonc`), never of a real consuming project's own app code — a project
+ * built on `renderer: 'preact'` never imports Preact directly, only transitively through this
+ * package. A bare specifier reached with no real project-file referrer at all (every case
+ * {@linkcode referrerUrlFor} above returns `undefined` for: `importer === undefined` — Vite's own
+ * dep-optimizer resolves every `optimizeDeps.include` entry this way, including `preact/debug`
+ * and `preact/devtools`, added unconditionally by `@preact/preset-vite`'s own devtools sub-plugin
+ * — a dev-server virtual importer, or a `node_modules`-rooted one) has no import map to fall back
+ * to but the consuming project's own root `imports`, which was never going to declare a package
+ * that project never itself imports. Confirmed live against a real consumer root (no local link,
+ * `@zanix/space` resolved from JSR): `Failed to resolve dependency: preact/debug, present in
+ * client 'optimizeDeps.include'` (same for `preact`, `preact/hooks`, `@prefresh/core`,
+ * `@prefresh/utils`) — the exact same missing-mapping gap escalates to a hard `Module not found
+ * "https://jsr.io/@zanix/space/<version>/src/modules/bundler/preact/debug"` once something
+ * actually imports one of these rather than just declaring it in `optimizeDeps.include` (the
+ * devtools sub-plugin's own `transform` hook prepends exactly that import into the auto-generated
+ * client entry, whose own source `@zanix/space` generates — see `client-entry-plugin.ts`).
+ *
+ * A real referrer INSIDE `@zanix/space`'s own module tree does not fix this — see
+ * {@linkcode getSpaceOwnLoader}'s own doc for why `getSharedLoader`'s `Workspace` structurally
+ * can't resolve these specifiers no matter what referrer is passed, and why a dedicated loader is
+ * what closes the gap instead. {@linkcode resolveBareSpecifierCanonically} retries a referrer-less
+ * failure once against that second loader. This only ever changes the outcome for a specifier
+ * `@zanix/space`'s own manifest declares and the primary, referrer-less attempt couldn't resolve —
+ * anything genuinely unresolvable (a real typo, an unrelated package neither scope declares) still
+ * fails identically, just one `resolveSync` call later.
  */
 function referrerUrlFor(importer: string | undefined): string | undefined {
   if (importer === undefined || isDenoSpecifier(importer)) return undefined
@@ -225,11 +254,23 @@ export async function resolveBareSpecifierCanonically(
     return null
   }
   const loader = await getSharedLoader(root)
+  const referrer = referrerUrlFor(importer)
   let resolved: string
   try {
-    resolved = loader.resolveSync(id, referrerUrlFor(importer), ResolutionMode.Import)
+    resolved = loader.resolveSync(id, referrer, ResolutionMode.Import)
   } catch {
-    return null // not resolvable this way — let the existing pipeline try its own resolution
+    // A real project-file referrer that still failed means the project genuinely doesn't declare
+    // this specifier in scope — no reason to guess again. Only a referrer-less attempt (no real
+    // project file to have trusted in the first place) retries against `@zanix/space`'s own
+    // dedicated loader (see `getSpaceOwnLoader`'s own doc for why a second loader, not a borrowed
+    // referrer, is what this needs).
+    if (referrer !== undefined) return null
+    try {
+      const spaceLoader = await getSpaceOwnLoader()
+      resolved = spaceLoader.resolveSync(id, undefined, ResolutionMode.Import)
+    } catch {
+      return null // not resolvable this way either — let the existing pipeline try its own
+    }
   }
   if (!resolved.startsWith('file://')) return null // npm:/jsr:/http: — not this function's concern
   return fileURLToPath(resolved)

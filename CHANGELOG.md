@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.10.1] - 2026-09-09
+
+### Fixed
+
+- **`zanix space dev`/`build` under `renderer: 'preact'` could fail to resolve `preact`,
+  `preact/debug`, `preact/devtools`, `@prefresh/core`, and `@prefresh/utils` against a real
+  consuming project** — surfacing as
+  `Failed to resolve dependency: preact/debug, present in
+  client 'optimizeDeps.include'` warnings,
+  escalating to a hard
+  `Module not found
+  "https://jsr.io/@zanix/space/<version>/src/modules/bundler/preact/debug"` once
+  `@preact/preset-vite`'s own devtools sub-plugin injected `import "preact/debug"` into the
+  auto-generated client entry. These four packages are real dependencies of `@zanix/space` itself
+  (declared in its own `deno.jsonc`), never of a consuming project's own app code, which only ever
+  reaches them transitively — a `@deno/loader` `Workspace` rooted at the consuming project's own
+  config has no way to resolve a bare specifier only `@zanix/space`'s manifest declares, and
+  (confirmed empirically) never inherits it even given a real referrer URL inside `@zanix/space`'s
+  own module tree. `bare-specifier-resolve.ts` now retries a referrer-less resolution failure
+  against a second, dedicated loader (`deno-loader.ts`'s `getSpaceOwnLoader`) rooted at
+  `@zanix/space`'s own `deno.jsonc` instead.
+
 ## [1.10.0] - 2026-09-08
 
 ### Fixed

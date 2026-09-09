@@ -2,7 +2,10 @@ import { assert, assertEquals, assertRejects } from '@std/assert'
 import { ZanixController, ZanixSsrController } from '@zanix/server'
 import type { GuardContext } from '@zanix/server'
 import { HttpError } from '@zanix/errors'
-import { createAssetsController } from 'modules/assets-api/controllers/assets.controller.ts'
+import {
+  combineGuards,
+  createAssetsController,
+} from 'modules/assets-api/controllers/assets.controller.ts'
 import { denyAllGuard } from 'modules/assets-api/controllers/guards/deny-all-guard.ts'
 import { mockHandlerContext } from 'modules/testing/mock-handler-context.ts'
 import type { AssetService, CreateAssetCommand } from 'modules/assets-api/asset-service.ts'
@@ -50,6 +53,47 @@ Deno.test(
     assertEquals(result.response.status, 403)
   },
 )
+
+Deno.test(
+  'combineGuards: merges headers from every non-denying guard, not just the last one — a ' +
+    "guard like @zanix/auth's rateLimitGuard needs its own headers to actually reach a " +
+    'PASSING request, not only a 429 denial',
+  async () => {
+    const rateLimitLikeGuard = () =>
+      Promise.resolve({ headers: { 'X-Znx-RateLimit-Remaining': '99' } })
+    const otherHeaderGuard = () => Promise.resolve({ headers: { 'X-Znx-RateLimit-Limit': '100' } })
+
+    const combined = combineGuards([rateLimitLikeGuard, otherHeaderGuard])
+    const result = await combined({} as GuardContext)
+
+    assertEquals(result.response, undefined, 'neither guard denies — this must never short-circuit')
+    assertEquals(result.headers, {
+      'X-Znx-RateLimit-Remaining': '99',
+      'X-Znx-RateLimit-Limit': '100',
+    })
+  },
+)
+
+Deno.test(
+  'combineGuards: a later denial still wins even after an earlier guard already set headers',
+  async () => {
+    const headerGuard = () => Promise.resolve({ headers: { 'X-Znx-RateLimit-Remaining': '0' } })
+    const denyingGuard = () => Promise.resolve({ response: new Response(null, { status: 429 }) })
+
+    const combined = combineGuards([headerGuard, denyingGuard])
+    const result = await combined({} as GuardContext)
+
+    assert(result.response, 'the second guard denies — the combined guard must short-circuit')
+    assertEquals(result.response.status, 429)
+  },
+)
+
+Deno.test('combineGuards: no headers from any guard returns a bare {}, same as before', async () => {
+  const combined = combineGuards([allowAllGuard])
+  const result = await combined({} as GuardContext)
+
+  assertEquals(result, {})
+})
 
 // --- route methods, called directly (bypasses the router/guards, same "not testable through the
 // HTTP surface at this level" boundary the ffmpeg-backed functional suites cover instead) --------
@@ -129,6 +173,30 @@ Deno.test(
     assertEquals(calls[0].transformRequest, { kind: 'image' })
     assertEquals(calls[0].upload.contentType, 'image/jpeg')
     assertEquals(result, { ...fakeRecord({ kind: 'image' }) })
+  },
+)
+
+Deno.test(
+  'createImageAsset: a controller built with imageOptimizeOptions forwards it as ' +
+    'transformRequest.options on every upload — never a per-request query param',
+  async () => {
+    const { service, calls } = createSpyAssetService()
+    const ControllerClass = createAssetsController({
+      service,
+      prefix: 'assets-image-options-test',
+      guards: { write: [allowAllGuard], read: [allowAllGuard] },
+      imageOptimizeOptions: { breakpoints: [400, 1200] },
+    })
+    const ctx = mockHandlerContext({ req: uploadRequest('image/jpeg') })
+    const controller = new ControllerClass(ctx)
+
+    await controller.createImageAsset(ctx)
+
+    assertEquals(calls.length, 1)
+    assertEquals(calls[0].transformRequest, {
+      kind: 'image',
+      options: { breakpoints: [400, 1200] },
+    })
   },
 )
 

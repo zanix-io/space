@@ -27,6 +27,7 @@ import {
 import type { VoiceAudioTransformOptions } from '../media/audio/policies/voice.ts'
 import { VIDEO_TRANSFORM_POLICY_VERSION } from '../media/cached-video-transcoder.ts'
 import type { VideoBreakpointName } from '../media/video-breakpoints.ts'
+import type { ImagesOptimizeOptions } from '../assets/image-optimize-types.ts'
 import { buildOriginalStorageKey, buildVariantStorageKey } from './keys.ts'
 import { readAllBytes, readBoundedBytes } from './read-all-bytes.ts'
 import { matchesImageSignature } from './magic-bytes.ts'
@@ -52,9 +53,13 @@ export function createAssetService(options: AssetServiceOptions): AssetService {
 
   /**
    * The ONE place `AssetTransformRequest`'s real shape is read — everything above this function
-   * (`JobDispatcher`, `InlineJobDispatcher`) only ever sees `transformRequest` as `unknown`.
+   * (`JobDispatcher`, `InlineJobDispatcher`) only ever sees `transformRequest` as `unknown`. Always
+   * resolves to an ARRAY: every kind but `'image'` (with `options`) produces exactly one variant,
+   * but `'image'` alone can produce several — one per surviving breakpoint/format combination (see
+   * `runImageTransformation`'s own doc) — so the return shape is uniform across every kind rather
+   * than special-casing image at every call site.
    */
-  async function runTransformation(input: AssetTransformationJobInput): Promise<AssetVariant> {
+  async function runTransformation(input: AssetTransformationJobInput): Promise<AssetVariant[]> {
     const request = input.transformRequest as AssetTransformRequest
 
     const source = await storage.get(input.sourceKey)
@@ -67,23 +72,32 @@ export function createAssetService(options: AssetServiceOptions): AssetService {
 
     switch (request.kind) {
       case 'audio':
-        return await runVoiceTransformation(
-          input.assetId,
-          input.sourceKey,
-          sourceBytes,
-          source.object.contentType,
-          request.options,
-        )
+        return [
+          await runVoiceTransformation(
+            input.assetId,
+            input.sourceKey,
+            sourceBytes,
+            source.object.contentType,
+            request.options,
+          ),
+        ]
       case 'image':
-        return await runImageTransformation(input.assetId, sourceBytes, source.object.contentType)
-      case 'video':
-        return await runVideoTransformation(
+        return await runImageTransformation(
           input.assetId,
-          input.sourceKey,
           sourceBytes,
           source.object.contentType,
           request.options,
         )
+      case 'video':
+        return [
+          await runVideoTransformation(
+            input.assetId,
+            input.sourceKey,
+            sourceBytes,
+            source.object.contentType,
+            request.options,
+          ),
+        ]
       default: {
         // Exhaustiveness guard — mirrors `system-ffmpeg-audio-transcoder.ts`'s own pattern. Now
         // checked against the whole `request` (every member handled above narrows it to `never`
@@ -181,19 +195,38 @@ export function createAssetService(options: AssetServiceOptions): AssetService {
     'video/mp4': '.mp4',
     'video/webm': '.webm',
   }
-  /** `AssetTransformRequest`'s `'image'` member takes no options — see that type's own doc. Not a
-   * real cache-relevant policy axis (`transformImage(..., true)` never changes shape), kept only
-   * so `AssetVariant.policyVersion` has a real, bumpable value if that ever changes. */
+  /** Applied when `AssetTransformRequest`'s `'image'` member carries no `options` — the bare
+   * in-place recompress, unchanged since before `options` existed on this member. */
   const IMAGE_TRANSFORM_POLICY_VERSION = 'v1'
+  /** Applied whenever `options` IS given — a materially different contract from the bare case (a
+   * caller-configured breakpoint/format policy, potentially producing several variants from one
+   * upload instead of exactly one), so it gets its own version rather than silently sharing `v1`. */
+  const IMAGE_TRANSFORM_POLICY_VERSION_WITH_OPTIONS = 'v2'
 
   /**
-   * `AssetTransformer.transformImage(relativePath, bytes, true)` — the simplest case (optimize in
-   * place, no responsive breakpoints/format conversion). `sharp` detects the real source format
-   * from the BYTES themselves (confirmed reading `image-optimize.ts`), so `relativePath`'s
-   * extension only affects the returned entry's own labeling/content-type resolution here, never
-   * the actual transform — but it still has to be the REAL one, not a hardcoded guess, for
-   * `contentTypeFor()` below to resolve correctly. `optimizeImageAsset` already applies its own
-   * "never worsen" comparison internally (`pickSmaller`) — nothing extra to handle here for that.
+   * `AssetTransformer.transformImage(relativePath, bytes, options ?? true)`. `sharp` detects the
+   * real source format from the BYTES themselves (confirmed reading `image-optimize.ts`), so
+   * `relativePath`'s extension only affects the returned entries' own labeling/content-type
+   * resolution here, never the actual transform — but it still has to be the REAL one, not a
+   * hardcoded guess, for `contentTypeFor()` below to resolve correctly. `optimizeImageAsset` already
+   * applies its own "never worsen" comparison internally (`pickSmaller`) — nothing extra to handle
+   * here for that.
+   *
+   * Two shapes, per `options`:
+   * - **Omitted** (the common case) — `transformImage` always returns exactly one entry (the
+   *   source, recompressed in place only if strictly smaller). That entry becomes the one variant
+   *   this function has always returned, byte-for-byte the same behavior as before `options`
+   *   existed on this member.
+   * - **Given** — `transformImage` returns the UNCHANGED original as its first entry (already
+   *   covered by `AssetRecord.storageKey`, which `createAsset()` persists before this function ever
+   *   runs, so it's never re-stored as a variant here) followed by zero or more derived
+   *   breakpoint/format entries, each already vetted by `optimizeImageAsset`'s own never-worsen
+   *   rule. Every derived entry becomes its own `AssetVariant`, so ONE upload can yield several
+   *   stored, independently downloadable variants (e.g. a resized "full" view alongside a distinct
+   *   thumbnail) — never one variant silently overwriting another. A `breakpoints` request whose
+   *   resize never beats the original in bytes (a source too small to shrink further) legitimately
+   *   yields zero derived variants, the same outcome `assetsPlugin`'s own build-time optimizer has
+   *   for an equally-unfavorable input.
    *
    * After the content-type allowlist check, also verifies the buffered bytes actually START WITH
    * `sourceContentType`'s real file signature (`matchesImageSignature`, `magic-bytes.ts`) — the
@@ -212,7 +245,8 @@ export function createAssetService(options: AssetServiceOptions): AssetService {
     assetId: string,
     sourceBytes: Uint8Array,
     sourceContentType: string,
-  ): Promise<AssetVariant> {
+    options?: ImagesOptimizeOptions,
+  ): Promise<AssetVariant[]> {
     const extension = IMAGE_EXTENSION_BY_CONTENT_TYPE[sourceContentType]
     if (!extension) {
       throw new HttpError('BAD_REQUEST', {
@@ -233,23 +267,65 @@ export function createAssetService(options: AssetServiceOptions): AssetService {
       })
     }
 
-    const [optimized] = await transformer.transformImage(`source${extension}`, sourceBytes, true)
-    const variantId = generateUUID()
-    const contentType = contentTypeFor(optimized.relativePath)
-    const storageKey = buildVariantStorageKey(assetId, variantId)
-    const object = await storage.put(storageKey, optimized.bytes, { contentType })
+    const entries = await transformer.transformImage(
+      `source${extension}`,
+      sourceBytes,
+      options ?? true,
+    )
 
-    return {
-      variantId,
-      kind: 'image',
-      format: extension.slice(1),
-      contentType,
-      storageKey,
-      size: object.size,
-      checksum: object.checksum,
-      transformId: 'image-optimize',
-      policyVersion: IMAGE_TRANSFORM_POLICY_VERSION,
+    if (!options) {
+      const [optimized] = entries
+      const variantId = generateUUID()
+      const contentType = contentTypeFor(optimized.relativePath)
+      const storageKey = buildVariantStorageKey(assetId, variantId)
+      const object = await storage.put(storageKey, optimized.bytes, { contentType })
+
+      return [{
+        variantId,
+        kind: 'image',
+        format: extension.slice(1),
+        contentType,
+        storageKey,
+        size: object.size,
+        checksum: object.checksum,
+        transformId: 'image-optimize',
+        policyVersion: IMAGE_TRANSFORM_POLICY_VERSION,
+      }]
     }
+
+    // `entries[0]` is the untouched original (see this function's own doc) — every entry AFTER it
+    // is a real, already-vetted derived variant.
+    const variants: AssetVariant[] = []
+    for (const entry of entries.slice(1)) {
+      const contentType = contentTypeFor(entry.relativePath)
+      const variantId = generateUUID()
+      const storageKey = buildVariantStorageKey(assetId, variantId)
+      // Sequential on purpose, mirroring `optimizeImageAsset`'s own sequential breakpoint loop,
+      // rather than adding unbounded upload-time storage concurrency for a handful of variants.
+      // deno-lint-ignore no-await-in-loop
+      const object = await storage.put(storageKey, entry.bytes, { contentType })
+
+      // `entry.relativePath` is always `<base>.<ext>` (no options given — unreachable here) or one
+      // of `<base>.<breakpointKey>.<ext>` / `<base>.<format>` / `<base>.<breakpointKey>.<format>`
+      // (see `image-optimize.ts`'s own key construction) — the trailing segment is always the real
+      // output extension, and a 3-segment key's middle segment is always the breakpoint identity.
+      const segments = entry.relativePath.split('.')
+      const outputExtension = segments[segments.length - 1]
+      const breakpointKey = segments.length === 3 ? segments[1] : undefined
+
+      variants.push({
+        variantId,
+        kind: 'image',
+        format: outputExtension,
+        contentType,
+        storageKey,
+        size: object.size,
+        checksum: object.checksum,
+        transformId: breakpointKey ? `image-${breakpointKey}` : 'image-format',
+        policyVersion: IMAGE_TRANSFORM_POLICY_VERSION_WITH_OPTIONS,
+      })
+    }
+    return variants
   }
 
   /**

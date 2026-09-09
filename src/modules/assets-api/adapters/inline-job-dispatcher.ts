@@ -25,8 +25,10 @@ export interface InlineJobDispatcherOptions {
   repository: AssetRepository
   /** Interprets one job's own `transformRequest` for real — the ONLY place that shape is known.
    * Supplied by `AssetService`, the layer that actually knows what `{kind:'audio',
-   * profile:'voice', ...}` means. */
-  runTransformation(input: AssetTransformationJobInput): Promise<AssetVariant>
+   * profile:'voice', ...}` means. Always resolves to an array — most kinds produce exactly one
+   * variant, but an image transform request carrying breakpoint/format `options` can produce
+   * several from one upload (see `AssetService`'s own `runImageTransformation` doc). */
+  runTransformation(input: AssetTransformationJobInput): Promise<AssetVariant[]>
 }
 
 /** Implements `JobDispatcher` by running the transform→store→repository-update chain synchronously
@@ -40,9 +42,9 @@ export function createInlineJobDispatcher(options: InlineJobDispatcherOptions): 
       await repository.update(input.assetId, { status: 'processing' })
 
       try {
-        const variant = await runTransformation(input)
+        const newVariants = await runTransformation(input)
         const asset = await repository.findById(input.assetId)
-        const variants = [...(asset?.variants ?? []), variant]
+        const variants = [...(asset?.variants ?? []), ...newVariants]
         await repository.update(input.assetId, { status: 'completed', variants })
       } catch (error) {
         // Deliberately swallowed here — see `JobDispatcher.dispatch`'s own doc: a transformation

@@ -82,7 +82,9 @@ The three write routes:
 
 - `POST /assets/audio?format=aac|opus` — uploads a `.wav` (`Content-Type: audio/wav` required) and
   transcodes it via the voice profile.
-- `POST /assets/image` — uploads a jpeg/png/webp and optimizes it in place.
+- `POST /assets/image` — uploads a jpeg/png/webp and optimizes it per the controller's own
+  `imageOptimizeOptions` (see "Image optimization policy" below), or in place with no resize when
+  that option is omitted.
 - `POST /assets/video?breakpoint=msm|mlg|dmd|dlg&format=mp4|webm` — uploads an mp4/webm and
   transcodes it at `breakpoint` (both query params optional; `breakpoint` defaults to `'mlg'`).
 
@@ -128,6 +130,38 @@ still accepted (`200`, the original is stored and downloadable), but the record 
 `status: 'failed'` and `error: { message: 'BAD_REQUEST' }`. This verification exists only for images
 today — audio (`.wav`) and video (mp4/webm) still trust their declared `Content-Type` header alone.
 
+### Image optimization policy
+
+`POST /assets/image` with no further configuration runs `AssetTransformer.transformImage(..., true)`
+— a bare in-place recompress at a fixed quality, never a resize. Configure
+`createAssetsController`'s own `imageOptimizeOptions` to apply a real breakpoint/format policy to
+every image upload that controller instance accepts:
+
+```ts
+createAssetsController({
+  service,
+  guards: { write: [authGuard], read: [authGuard] },
+  imageOptimizeOptions: { breakpoints: [400, 1200] }, // e.g. a thumbnail and a full view
+})
+```
+
+This is the exact same `ImagesOptimizeOptions` shape (`breakpoints`/`formats`/`quality`/`width`)
+`assetsPlugin`'s build-time `optimize.images` already uses — see `docs/assets.md`'s own walkthrough
+for what each shape produces. Given real `options`, one upload can produce SEVERAL stored,
+independently downloadable `AssetVariant`s — one per surviving breakpoint/format combination —
+instead of exactly one; the untouched original (already covered by `AssetRecord.storageKey`, stored
+before any transform runs) is never re-stored as a variant of its own, and a breakpoint whose resize
+never beats the original in bytes legitimately produces zero derived variants for that request, the
+same "never worsen" outcome the build-time optimizer already has.
+
+`imageOptimizeOptions` is deliberately a FIXED value applied to every upload through one controller
+instance — never a per-request query param the way `VideoUploadQueryRTO`/`VoiceUploadQueryRTO` let a
+caller pick `breakpoint`/`format` on `/assets/video`/`/assets/audio`. Extending that same
+caller-chosen shape to images would let any caller request an arbitrary combination of
+breakpoints/formats per upload, a real resource-abuse surface `'image'` has no product reason to
+accept by default; an operator who wants a fixed photo policy (e.g. a profile-photo upload endpoint
+that always produces the same full/thumbnail preset) configures it once, here.
+
 ### Lifecycle and querying an asset
 
 ```ts
@@ -152,7 +186,9 @@ record genuinely `'processing'` for longer.
 `VideoAssetVariant` / `ThumbnailAssetVariant` / `AudioAssetVariant`) — every member shares
 `variantId`/`format`/ `contentType`/`storageKey`/`size`/`checksum`/`transformId`/`policyVersion`
 (`AssetVariantBase`) plus its own kind-specific fields (e.g. `width`/`height` for
-image/video/thumbnail, `durationSeconds`/`channels`/`sampleRateHz` for audio).
+image/video/thumbnail, `durationSeconds`/`channels`/`sampleRateHz` for audio). Every kind produces
+exactly one variant per upload except image with `imageOptimizeOptions` configured (see "Image
+optimization policy" above), which can produce several.
 
 `:id` is always a real `generateUUID()` value minted server-side by `AssetService` — every route
 param validates it with `@IsUUID` (`AssetIdParamsRTO`), rejecting anything else (including a
@@ -166,10 +202,15 @@ production backend itself:
 
 - **`createInMemoryAssetStorage()` / `createInMemoryAssetRepository()`** — in-process `Map`-backed,
   for tests. Never persist across a process restart.
-- **`createLocalFilesystemAssetStorage(rootDir)`** — a real, disk-backed `AssetStorage`. Lets the
-  complete vertical slice (upload → transform → store → download) run locally with zero external
-  infra. It's a dev/test adapter, not the intended production object store; every key is confined to
-  `rootDir` (via `@zanix/helpers`'s `confinePath`) before touching disk.
+- **`createLocalFilesystemAssetStorage(rootDir, options?)`** — a real, disk-backed `AssetStorage`.
+  Lets the complete vertical slice (upload → transform → store → download) run locally with zero
+  external infra. It's a dev/test adapter, not the intended production object store; every key is
+  confined to `rootDir` (via `@zanix/helpers`'s `confinePath`) before touching disk.
+  `options.encrypt` (`AssetStorageEncryptSettings`), when set, encrypts bytes at rest — the same
+  opt-in `{ type: 'symmetric' | 'asymmetric', version? }` shape and `DATA_AES_KEY`/`DATA_RSA_PUB`/
+  `DATA_RSA_KEY` key-resolution convention `@zanix/datamaster/storage`'s `S3ObjectStorage` `encrypt`
+  option uses, reached independently rather than by importing that package. Omitted (the default):
+  bytes are written and read back exactly as given.
 - **S3, structurally, no adapter needed** — `S3ObjectStorage` (`@zanix/datamaster/storage`, a
   sibling package `@zanix/space` never imports) already has an identical `put`/`get`/`delete`/
   `exists` shape, so it satisfies `AssetStorage` as-is. A consuming application composes it in

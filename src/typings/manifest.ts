@@ -452,9 +452,10 @@ export interface SpaceAppConfig {
    * real composition (S3-backed storage, a Mongo-backed file registry, key rotation, ...) lives in
    * the consuming application's own bootstrap, wiring `@zanix/datamaster`'s `S3ObjectStorage`/
    * `MongoFileRepository` into `createAssetService({ storage, repository })` before ever reaching
-   * this field. `prefix`/`guards` forward as-is to `createAssetsController` — see
-   * `AssetsControllerOptions`'s own doc, in particular why every route denies-by-default until real
-   * `guards` are passed.
+   * this field. `prefix`/`guards`/`imageOptimizeOptions` forward as-is to `createAssetsController` —
+   * see `AssetsControllerOptions`'s own doc, in particular why every route denies-by-default until
+   * real `guards` are passed, and why `imageOptimizeOptions` is a fixed policy rather than a
+   * per-request query param.
    *
    * **Omitted entirely by default — no route registered, at zero cost**, same convention every
    * other opt-in feature in this manifest already follows.

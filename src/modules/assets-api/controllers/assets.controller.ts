@@ -26,16 +26,27 @@ export type { AssetsControllerOptions }
 
 /** Combines a guard list into ONE guard: runs each in order, short-circuiting on the first
  * denial. Empty/omitted lists fall back to `[denyAllGuard]` — the concrete mechanism behind
- * `AssetsControllerOptions.guards`'s own "never public by accident" contract. */
-function combineGuards(guards: MiddlewareGuard[] | undefined): MiddlewareGuard {
+ * `AssetsControllerOptions.guards`'s own "never public by accident" contract.
+ *
+ * Also merges `headers` from every guard that returns them, not just the one that (if any)
+ * short-circuits — `@zanix/auth`'s own `rateLimitGuard`, a realistic entry in `guards.read`/
+ * `guards.write`, attaches its `X-Znx-RateLimit-*` headers to a PASSING request too, not only to
+ * the 429 it returns once the limit is hit. `@Guard(writeGuard)`'s own decorator (this function's
+ * real caller) only ever sees ONE combined guard, so if this function discarded a passing guard's
+ * headers here, `@zanix/server`'s own header-merging (which happens one layer up, across every
+ * `@Guard(...)` on a method) would have nothing left of theirs to merge — later headers win on a
+ * key collision, matching `@zanix/server`'s own `overwrite: true` merge order for guard headers. */
+export function combineGuards(guards: MiddlewareGuard[] | undefined): MiddlewareGuard {
   const list = guards && guards.length > 0 ? guards : [denyAllGuard]
   return async (context, ...args) => {
+    const headers: Record<string, string> = {}
     for (const guard of list) {
       // deno-lint-ignore no-await-in-loop
       const result = await guard(context, ...args)
       if (result.response) return result
+      if (result.headers) Object.assign(headers, result.headers)
     }
-    return {}
+    return Object.keys(headers).length > 0 ? { headers } : {}
   }
 }
 
@@ -45,7 +56,10 @@ export interface AssetsControllerInstance extends ZanixController {
   createVoiceAsset(
     ctx: HandlerContext<{ search: VoiceUploadQueryRTO }>,
   ): Promise<Record<string, unknown>>
-  /** `POST /assets/image` — uploads a jpeg/png/webp and optimizes it in place. */
+  /** `POST /assets/image` — uploads a jpeg/png/webp and optimizes it per this controller's own
+   * `imageOptimizeOptions` (a fixed, operator-configured policy — see
+   * `AssetsControllerOptions.imageOptimizeOptions`'s own doc), or in place with no resize when
+   * that option is omitted. */
   createImageAsset(ctx: HandlerContext): Promise<Record<string, unknown>>
   /** `POST /assets/video` — uploads an mp4/webm and transcodes it at `breakpoint` (default
    * `'mlg'`). */
@@ -76,7 +90,7 @@ export interface AssetsControllerInstance extends ZanixController {
 export function createAssetsController(
   options: AssetsControllerOptions,
 ): new (context: HandlerContext) => AssetsControllerInstance {
-  const { service, prefix = 'assets' } = options
+  const { service, prefix = 'assets', imageOptimizeOptions } = options
   const writeGuard = combineGuards(options.guards?.write)
   const readGuard = combineGuards(options.guards?.read)
 
@@ -105,7 +119,9 @@ export function createAssetsController(
       const upload = readUploadedAssetFromRequest(ctx.req)
       const record = await service.createAsset({
         upload,
-        transformRequest: { kind: 'image' },
+        transformRequest: imageOptimizeOptions
+          ? { kind: 'image', options: imageOptimizeOptions }
+          : { kind: 'image' },
       })
       return { ...record }
     }

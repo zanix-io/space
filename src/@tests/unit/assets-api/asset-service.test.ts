@@ -156,6 +156,40 @@ function createImageTransformer(): AssetTransformer {
   }
 }
 
+/** A fake `AssetTransformer` for the image path exercising `AssetTransformRequest`'s `'image'`
+ * `options` field — mirrors `optimizeImageAsset`'s own real contract for the shapes this suite
+ * needs: called with `true` (no `options`), returns exactly one entry (the source, untouched);
+ * called with real `options`, returns the untouched original as `entries[0]` followed by one
+ * derived entry per requested breakpoint, each smaller than the source by construction — unless
+ * `emptyBreakpoints` is set, which simulates the real "never worsen" outcome where a breakpoint's
+ * own resize never beats the original in bytes and no derived entry is produced at all. */
+function createImageTransformerWithOptions(
+  config: { emptyBreakpoints?: boolean } = {},
+): AssetTransformer {
+  return {
+    transformImage: (relativePath, source, transformOptions) => {
+      if (transformOptions === true) return Promise.resolve([{ relativePath, bytes: source }])
+      const entries = [{ relativePath, bytes: source }]
+      if (!config.emptyBreakpoints) {
+        const dot = relativePath.lastIndexOf('.')
+        const base = relativePath.slice(0, dot)
+        const ext = relativePath.slice(dot + 1)
+        for (const breakpoint of transformOptions.breakpoints ?? []) {
+          const key = typeof breakpoint === 'number' ? `w${breakpoint}` : breakpoint
+          entries.push({
+            relativePath: `${base}.${key}.${ext}`,
+            bytes: source.slice(0, Math.max(1, source.byteLength - 1)),
+          })
+        }
+      }
+      return Promise.resolve(entries)
+    },
+    transformVideo: notUsed,
+    transformThumbnail: notUsed,
+    transformAudio: notUsed,
+  }
+}
+
 function jpegFixture(): Uint8Array {
   return new Uint8Array([0xff, 0xd8, 0xff, 1, 2, 3])
 }
@@ -629,6 +663,75 @@ Deno.test(
     assertEquals(record.status, 'failed')
     // See the "source vanished" test above for why this is the CODE, not the `meta.reason` text.
     assertEquals(record.error?.message, 'BAD_REQUEST')
+  },
+)
+
+Deno.test(
+  'createAsset: image upload with breakpoint options produces one derived variant per ' +
+    'breakpoint, and never re-stores the untouched original as a variant of its own',
+  async () => {
+    const storage = createInMemoryAssetStorage()
+    const repository = createInMemoryAssetRepository()
+    const service = createAssetService({
+      transformer: createImageTransformerWithOptions(),
+      storage,
+      repository,
+    })
+
+    const record = await service.createAsset({
+      upload: { stream: streamFrom(jpegFixture()), contentType: 'image/jpeg', filename: 'a.jpg' },
+      transformRequest: { kind: 'image', options: { breakpoints: [400, 1200] } },
+    })
+
+    assertEquals(record.status, 'completed')
+    assertEquals(record.variants.length, 2)
+    const [thumb, full] = record.variants
+    assertEquals(thumb.kind, 'image')
+    assertEquals(thumb.transformId, 'image-w400')
+    assertEquals(thumb.policyVersion, 'v2')
+    assertEquals(full.transformId, 'image-w1200')
+    assert(
+      new Set(record.variants.map((v) => v.storageKey)).size === 2,
+      'each breakpoint variant must have its own distinct storageKey',
+    )
+    const downloads = await Promise.all(
+      record.variants.map(async (variant) => {
+        assert(
+          variant.storageKey !== record.storageKey,
+          'a variant key must never equal the original',
+        )
+        return { transformId: variant.transformId, stored: await storage.get(variant.storageKey) }
+      }),
+    )
+    for (const { transformId, stored } of downloads) {
+      assert(stored, `variant ${transformId} must really be retrievable from storage`)
+    }
+
+    // The untouched original itself was never re-stored as a THIRD variant.
+    const originalDownload = await storage.get(record.storageKey)
+    assert(originalDownload, 'the original upload is still stored under its own key')
+  },
+)
+
+Deno.test(
+  'createAsset: image upload with breakpoint options whose resize never beats the original in ' +
+    'bytes yields zero derived variants — the same real "never worsen" outcome as build time',
+  async () => {
+    const storage = createInMemoryAssetStorage()
+    const repository = createInMemoryAssetRepository()
+    const service = createAssetService({
+      transformer: createImageTransformerWithOptions({ emptyBreakpoints: true }),
+      storage,
+      repository,
+    })
+
+    const record = await service.createAsset({
+      upload: { stream: streamFrom(jpegFixture()), contentType: 'image/jpeg' },
+      transformRequest: { kind: 'image', options: { breakpoints: [1200] } },
+    })
+
+    assertEquals(record.status, 'completed')
+    assertEquals(record.variants.length, 0)
   },
 )
 

@@ -11,6 +11,7 @@
 import type { AssetKind } from '../asset-transform/types.ts'
 import type { VoiceAudioFormat, VoiceAudioTransformOptions } from '../media/audio/policies/voice.ts'
 import type { VideoBreakpointName } from '../media/video-breakpoints.ts'
+import type { ImagesOptimizeOptions } from '../assets/image-optimize-types.ts'
 
 /** Re-exported because `AssetTransformRequest` (below) references it, and a type reachable from
  * this module's own public surface must itself be nameable from here — see `asset-transform/types.ts`
@@ -22,6 +23,11 @@ export type { AssetKind }
  * and a type reachable from this module's own public surface must itself be nameable from here —
  * not just from `@zanix/space/media`, where each is ALSO public. */
 export type { VideoBreakpointName, VoiceAudioFormat, VoiceAudioTransformOptions }
+/** Re-exported for the same reason as the two groups above — `AssetTransformRequest`'s `'image'`
+ * member (below) references it, and it's `sharp`-free (defined in `image-optimize-types.ts`, split
+ * from `image-optimize.ts` itself for exactly this reason), so re-exporting it here never pulls
+ * `sharp` into this module's own graph. */
+export type { ImagesOptimizeOptions }
 
 /**
  * Real lifecycle of one asset's own transformation — deliberately compatible with a FUTURE async
@@ -158,12 +164,16 @@ export interface AssetRecord {
  * supplies. `profile` is omitted too — it's already carried at the top level, so `options` never
  * repeats it.
  *
- * `'image'` takes no options — it always runs `AssetTransformer.transformImage(..., true)`, the
- * simplest case (optimize in place, no responsive breakpoints/format conversion — see
- * `asset-transformer.ts`'s own `ImagesOptimizeOptions` doc for what those would add). `'video'`
- * exposes only `breakpoint`/`format`, mirroring the audio member's own minimal, HTTP-caller-facing
- * surface — never `width`/`bitrateKbps`/`outputPath`, which stay `AssetService`'s own transform-time
- * decisions.
+ * `'image'`'s `options` is the real `ImagesOptimizeOptions` shape `assetsPlugin`'s build-time
+ * `optimize.images` already uses (`breakpoints`/`formats`/`quality`/`width`) — omitted entirely
+ * (the common case: no operator-configured policy), `AssetService` runs
+ * `AssetTransformer.transformImage(..., true)`, the bare in-place recompress with no resize. Unlike
+ * `'audio'`/`'video'`, this is never populated from a per-request query param — see
+ * `AssetsControllerOptions.imageOptimizeOptions`'s own doc for why image optimization is a fixed,
+ * operator-configured policy applied to every upload through one controller instance, rather than a
+ * caller-chosen one. `'video'` exposes only `breakpoint`/`format`, mirroring the audio member's own
+ * minimal, HTTP-caller-facing surface — never `width`/`bitrateKbps`/`outputPath`, which stay
+ * `AssetService`'s own transform-time decisions.
  */
 export type AssetTransformRequest =
   | {
@@ -171,5 +181,5 @@ export type AssetTransformRequest =
     profile: 'voice'
     options: Omit<VoiceAudioTransformOptions, 'outputPath' | 'profile'>
   }
-  | { kind: 'image' }
+  | { kind: 'image'; options?: ImagesOptimizeOptions }
   | { kind: 'video'; options?: { breakpoint?: VideoBreakpointName; format?: 'mp4' | 'webm' } }

@@ -89,7 +89,7 @@ Deno.test(
       repository,
       runTransformation: (input) => {
         received = input.transformRequest
-        return Promise.resolve(fakeVariant)
+        return Promise.resolve([fakeVariant])
       },
     })
 

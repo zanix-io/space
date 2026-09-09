@@ -65,6 +65,11 @@ export type {
   AudioAssetVariant,
   /** A variant produced by image optimization. */
   ImageAssetVariant,
+  /** Breakpoint/format/quality/width policy for image optimization — the same shape
+   * `assetsPlugin`'s build-time `optimize.images` uses, re-exported here since
+   * `AssetTransformRequest`'s `'image'` member and `AssetsControllerOptions.imageOptimizeOptions`
+   * both reference it. */
+  ImagesOptimizeOptions,
   /** A still-image thumbnail derived from a video or image asset. */
   ThumbnailAssetVariant,
   /** A variant produced by video transcoding at a given breakpoint/format. */
@@ -93,6 +98,7 @@ export type { AssetTransformationJobInput, JobDispatcher } from './ports/job-dis
 export { createInMemoryAssetStorage } from './adapters/in-memory-asset-storage.ts'
 export { createInMemoryAssetRepository } from './adapters/in-memory-asset-repository.ts'
 export { createLocalFilesystemAssetStorage } from './adapters/local-filesystem-asset-storage.ts'
+export type { AssetStorageEncryptSettings } from './adapters/local-filesystem-asset-storage.ts'
 export { createAssetRepositoryOverFiles } from './adapters/asset-repository-over-files.ts'
 export type {
   CreateFileInputLike,

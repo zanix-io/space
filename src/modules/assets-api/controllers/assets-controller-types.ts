@@ -14,6 +14,7 @@
 
 import type { MiddlewareGuard } from '@zanix/server'
 import type { AssetService } from '../asset-service-types.ts'
+import type { ImagesOptimizeOptions } from '../../assets/image-optimize-types.ts'
 
 /** Options for `createAssetsController`. */
 export interface AssetsControllerOptions {
@@ -31,4 +32,22 @@ export interface AssetsControllerOptions {
     write?: MiddlewareGuard[]
     read?: MiddlewareGuard[]
   }
+  /**
+   * A fixed image breakpoint/format policy applied to every `POST /assets/image` upload accepted
+   * by THIS controller instance. Omitted (the default): every upload gets the bare in-place
+   * recompress, exactly as if this field didn't exist.
+   *
+   * Deliberately a fixed, operator-configured value here — never a per-request query param the
+   * way `VideoUploadQueryRTO`/`VoiceUploadQueryRTO` let a caller pick `breakpoint`/`format` on
+   * `/assets/video`/`/assets/audio`. Those two routes already accept that an authenticated caller
+   * can request a specific, bounded amount of transcode work per upload; extending the identical
+   * shape to images would let a caller ask for an arbitrary combination of breakpoints/formats on
+   * every request, a real resource-abuse surface `'image'` has no product reason to accept. Every
+   * known real integrator of this controller wants exactly one photo policy applied uniformly
+   * (e.g. a profile-photo upload endpoint that always produces the same full/thumbnail preset) —
+   * a fixed value here covers that directly, with no configurability an integrator doesn't need.
+   * A future integrator that genuinely needs per-request image policy is a real, separate design
+   * decision, not a default this field should silently grow into.
+   */
+  imageOptimizeOptions?: ImagesOptimizeOptions
 }

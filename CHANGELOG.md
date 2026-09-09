@@ -5,25 +5,57 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [1.8.0] - 2026-09-07
+## [1.10.0] - 2026-09-08
+
+### Fixed
+
+- **`createAssetsController`'s internal `combineGuards` (now exported, for testability) no longer
+  discards a passing guard's own `headers`** — it previously only ever propagated `.headers` from
+  whichever guard (if any) short-circuited the chain with a denial, silently dropping any header a
+  guard set on a request it otherwise let through. `@zanix/auth`'s `rateLimitGuard` is a realistic
+  entry in `guards.read`/`guards.write` and attaches its own `X-Znx-RateLimit-*` headers to a
+  PASSING request too (not only the 429 it returns once the limit is hit) — those headers never
+  reached the real response before this fix, since `@Guard(writeGuard)`/`@Guard(readGuard)` each see
+  only ONE already-combined guard, with nothing left of a discarded guard's headers for
+  `@zanix/server`'s own per-decorator header merging to pick up one layer up.
 
 ### Added
 
-- **`defineComet` accepts an optional third `name` argument, overriding `Component.name`** — closes
-  a real, confirmed production defect: a Comet whose component is a named function _expression_
-  returned from a factory (e.g. `@zanix/space-ui`'s own `NavDrawer`,
-  `function
-  createNavDrawer() { return function NavDrawer() {...} }`) has no top-level declaration
-  protecting that name, so `zanix space build`'s default minification and its `--obfuscate` pass can
-  each strip it — `Component.name` comes back empty inside the client's own bundled chunk, and
-  `defineComet`'s existing guard throws during that chunk's own module evaluation. The initial
-  server-rendered HTML still looks correct (every `data-comet-*` attribute present), but hydration
-  never completes and nothing reaches the page's own console (the rejection is caught and logged
-  separately, by `hydrateComets`'s `.catch()`, well after the boundary has already failed). The
-  exact same component already worked under `--no-minify`/`zanix space dev`, since neither renames
-  identifiers — pass the real export name explicitly
-  (`defineComet(Component, sourceUrl, 'ComponentName')`) for a factory-returned component instead of
-  relying on its runtime `.name` to survive a production build.
+- **`AssetTransformRequest`'s `'image'` member accepts an optional `options: ImagesOptimizeOptions`
+  field** (`@zanix/space/assets-api`) — the same breakpoint/format/quality/width shape
+  `assetsPlugin`'s build-time `optimize.images` already uses. Omitted (the default), `AssetService`
+  runs `AssetTransformer.transformImage(..., true)` exactly as before — a bare in-place recompress,
+  no resize, byte-for-byte the same behavior every existing caller already gets. Given real
+  `options`, `AssetService.createAsset()` can produce several stored, independently downloadable
+  `AssetVariant`s from one upload — one per surviving breakpoint/format combination — instead of
+  exactly one; the untouched original (already covered by `AssetRecord.storageKey`) is never
+  re-stored as a variant of its own, and a breakpoint whose resize never beats the original in bytes
+  legitimately yields zero derived variants, the same "never worsen" outcome `optimizeImageAsset`
+  already has at build time.
+- **`createAssetsController`'s own `AssetsControllerOptions` accepts an optional
+  `imageOptimizeOptions: ImagesOptimizeOptions` field**, applied to every `POST /assets/image`
+  upload accepted by that controller instance. Deliberately a fixed, operator-configured value
+  rather than a per-request query param the way `VideoUploadQueryRTO`/`VoiceUploadQueryRTO` let a
+  caller pick `breakpoint`/`format` on `/assets/video`/`/assets/audio` — extending that same shape
+  to images would let any caller request an arbitrary combination of breakpoints/formats per upload,
+  a real resource-abuse surface `'image'` has no product reason to accept by default. Every known
+  integrator wants exactly one photo policy applied uniformly to every upload through a given
+  controller instance, which a fixed value covers directly. Forwarded as-is through
+  `SpaceAppConfig.assetsApi` (`defineSpaceApp`), alongside `prefix`/`guards`.
+- **`createLocalFilesystemAssetStorage` accepts an optional second `options.encrypt` argument**,
+  encrypting bytes at rest — `{ type: 'symmetric' | 'asymmetric', version? }`, the same opt-in shape
+  `@zanix/datamaster/storage`'s `S3ObjectStorage` `encrypt` option has, reached independently rather
+  than by importing that package (`assets-api` never does). `'symmetric'` encrypts bytes directly
+  with `DATA_AES_KEY`; `'asymmetric'` wraps a random per-object AES key with `DATA_RSA_PUB`/
+  `DATA_RSA_KEY` and carries the wrapped key in the object's own sidecar `.meta.json` file, the
+  local-disk equivalent of the S3 object metadata `S3ObjectStorage` carries the same fields as. A
+  missing required key throws rather than silently storing plaintext. Omitted (the default): bytes
+  are written and read back exactly as given, unchanged from before this option existed. New
+  `AssetStorageEncryptSettings` export.
+
+## [1.9.0] - 2026-09-08
+
+### Added
 
 - **`SpaceAppConfig`/`defineSpaceApp` now accept an optional `behaviors` field, forwarded through to
   the underlying `defineZanixApp()` call** — closes a real gap: `@zanix/app`'s own
@@ -57,6 +89,28 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
   (`resetMessagesCache`, also newly exported from the same entry point), so a consumer's test gets a
   supported seam instead of the only prior workaround — running a real `zanix space build` before
   `deno test`, an undocumented, easy-to-miss prerequisite with no error pointing at it when skipped.
+
+## [1.8.0] - 2026-09-07
+
+### Added
+
+- **`defineComet` accepts an optional third `name` argument, overriding `Component.name`** — closes
+  a real, confirmed production defect: a Comet whose component is a named function _expression_
+  returned from a factory (e.g. `@zanix/space-ui`'s own `NavDrawer`,
+  `function
+  createNavDrawer() { return function NavDrawer() {...} }`) has no top-level declaration
+  protecting that name, so `zanix space build`'s default minification and its `--obfuscate` pass can
+  each strip it — `Component.name` comes back empty inside the client's own bundled chunk, and
+  `defineComet`'s existing guard throws during that chunk's own module evaluation. The initial
+  server-rendered HTML still looks correct (every `data-comet-*` attribute present), but hydration
+  never completes and nothing reaches the page's own console (the rejection is caught and logged
+  separately, by `hydrateComets`'s `.catch()`, well after the boundary has already failed). The
+  exact same component already worked under `--no-minify`/`zanix space dev`, since neither renames
+  identifiers — pass the real export name explicitly
+  (`defineComet(Component, sourceUrl, 'ComponentName')`) for a factory-returned component instead of
+  relying on its runtime `.name` to survive a production build.
+
+### Fixed
 
 - **A fragment response's own streaming Suspense reveal script (React's `$RC`/`$RB`) carried no
   `nonce` attribute at all, silently rejected by `orbit.ts`'s own nonce-verification gate

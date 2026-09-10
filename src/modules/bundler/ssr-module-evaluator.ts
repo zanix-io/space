@@ -13,6 +13,21 @@ import { resolveDenoAt } from './deno-specifier-resolver.ts'
 const REQUIRES_LOADER_RESOLUTION = new Set(['preact/debug', 'preact/devtools'])
 
 /**
+ * The specifier {@linkcode RealImportEvaluator.runExternalModule} hands to a real `import()`, given
+ * `resolveDenoAt`'s result for the same lookup. See that method's own doc, at its call site, for why
+ * a local-file result needs converting back to a `file://` URL rather than being passed through as
+ * the plain filesystem path `resolveDenoAt` returns it as. Extracted into its own pure function so
+ * this conversion is unit-testable without a real `import()` call.
+ */
+export function resolvedImportTarget(
+  resolved: { id: string; isLocalFile: boolean } | null,
+  fallbackSpecifier: string,
+): string {
+  if (resolved === null) return fallbackSpecifier
+  return resolved.isLocalFile ? toFileUrl(resolved.id).href : resolved.id
+}
+
+/**
  * Replaces Vite's own default SSR module evaluator (`ESModulesEvaluator`, from
  * `vite/module-runner` — the one `server.ssrLoadModule()` uses internally, via
  * `SSRCompatModuleRunner`, with no way to swap it out) for exactly one reason: its
@@ -217,6 +232,20 @@ export class RealImportEvaluator implements ModuleEvaluator {
     // whole method exists to route around), while the original, possibly `jsr:`-qualified text
     // (`'jsr:@zanix/space@^1.0.0/comet'`) always resolves via Deno's own generic JSR mechanism
     // regardless of any import map, the same safety net this evaluator always had.
-    return import(resolved?.id ?? specifier)
+    //
+    // `resolved.id` is a PLAIN FILESYSTEM PATH, never a URL, whenever `isLocalFile` is true —
+    // `resolveDenoAt` runs it through `fileURLToPath` itself (see that function's own doc). A bare
+    // `/Users/...`-style path resolves correctly through `import()` only when THIS module's own
+    // base URL already happens to be `file://`: a specifier starting with `/` resolves as an
+    // absolute PATH against the calling module's own origin, per the WHATWG URL spec `import()`
+    // follows. Under a real global `@zanix/cli` install (`jsr:@zanix/cli@<version>`), this
+    // package's own code runs from a REMOTE `https://jsr.io/...` origin instead, so the identical
+    // bare path resolves to `https://jsr.io/Users/...` and throws `Module not found`. `toFileUrl`
+    // converts it to a real `file://` URL first — the one shape that resolves identically
+    // regardless of which origin the calling module was itself loaded from. A non-local result
+    // (`isLocalFile: false`, a `jsr:`/`http(s):` string `resolveDenoAt` already left fully
+    // qualified) passes through unchanged.
+    const target = resolvedImportTarget(resolved, specifier)
+    return import(target)
   }
 }

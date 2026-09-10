@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.10.3] - 2026-09-10
+
+### Fixed
+
+- **`Module not found "https://jsr.io/<absolute-filesystem-path>"` under a real global `@zanix/cli`
+  install, for any specifier `runExternalModule` routes through `resolveDenoAt`'s loader-based
+  resolution (`preact/debug`/`preact/devtools`, or any `@zanix/*` specifier).** `resolveDenoAt`
+  returns a local result's `id` as a plain filesystem path, never a URL. Handing that path straight
+  to `import()` resolves correctly only when the calling module's own base URL is already `file://`:
+  a specifier starting with `/` resolves as an absolute path against the calling module's own
+  origin. A real global `@zanix/cli` install runs from a remote `https://jsr.io/...` origin instead,
+  so the identical bare path resolves against that origin and throws `Module not
+  found`.
+  `RealImportEvaluator.runExternalModule` now converts a local result back to a real `file://` URL
+  (via the new, unit-tested `resolvedImportTarget`) before handing it to `import()` — the one shape
+  that resolves identically regardless of which origin the calling module itself was loaded from.
+
 ## [1.10.2] - 2026-09-09
 
 ### Added

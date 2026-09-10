@@ -40,7 +40,23 @@ export function toValidatablePayload(body: unknown): Record<string, unknown> {
   if (body instanceof FormData) {
     const flattened: Record<string, unknown> = {}
     for (const [key, value] of body.entries()) {
-      if (typeof value === 'string') flattened[key] = value
+      if (typeof value !== 'string') continue
+      // A key seen once stays a plain string — every existing single-value field (`displayName`,
+      // `birthDate`, ...) keeps resolving exactly as before this loop started deduplicating repeats.
+      // A key seen AGAIN (the real multi-checkbox case, e.g. `name="objectives"` repeated once per
+      // checked box) becomes a real array instead of silently overwriting the previous occurrence —
+      // `FormData.entries()` yields one pair per checked box, in the same order they were submitted,
+      // so accumulating here is what actually preserves all of them, not just the last. This is the
+      // one place that array has to originate: a `FormData` value is never anything but a string or
+      // a `File` on its own, and `@zanix/validator`'s own `{ each: true }` fields are written against
+      // a real array input.
+      if (key in flattened) {
+        const existing = flattened[key]
+        if (Array.isArray(existing)) existing.push(value)
+        else flattened[key] = [existing as string, value]
+      } else {
+        flattened[key] = value
+      }
     }
     return flattened
   }

@@ -26,11 +26,15 @@ export interface AssetsControllerOptions {
   /**
    * Per-operation-group guards. Each group defaults to `[denyAllGuard]` when omitted or empty —
    * never to "no guard at all." `write` gates every `POST` route (`/assets/audio`,
-   * `/assets/image`, `/assets/video`); `read` gates every `GET` route.
+   * `/assets/image`, `/assets/video`); `read` gates every `GET` route; `delete` gates
+   * `DELETE /assets/:id` — kept separate from `write` since a real integrator's ownership check
+   * for "may upload a new asset" and "may remove THIS one" is routinely different (e.g. only the
+   * asset's own uploader, not merely any authenticated session).
    */
   guards?: {
     write?: MiddlewareGuard[]
     read?: MiddlewareGuard[]
+    delete?: MiddlewareGuard[]
   }
   /**
    * A fixed image breakpoint/format policy applied to every `POST /assets/image` upload accepted

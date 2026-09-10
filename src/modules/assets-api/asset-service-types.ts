@@ -105,4 +105,10 @@ export interface AssetService {
   ): Promise<
     { stream: ReadableStream<Uint8Array>; contentType: string; size: number } | undefined
   >
+  /** Deletes an asset's own record and every stored byte object it owns — the original upload and
+   * each variant's own `storageKey`, deduplicated (the "never-worsened" transform case reuses the
+   * original's own key for a variant, which must not issue two deletes against the same object). A
+   * no-op when `id` doesn't exist, mirroring `AssetStorage.delete`'s own "deleting something
+   * already gone is not an error" convention rather than throwing. */
+  deleteAsset(id: string): Promise<void>
 }

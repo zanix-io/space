@@ -24,7 +24,7 @@ function createUnreachableAssetService(): AssetService {
   const fail = (): never => {
     throw new Error('AssetService must never be invoked when a guard denies the request')
   }
-  return { createAsset: fail, getAsset: fail, downloadVariant: fail }
+  return { createAsset: fail, getAsset: fail, downloadVariant: fail, deleteAsset: fail }
 }
 
 Deno.test(
@@ -146,6 +146,7 @@ function createSpyAssetService(
     },
     getAsset: () => Promise.resolve(undefined),
     downloadVariant: () => Promise.resolve(undefined),
+    deleteAsset: () => Promise.resolve(),
     ...overrides,
   }
   return { service, calls }
@@ -301,5 +302,53 @@ Deno.test(
 
     const error = await assertRejects(() => controller.downloadAsset(ctx), HttpError)
     assertEquals(error.status.code, 'NOT_FOUND')
+  },
+)
+
+Deno.test(
+  'deleteAsset: an unknown id throws a real NOT_FOUND HttpError — never calls ' +
+    'AssetService.deleteAsset for something that was never there',
+  async () => {
+    const { service } = createSpyAssetService({ getAsset: () => Promise.resolve(undefined) })
+    const ControllerClass = createAssetsController({
+      service,
+      prefix: 'assets-delete-not-found-test',
+      guards: { write: [allowAllGuard], read: [allowAllGuard], delete: [allowAllGuard] },
+    })
+    const ctx = mockHandlerContext({
+      payload: { params: { id: 'missing' } as AssetIdParamsRTO, search: {}, body: undefined },
+    })
+    const controller = new ControllerClass(ctx)
+
+    const error = await assertRejects(() => controller.deleteAsset(ctx), HttpError)
+    assertEquals(error.status.code, 'NOT_FOUND')
+  },
+)
+
+Deno.test(
+  'deleteAsset: a known id calls AssetService.deleteAsset with that id and returns an empty body',
+  async () => {
+    let deletedId: string | undefined
+    const { service } = createSpyAssetService({
+      getAsset: () => Promise.resolve(fakeRecord()),
+      deleteAsset: (id) => {
+        deletedId = id
+        return Promise.resolve()
+      },
+    })
+    const ControllerClass = createAssetsController({
+      service,
+      prefix: 'assets-delete-ok-test',
+      guards: { write: [allowAllGuard], read: [allowAllGuard], delete: [allowAllGuard] },
+    })
+    const ctx = mockHandlerContext({
+      payload: { params: { id: 'asset-1' } as AssetIdParamsRTO, search: {}, body: undefined },
+    })
+    const controller = new ControllerClass(ctx)
+
+    const result = await controller.deleteAsset(ctx)
+
+    assertEquals(deletedId, 'asset-1')
+    assertEquals(result, {})
   },
 )

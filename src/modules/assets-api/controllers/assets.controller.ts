@@ -14,7 +14,7 @@
  */
 
 import type { HandlerContext } from '@zanix/server'
-import { Controller, Get, Guard, Post, ZanixController } from '@zanix/server'
+import { Controller, Delete, Get, Guard, Post, ZanixController } from '@zanix/server'
 import type { MiddlewareGuard } from '@zanix/server'
 import { HttpError } from '@zanix/errors'
 import { readUploadedAssetFromRequest } from '../upload.ts'
@@ -77,6 +77,10 @@ export interface AssetsControllerInstance extends ZanixController {
    * DTO), the same "handler may return a full `Response`, used as-is" contract `@zanix/server`
    * already defines. */
   downloadAsset(ctx: HandlerContext<{ params: AssetIdParamsRTO }>): Promise<Response>
+  /** `DELETE /assets/:id` — removes the asset's own record and every stored byte object it owns
+   * (original + variants). `404` when `id` doesn't already resolve to a real asset, same
+   * not-found contract every other `:id` route here already has. */
+  deleteAsset(ctx: HandlerContext<{ params: AssetIdParamsRTO }>): Promise<Record<string, unknown>>
 }
 
 /**
@@ -93,6 +97,7 @@ export function createAssetsController(
   const { service, prefix = 'assets', imageOptimizeOptions } = options
   const writeGuard = combineGuards(options.guards?.write)
   const readGuard = combineGuards(options.guards?.read)
+  const deleteGuard = combineGuards(options.guards?.delete)
 
   @Controller({ prefix })
   class _AssetsController extends ZanixController {
@@ -185,6 +190,19 @@ export function createAssetsController(
           'Content-Length': String(download.size),
         },
       })
+    }
+
+    @Delete(':id', { Params: AssetIdParamsRTO })
+    @Guard(deleteGuard)
+    public async deleteAsset(
+      ctx: HandlerContext<{ params: AssetIdParamsRTO }>,
+    ): Promise<Record<string, unknown>> {
+      const record = await service.getAsset(ctx.payload.params.id)
+      if (!record) {
+        throw new HttpError('NOT_FOUND', { meta: { source: 'zanix', id: ctx.payload.params.id } })
+      }
+      await service.deleteAsset(ctx.payload.params.id)
+      return {}
     }
   }
 

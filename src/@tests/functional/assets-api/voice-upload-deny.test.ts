@@ -19,7 +19,7 @@ function createUnreachableAssetService(): AssetService {
   const fail = (): never => {
     throw new Error('AssetService must never be invoked when a guard denies the request')
   }
-  return { createAsset: fail, getAsset: fail, downloadVariant: fail }
+  return { createAsset: fail, getAsset: fail, downloadVariant: fail, deleteAsset: fail }
 }
 
 Deno.test({
@@ -51,6 +51,10 @@ Deno.test({
     const read = await fetch(`${baseUrl}/assets/some-id`)
     assertEquals(read.status, 403)
     await read.body?.cancel()
+
+    const remove = await fetch(`${baseUrl}/assets/some-id`, { method: 'DELETE' })
+    assertEquals(remove.status, 403)
+    await remove.body?.cancel()
 
     await webServerManager.stop([serverId])
   },

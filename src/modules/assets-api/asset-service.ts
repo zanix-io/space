@@ -484,5 +484,23 @@ export function createAssetService(options: AssetServiceOptions): AssetService {
         size: stored.object.size,
       }
     },
+
+    async deleteAsset(id: string): Promise<void> {
+      const record = await repository.findById(id)
+      if (!record) return
+
+      // Deduplicated — the never-worsened transform case (`runVoiceTransformation`/
+      // `runVideoTransformation`) points a variant's own `storageKey` straight at the original's,
+      // so deleting each key exactly once (rather than once per variant) never issues a second,
+      // redundant delete against the same object.
+      const storageKeys = new Set(
+        [record.storageKey, ...record.variants.map((variant) => variant.storageKey)],
+      )
+      for (const key of storageKeys) {
+        // deno-lint-ignore no-await-in-loop
+        await storage.delete(key)
+      }
+      await repository.delete(id)
+    },
   }
 }

@@ -1061,3 +1061,74 @@ Deno.test(
     assertEquals(record.status, 'completed', 'a genuine jpeg must never be rejected by the check')
   },
 )
+
+// --- deleteAsset ------------------------------------------------------------------------------
+
+Deno.test('deleteAsset: an unknown id is a no-op — never throws', async () => {
+  const storage = createInMemoryAssetStorage()
+  const repository = createInMemoryAssetRepository()
+  const service = createAssetService({ storage, repository })
+
+  await service.deleteAsset('does-not-exist')
+})
+
+Deno.test(
+  'deleteAsset: removes the record and every stored object — the original plus each distinct ' +
+    'variant storage key',
+  async () => {
+    const storage = createInMemoryAssetStorage()
+    const repository = createInMemoryAssetRepository()
+    const service = createAssetService({
+      transformer: createImageTransformerWithOptions(),
+      storage,
+      repository,
+    })
+
+    const record = await service.createAsset({
+      upload: { stream: streamFrom(jpegFixture()), contentType: 'image/jpeg' },
+      transformRequest: { kind: 'image', options: { breakpoints: [400] } },
+    })
+    assertEquals(record.variants.length, 1)
+    const variantKey = record.variants[0].storageKey
+    assert(variantKey !== record.storageKey, 'this fixture must produce a real, distinct variant')
+
+    assert(await storage.exists(record.storageKey), 'the original must exist before deleting')
+    assert(await storage.exists(variantKey), 'the variant must exist before deleting')
+
+    await service.deleteAsset(record.id)
+
+    assertEquals(await service.getAsset(record.id), undefined)
+    assertEquals(await storage.exists(record.storageKey), false)
+    assertEquals(await storage.exists(variantKey), false)
+  },
+)
+
+Deno.test(
+  "deleteAsset: a never-worsened variant reusing the original's own storageKey is deleted only " +
+    'once, not twice',
+  async () => {
+    const storage = createInMemoryAssetStorage()
+    const repository = createInMemoryAssetRepository()
+    const service = createAssetService({
+      transformer: createFakeTransformer('never-worsened'),
+      storage,
+      repository,
+    })
+
+    const record = await service.createAsset({
+      upload: { stream: streamFrom(wavFixture()), contentType: 'audio/wav', filename: 'voice.wav' },
+      transformRequest: { kind: 'audio', profile: 'voice', options: { format: 'aac' } },
+    })
+    assertEquals(record.variants.length, 1)
+    assertEquals(
+      record.variants[0].storageKey,
+      record.storageKey,
+      "this fixture must reuse the original's own storage key",
+    )
+
+    await service.deleteAsset(record.id)
+
+    assertEquals(await service.getAsset(record.id), undefined)
+    assertEquals(await storage.exists(record.storageKey), false)
+  },
+)

@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`AssetService.deleteAsset(id)` and `DELETE /assets/:id`** (`assets-api`). `AssetStorage`/
+  `AssetRepository` already had `delete` at the port level, but nothing in `AssetService` or
+  `createAssetsController` ever called it — every asset a consuming app created was permanent, with
+  no way to remove an orphaned or user-discarded upload. `deleteAsset` removes an asset's own record
+  and every stored byte object it owns (the original plus each distinct variant `storageKey`,
+  deduplicated so the never-worsened case — a variant that reuses the original's own key — is never
+  deleted twice), and is a no-op when `id` doesn't exist, mirroring `AssetStorage.delete`'s own
+  "deleting something already gone is not an error" convention. `createAssetsController`'s new
+  `guards.delete` option gates the new `DELETE /assets/:id` route separately from `guards.write`,
+  since a real integrator's ownership check for "may upload" and "may remove this one" is routinely
+  different.
+
+### Fixed
+
+- **A repeated `FormData` key (a real multi-checkbox field, `name="objectives"` appended once per
+  checked box) lost every value but the last before a page's own `action: { Body }` RTO ever saw
+  it.** `toValidatablePayload` flattened a submitted `<form>` body with `flattened[key] = value`
+  inside a plain `for...of body.entries()` loop — a later occurrence of the same key silently
+  overwrote the earlier one instead of accumulating. Fixed to collect a key seen more than once into
+  a real array (a key seen only once still resolves to a plain string, unchanged for every ordinary
+  single-value field) — the shape a validator field declared `{ each: true }` is written against.
+- **`Applying inline style violates the following Content Security Policy directive 'style-src'...`
+  on any `<style nonce>` element reached through a click-driven Orbit navigation.** `performSwap`
+  (`orbit.ts`) parses a destination fragment via `template.innerHTML`, which a browser only ever
+  reads a `<style>`/`<script>` element's own `nonce` ATTRIBUTE from — never honored by CSP, which
+  only checks the element's `.nonce` PROPERTY, set exactly once by `document.createElement` and
+  never reflected back from an attribute a browser parsed. `reviveFragmentScripts` already
+  re-creates every `<script>` this way, but nothing did the same for `<style>` — so any
+  component-rendered positioning `<style nonce>` (`Modal`/`Drawer`/`Popover`/`Tooltip`,
+  `@zanix/space-ui`) or this package's own built-in
+  `[data-comet],[data-space-outlet],[data-error-module]{display:contents}` rule threw this violation
+  the moment it was reached through a client-side navigation rather than a full page load — a raw
+  address-bar navigation never exercises `performSwap` at all, which is what let this ship
+  unnoticed. `reviveFragmentStyles`, `reviveFragmentScripts`'s new sibling, closes the gap with the
+  identical technique and the identical fragment-nonce verification gate.
+
 ## [1.10.3] - 2026-09-10
 
 ### Fixed

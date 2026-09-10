@@ -257,6 +257,46 @@ export function reviveFragmentScripts(
 }
 
 /**
+ * {@linkcode reviveFragmentScripts}'s sibling for `<style nonce>` elements — the identical CSP gap,
+ * confirmed live: a nonce-based `style-src` blocks EVERY `<style>` a fragment swap injects via
+ * `template.innerHTML` just as unconditionally as it blocks a `<script>` reached the same way (a
+ * nonce set through an HTML attribute a browser only ever PARSED, rather than one assigned as a
+ * real element property after `document.createElement`, is never honored by CSP — confirmed in a
+ * real Chrome, not assumed from spec text alone), yet this function's own module only ever revived
+ * `<script>` elements — a real, confirmed regression: `Modal`/`Drawer`/`Popover`/`Tooltip`'s own
+ * per-instance positioning `<style nonce>` element (`@zanix/space-ui`), and this package's own
+ * built-in `[data-comet],[data-space-outlet],[data-error-module]{display:contents}` global rule,
+ * both throw exactly this violation the moment either is reached through a CLICK-driven Orbit
+ * navigation (`onClick` → `swapOutlet` → `performSwap`) rather than a full page load — a raw
+ * address-bar navigation never exercises this code path at all, since it never goes through
+ * `template.innerHTML` in the first place, which is what let this ship unnoticed.
+ *
+ * Mirrors {@linkcode reviveFragmentScripts} exactly — same fragment-nonce gate (a `<style>` whose
+ * own nonce doesn't match `fragmentNonce` is left inert, never handed a fresh valid one, the
+ * identical CSP-protection reasoning that function's own doc already covers in full), same
+ * create-fresh-element-then-replace technique. No ordering concern to preserve here, unlike a
+ * classic inline script (which can run synchronously the instant it connects) — a `<style>`
+ * element's own rules simply apply once connected, in no way sensitive to WHEN relative to a
+ * sibling that happens beforehand.
+ */
+export function reviveFragmentStyles(
+  root: DocumentFragment,
+  fragmentNonce: string | undefined,
+): void {
+  const activeNonce = getActiveCspNonce()
+  for (const original of root.querySelectorAll('style')) {
+    if (fragmentNonce !== undefined && original.getAttribute('nonce') !== fragmentNonce) continue
+    const style = document.createElement('style')
+    for (const { name, value } of original.attributes) {
+      if (name !== 'nonce') style.setAttribute(name, value)
+    }
+    if (activeNonce !== undefined) style.nonce = activeNonce
+    style.textContent = original.textContent
+    original.replaceWith(style)
+  }
+}
+
+/**
  * Extracts the shared script-src/style-src nonce value from a raw `Content-Security-Policy` header
  * — this framework's own convention (every zero-config CSP default gives style-src the SAME
  * per-request nonce as script-src), so there's exactly one value to ever find. `undefined` when the
@@ -393,7 +433,12 @@ async function performSwap(href: string, replace: boolean): Promise<void> {
   // `extractCspNonce(cspHeader)` is THIS fragment's own declared nonce, straight off the same
   // response `cspHeader` already came from — never the active document's own (that's what a
   // revived script gets ASSIGNED, not what it's checked against).
-  reviveFragmentScripts(template.content, extractCspNonce(cspHeader))
+  const fragmentNonce = extractCspNonce(cspHeader)
+  reviveFragmentScripts(template.content, fragmentNonce)
+  // See `reviveFragmentStyles`'s own doc — the identical CSP gap for `<style nonce>` elements
+  // (component-rendered positioning styles, this package's own built-in comet-visibility rule),
+  // fixed the same way.
+  reviveFragmentStyles(template.content, fragmentNonce)
 
   // Registers each `persist`-tagged boundary's own `view-transition-name` — see
   // `comet-persist-transition.ts`'s own doc for the full mechanism. This MUST run before

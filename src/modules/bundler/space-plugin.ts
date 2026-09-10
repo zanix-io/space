@@ -39,6 +39,25 @@ export interface SpacePluginOptions {
    * identical in every respect.
    */
   renderer?: 'react' | 'preact'
+
+  /**
+   * Escape hatch for `renderer: 'preact'` only — disables `@preact/preset-vite`'s own devtools
+   * sub-plugin (Preact's dev-mode console warnings, and the browser DevTools extension's
+   * component-tree inspector) without needing a new `@zanix/space` release to do it. Left
+   * `undefined` — never forced to a default here — this defers entirely to `preact()`'s OWN
+   * default: enabled under `zanix space dev`, disabled under `zanix space build` (a production
+   * build never carries dev-only devtools code unless explicitly forced back on). Has no effect
+   * under `renderer: 'react'`.
+   *
+   * `runExternalModule`'s own doc (`ssr-module-evaluator.ts`) has the real mechanism this guards
+   * against: devtools' own entry-detection heuristic injects `import "preact/debug"` into
+   * whichever real route file it latches onto, and that specifier resolves through this package's
+   * own loader-based fallback rather than a plain `import()`. Set this to `false` only as a
+   * last-resort workaround if that resolution path itself turns out to be broken for a given
+   * project's own dependency setup — Fast Refresh/HMR (`@prefresh/vite`, a separate mechanism) is
+   * unaffected either way.
+   */
+  preactDevTools?: boolean
 }
 
 /**
@@ -112,7 +131,7 @@ export interface SpacePluginOptions {
  * ```
  */
 export function spacePlugin(options: SpacePluginOptions = {}): PluginOption[] {
-  const { renderer = 'react' } = options
+  const { renderer = 'react', preactDevTools } = options
   return [
     {
       name: 'zanix-space',
@@ -173,7 +192,15 @@ export function spacePlugin(options: SpacePluginOptions = {}): PluginOption[] {
     // interactivity). See `client-barrel-guard.ts`'s own doc for the measurement and for why this
     // cannot be a runtime assertion.
     clientBarrelGuardPlugin(renderer),
-    ...(renderer === 'preact' ? preact() : [
+    // `devToolsEnabled: options.preactDevTools` is passed through UNCHANGED, `undefined` included
+    // — never defaulted here — so an app that never sets `preactDevTools` keeps `preact()`'s OWN
+    // dev/prod default (enabled under `zanix space dev`, disabled under `zanix space build`)
+    // rather than this wrapper silently forcing devtools on in a production build.
+    // `ssr-module-evaluator.ts`'s own `runExternalModule` is what actually resolves the
+    // `preact/debug`/`preact/devtools` specifiers devtools' own injection needs, not disabling the
+    // feature; see that file's own doc for the real mechanism, and
+    // `SpacePluginOptions.preactDevTools`'s own doc for the consumer-facing override.
+    ...(renderer === 'preact' ? preact({ devToolsEnabled: preactDevTools }) : [
       ...react(),
       // Dynamic on purpose — see this function's own doc for why: this `import()` is never
       // evaluated at all when `renderer: 'preact'` picks the other branch above.

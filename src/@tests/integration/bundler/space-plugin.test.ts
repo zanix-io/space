@@ -1,6 +1,27 @@
 import { assert, assertFalse } from '@std/assert'
 import { spacePlugin } from 'modules/bundler/space-plugin.ts'
 
+/** `@preact/preset-vite`'s own devtools sub-plugin, found by its real name (`preact:devtools`)
+ * inside a real `spacePlugin({ renderer: 'preact' })` call — `configResolved` is what actually
+ * decides whether its `resolveId`/`transform` hooks stay on the plugin object, so a caller invokes
+ * it directly with a minimal, real-shaped config rather than asserting on construction-time state
+ * alone. */
+interface DevtoolsPluginShape {
+  name: string
+  configResolved: (config: { isProduction: boolean; plugins: unknown[] }) => void
+  resolveId?: unknown
+  transform?: unknown
+}
+
+function devtoolsPlugin(preactDevTools?: boolean): DevtoolsPluginShape {
+  const plugin = spacePlugin({ renderer: 'preact', preactDevTools }).find(
+    (p): p is DevtoolsPluginShape =>
+      typeof p === 'object' && p !== null && 'name' in p && p.name === 'preact:devtools',
+  )
+  assert(plugin, 'preact:devtools plugin not found')
+  return plugin
+}
+
 /** Real plugin names each renderer's own real npm package produces — read directly off a real
  * `spacePlugin()` call, not assumed (`@vitejs/plugin-react@6.0.5`/`@preact/preset-vite@2.10.6`,
  * the exact versions this package depends on). Used as the one reliable, renderer-diagnostic
@@ -99,5 +120,52 @@ Deno.test(
     const include = clientOptimizeDepsInclude('preact')
     assert(include.includes('@prefresh/core'), include.join(', '))
     assert(include.includes('@prefresh/utils'), include.join(', '))
+  },
+)
+
+Deno.test(
+  "spacePlugin: preactDevTools left unset defers to preact()'s OWN default — enabled in a dev " +
+    'build (isProduction: false), devtools keeps its resolveId/transform hooks after a real ' +
+    'configResolved call',
+  () => {
+    const plugin = devtoolsPlugin()
+    plugin.configResolved({ isProduction: false, plugins: [plugin] })
+    assert(plugin.resolveId, 'expected devtools resolveId hook to survive configResolved')
+    assert(plugin.transform, 'expected devtools transform hook to survive configResolved')
+  },
+)
+
+Deno.test(
+  "spacePlugin: preactDevTools left unset defers to preact()'s OWN default — disabled in a " +
+    'production build (isProduction: true), a real configResolved call strips its ' +
+    'resolveId/transform hooks even though this wrapper never set preactDevTools itself',
+  () => {
+    const plugin = devtoolsPlugin()
+    plugin.configResolved({ isProduction: true, plugins: [plugin] })
+    assertFalse('resolveId' in plugin, 'expected devtools resolveId hook to be removed')
+    assertFalse('transform' in plugin, 'expected devtools transform hook to be removed')
+  },
+)
+
+Deno.test(
+  'spacePlugin: preactDevTools: false lets a consumer disable devtools EVEN IN A DEV BUILD, ' +
+    'without a new @zanix/space release — a real configResolved call strips its ' +
+    'resolveId/transform hooks despite isProduction: false',
+  () => {
+    const plugin = devtoolsPlugin(false)
+    plugin.configResolved({ isProduction: false, plugins: [plugin] })
+    assertFalse('resolveId' in plugin, 'expected devtools resolveId hook to be removed')
+    assertFalse('transform' in plugin, 'expected devtools transform hook to be removed')
+  },
+)
+
+Deno.test(
+  'spacePlugin: preactDevTools: true forces devtools ON even in a production build — the ' +
+    'reverse override, for a project that genuinely wants it there',
+  () => {
+    const plugin = devtoolsPlugin(true)
+    plugin.configResolved({ isProduction: true, plugins: [plugin] })
+    assert(plugin.resolveId, 'expected devtools resolveId hook to survive configResolved')
+    assert(plugin.transform, 'expected devtools transform hook to survive configResolved')
   },
 )

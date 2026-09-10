@@ -142,6 +142,11 @@ export {
   /** Reads back which renderer this app was configured for. */
   getActiveRenderer,
 } from '../router/active-renderer.ts'
+export {
+  /** Reads back `defineSpaceApp({ preactDevTools })`'s own value — see
+   * `SpacePluginOptions.preactDevTools`'s own doc (`@zanix/space/vite`) for what it controls. */
+  getActivePreactDevTools,
+} from './preact-devtools-registry.ts'
 export type {
   /** Which renderer implementation an app installed — `'react'` or `'preact'`. */
   RendererKind,

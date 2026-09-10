@@ -522,6 +522,29 @@ export interface SpaceAppConfig {
    */
   renderer?: 'react' | 'preact'
   /**
+   * Escape hatch for `renderer: 'preact'` only — disables `@preact/preset-vite`'s own devtools
+   * sub-plugin (Preact's dev-mode console warnings, and the browser DevTools extension's
+   * component-tree inspector) without needing a new `@zanix/space` release to do it. Left
+   * `undefined` — never defaulted here — this defers entirely to `preact()`'s OWN default:
+   * enabled under `zanix space dev`, disabled under `zanix space build`. Has no effect under
+   * `renderer: 'react'`, and no effect on Fast Refresh/HMR (`@prefresh/vite`, a separate
+   * mechanism).
+   *
+   * Same two-places-by-design split `renderer` above documents for a build-vs-runtime concern:
+   * `zanix space dev`/`zanix space build` read this field back via `getActivePreactDevTools()`
+   * (`modules/dev/preact-devtools-registry.ts`) to build `spacePlugin({ preactDevTools })`
+   * themselves — a project with its own hand-written `vite.config.ts` sets
+   * `spacePlugin({ preactDevTools })` there directly instead.
+   *
+   * See {@linkcode RealImportEvaluator.runExternalModule}'s own doc (`ssr-module-evaluator.ts`,
+   * `@zanix/space`'s own bundler module) for the real mechanism this guards against: devtools'
+   * own entry-detection heuristic injects `import "preact/debug"` into whichever real route file
+   * it latches onto, and that specifier resolves through this package's own loader-based fallback
+   * rather than a plain `import()`. Set this to `false` only as a last-resort workaround if that
+   * resolution path itself turns out not to cover a given project's own dependency setup.
+   */
+  preactDevTools?: boolean
+  /**
    * What this app's own BUILT-IN error/not-found fallback (`DefaultErrorView`/`DefaultNotFoundView`)
    * renders when a route declares no `error.tsx`/`not-found.tsx` of its own. Defaults to `'view'` —
    * the same behavior as omitting this field entirely (a real, rendered HTML document, wrapped in

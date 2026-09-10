@@ -8,6 +8,10 @@ import {
 import { getSharedLoader } from './deno-loader.ts'
 import { resolveDenoAt } from './deno-specifier-resolver.ts'
 
+/** See {@linkcode RealImportEvaluator.runExternalModule}'s own doc for why ONLY these two go
+ * through `resolveDenoAt`'s loader-based resolution instead of a plain `import(specifier)`. */
+const REQUIRES_LOADER_RESOLUTION = new Set(['preact/debug', 'preact/devtools'])
+
 /**
  * Replaces Vite's own default SSR module evaluator (`ESModulesEvaluator`, from
  * `vite/module-runner` — the one `server.ssrLoadModule()` uses internally, via
@@ -168,18 +172,44 @@ export class RealImportEvaluator implements ModuleEvaluator {
   // `import()` of that resolved URL then hits Deno's own process-wide module cache and returns the
   // SAME instance the project's own code already loaded — never a second copy pinned to whatever
   // the running `zanix space dev` process happens to have cached for an unrelated project.
-  // Everything else (`react`/`preact`, an ordinary external like `node:async_hooks`) keeps the
-  // plain `import(specifier)` this evaluator always had: an npm package is already safe without
-  // this — Deno's own `nodeModulesDir: "auto"` flattens the SERVED PROJECT's whole dependency tree
-  // into one shared `node_modules`, so a bare `import('react')` already resolves to the same
-  // instance regardless of which config asked — and resolving it down to an already-expanded file
-  // path here would skip Deno's own built-in CJS-to-ESM interop for a bare npm specifier, a real,
-  // confirmed regression for exactly that case.
+  // Everything else `NATIVE_RUNTIME_MODULES` covers (`react`/`react-dom`/`preact`/`preact/hooks`,
+  // and any OTHER subpath of those a consumer writes and declares itself, like `react-dom/server`
+  // or `react-dom/client`) keeps the plain `import(specifier)` this evaluator always had: an npm
+  // package is already safe without the loader — Deno's own `nodeModulesDir: "auto"` flattens the
+  // SERVED PROJECT's whole dependency tree into one shared `node_modules`, so a bare
+  // `import('react')` already resolves to the same instance regardless of which config asked — and
+  // resolving it down to an already-expanded file path here would skip Deno's own built-in
+  // CJS-to-ESM interop for a bare npm specifier, a real, confirmed regression for exactly that case
+  // (`react`/`react-dom` ship real CJS, including in subpaths like `react-dom/server`; `preact`
+  // doesn't, but is kept on the same safe path for consistency with what it's already known to work
+  // with).
+  //
+  // `REQUIRES_LOADER_RESOLUTION` (`preact/debug`, `preact/devtools`) is the one deliberate,
+  // narrowly-scoped exception: a real, confirmed case where `@preact/preset-vite`'s own devtools
+  // sub-plugin injects `import "preact/debug"` directly into whichever real route file its own
+  // entry-detection heuristic latches onto, so the served project's own `deno.json` has no reason
+  // to ever declare a `"preact/debug"` entry — unlike `react-dom/server` above, the CONSUMER never
+  // wrote this import itself, so there's no declared-import path for a plain `import()` to succeed
+  // through. This module's own resolution scope is a REMOTE one in production (`@zanix/space`
+  // served from `jsr.io`), where Deno's native bare-specifier resolution has no local
+  // `node_modules` to walk for a subpath nothing in scope declares. Confirmed empirically: a plain
+  // `import("preact/debug")` from here throws `Import "preact/debug" not a dependency and not in
+  // import map`, the literal shape behind the `Module not found` crash this exception closes.
+  // `resolveDenoAt` avoids that failure mode entirely by resolving directly against the served
+  // project's own real, on-disk `node_modules` (following `preact`'s own package.json `exports`
+  // map itself) rather than relying on this module's own ambient specifier scope to already know
+  // about a subpath. This carries none of the CJS-interop risk above: both are real ESM.
+  //
+  // Falls back to a plain `import(specifier)` only when `resolveDenoAt` itself can't resolve the
+  // specifier (`resolved` stays `null`) — the same safety net this evaluator always had for
+  // whatever case its own loader genuinely doesn't cover.
   public async runExternalModule(filepath: string): Promise<unknown> {
     const specifier = fromNativeRuntimeSentinel(filepath)
     if (specifier === null) return import(filepath)
     const normalized = normalizeNativeRuntimeSpecifier(specifier)
-    if (!normalized.startsWith('@zanix/')) return import(specifier)
+    if (!normalized.startsWith('@zanix/') && !REQUIRES_LOADER_RESOLUTION.has(normalized)) {
+      return import(specifier)
+    }
     const loader = await getSharedLoader(this.#root)
     const resolved = await resolveDenoAt(normalized, loader, undefined)
     // Falls back to the ORIGINAL specifier, never `normalized` — a bare `'@zanix/space/comet'`

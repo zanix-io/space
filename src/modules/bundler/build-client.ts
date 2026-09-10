@@ -34,6 +34,7 @@ import {
   getOptimizeConfig,
 } from 'modules/assets/asset-registry.ts'
 import { getActiveRenderer, type RendererKind } from 'modules/router/active-renderer.ts'
+import { getActivePreactDevTools } from 'modules/dev/preact-devtools-registry.ts'
 import { getRoutesDir } from 'modules/router/routes-dir-registry.ts'
 import { getValidationConfig } from 'modules/validation/config-registry.ts'
 import type { Diagnostic, ValidationConfig } from 'modules/validation/mod.ts'
@@ -161,6 +162,13 @@ export interface BuildSpaceClientOptions {
    */
   renderer?: RendererKind
   /**
+   * Forwarded to {@linkcode spacePlugin} unchanged. Defaults to `getActivePreactDevTools()` — the
+   * SAME eagerly-set flag `defineSpaceApp({ preactDevTools })` populates (see that field's own
+   * doc, `typings/manifest.ts`), mirroring exactly how `renderer` above already defaults to
+   * `getActiveRenderer()`.
+   */
+  preactDevTools?: boolean
+  /**
    * Overrides how {@linkcode discoverPages} imports each page/layout module — forwarded to it
    * unchanged. Defaults to `discoverPages`'s own native `import()`, which is only correct when
    * this function runs inside the CONSUMING project's own process (a build script that `deno run`s
@@ -277,6 +285,7 @@ export async function buildSpaceClient(
     plugins = [],
     minify = true,
     renderer = getActiveRenderer(),
+    preactDevTools = getActivePreactDevTools(),
     validation = getValidationConfig(),
     sitemapLocations: explicitSitemapLocations,
     importModule,
@@ -556,7 +565,7 @@ export async function buildSpaceClient(
       // first anyway for the same reason `dev-engine.ts` lists `nativeRuntimeModulesPlugin` first.
       clientEntryPlugin({ renderer, entryId: resolvedClientEntry }),
       deno(),
-      ...spacePlugin({ renderer }),
+      ...spacePlugin({ renderer, preactDevTools }),
       cometPlugin({ knownEntryPaths: [...comets, ...errorBoundaryFiles, ...usedCometFiles] }),
       ...cssPlugin({ ...css, cometEntries, globalEntries, pageEntries }),
       ...(pwa ? [pwaPlugin(resolvePwaPluginOptions(pwa, root))] : []),

@@ -30,6 +30,7 @@ import { getSitemapManifest, loadSitemapManifest } from 'modules/seo/sitemap-man
 import { registerRobots } from 'modules/seo/robots.ts'
 import { getDevImportModule, setDevRoutesReloader } from 'modules/dev/dev-engine-registry.ts'
 import { isDevClientEnabled } from 'modules/dev/dev-client-registry.ts'
+import { setActivePreactDevTools } from 'modules/dev/preact-devtools-registry.ts'
 import { setActiveRenderer } from 'modules/router/active-renderer.ts'
 import { setErrorResponseFormat } from 'modules/router/error-response-format-registry.ts'
 import { getRoutesDir, setRoutesDir } from 'modules/router/routes-dir-registry.ts'
@@ -156,6 +157,7 @@ export function defineSpaceApp(config: SpaceAppConfig): ZanixAppDefinition {
     sitemap,
     robots,
     renderer,
+    preactDevTools,
     errorResponse,
     serialization,
     validation,
@@ -192,6 +194,13 @@ export function defineSpaceApp(config: SpaceAppConfig): ZanixAppDefinition {
   // at all, so without this, it would have no way to ever learn `renderer` was set to `'preact'`.
   const declaredRenderer = renderer ?? 'react'
   setActiveRenderer(declaredRenderer)
+  // Eager, same reasoning/timing as `renderer` immediately above — an external orchestrator
+  // (`zanix space dev`/`zanix space build`) reads this back via `getActivePreactDevTools()` to
+  // build `spacePlugin({ preactDevTools })` itself. Passed through UNCHANGED, `undefined`
+  // included — never defaulted here — so an app that never sets this field keeps
+  // `@preact/preset-vite`'s OWN dev/prod default; see `SpacePluginOptions.preactDevTools`'s own
+  // doc (`space-plugin.ts`) for what this actually controls.
+  setActivePreactDevTools(preactDevTools)
   // Eager, same reasoning/timing as `renderer` immediately above — `zanix space build`/
   // `zanix space dev` both need to know where this project's pages actually live BEFORE
   // discovering any of them (document validation, sitemap derivation), and neither call

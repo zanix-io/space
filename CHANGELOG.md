@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.10.2] - 2026-09-09
+
+### Added
+
+- **`defineSpaceApp({ preactDevTools })` / `spacePlugin({ renderer: 'preact', preactDevTools })`** —
+  a consumer-facing escape hatch for `@preact/preset-vite`'s own devtools sub-plugin (Preact's
+  dev-mode console warnings, and the browser DevTools extension's component-tree inspector). Left
+  unset, this defers entirely to `preact()`'s OWN default — enabled under `zanix space dev`,
+  disabled under `zanix space build` — so a project can now set it to `false` directly, without
+  waiting on a new `@zanix/space` release, if the loader-based resolution `runExternalModule`
+  (`ssr-module-evaluator.ts`) relies on for devtools' own injected `preact/debug`/`preact/devtools`
+  specifiers turns out not to cover its own particular dependency setup. Fast Refresh/HMR
+  (`@prefresh/vite`, a separate mechanism) is unaffected either way.
+
+### Fixed
+
+- **The hard
+  `Module not found "https://jsr.io/@zanix/space/<version>/src/modules/bundler/
+  preact/debug"`
+  crash under `renderer: 'preact'` could still happen after 1.10.1's own resolution fix.**
+  `@preact/preset-vite`'s own devtools sub-plugin injects `import "preact/debug"` into whichever
+  real route file its own entry-detection heuristic latches onto first — an ordinary, unavoidable
+  side effect of running under `renderer: 'preact'` at all, not specific to any one project's
+  layout. Vite's SSR module runner externalizes that bare specifier rather than transforming it,
+  which routes it through `RealImportEvaluator.runExternalModule` — this method previously called a
+  plain `import(specifier)` for anything that wasn't `@zanix/*`-prefixed, resolved against THIS
+  PACKAGE's own module scope (a remote `jsr.io` one in production). `preact/debug` isn't a specifier
+  this package's own manifest declares (only bare `preact`, needed for its own `mod-preact.ts`) — a
+  real consumer's `deno.json` has no reason to ever declare it either, since neither side wrote that
+  import itself — so this plain `import()` had nothing to resolve against and threw exactly this
+  crash. `runExternalModule` now resolves every native-runtime specifier (not just `@zanix/*` ones)
+  through `getSharedLoader`/`resolveDenoAt`, rooted at the SERVED PROJECT rather than this package's
+  own scope, which follows `preact`'s real package.json `exports` map directly against the project's
+  own, real, on-disk `node_modules` — confirmed live against the real published module
+  (`Import "preact/debug" not a dependency and not in import
+  map`, reproduced without the fix) and
+  fixed by a real, verified regression test covering this exact mechanism
+  (`ssr-module-evaluator.test.ts`).
+
 ## [1.10.1] - 2026-09-09
 
 ### Fixed

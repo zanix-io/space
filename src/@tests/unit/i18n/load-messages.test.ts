@@ -633,6 +633,51 @@ Deno.test(
 )
 
 Deno.test(
+  'loadMessages: outside dev mode, with a build dir configured, MULTIPLE compiled segment files ' +
+    'under {buildDir}/messages/{rootIndex}/{lang}/ merge correctly — segmentation composes with ' +
+    "the production build-dir path exactly like it does with messagesDir's own live-source path",
+  async () => {
+    reset()
+    const messagesDir = await withTempDir(async (dir) => {
+      // Live source — must be ignored entirely once a build dir is configured, in production.
+      await writeJson(join(dir, 'en', 'index.json'), { 'home/title': 'Live source (unused)' })
+    })
+    const buildDir = await withTempDir(async (dir) => {
+      // Mirrors what `zanix space build`'s own compiler (`@zanix/cli`'s `writeCompiledCatalogs`)
+      // actually produces for a segmented `messagesDir`: one compiled file per source segment,
+      // same relative path, each value now precompiled AST rather than a raw ICU string.
+      await writeJson(join(dir, 'messages', '0', 'en', 'index.json'), {
+        'home/title': [{ type: 0, value: 'Compiled home title' }],
+      })
+      await writeJson(join(dir, 'messages', '0', 'en', 'iam.json'), {
+        'login/submit': [{ type: 0, value: 'Compiled sign in' }],
+      })
+      await writeJson(join(dir, 'messages', '0', 'en', 'profile.json'), {
+        'profile/name': [{ type: 0, value: 'Compiled name' }],
+      })
+      // A population override, also compiled — must still overlay on top of the merged segments.
+      await writeJson(join(dir, 'messages', '0', 'en', 'populations', 'zanix.json'), {
+        'profile/name': [{ type: 0, value: 'Compiled Zanix name' }],
+      })
+    })
+    try {
+      setMessagesDir(messagesDir)
+      setMessagesBuildDir(buildDir)
+      const messages = await loadMessages({ lang: 'en', population: 'zanix' })
+      assertEquals(messages, {
+        'home/title': [{ type: 0, value: 'Compiled home title' }],
+        'login/submit': [{ type: 0, value: 'Compiled sign in' }],
+        // The population override wins over the segment it shadows — same precedence the live-
+        // source path already guarantees, now proven against compiled AST values too.
+        'profile/name': [{ type: 0, value: 'Compiled Zanix name' }],
+      })
+    } finally {
+      await cleanup(messagesDir, buildDir)
+    }
+  },
+)
+
+Deno.test(
   'loadMessages: under dev mode, a configured build dir is IGNORED — messagesDir is always read ' +
     'live, same as when no build dir is configured at all',
   async () => {

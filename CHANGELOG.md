@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.11.1] - 2026-09-10
+
+### Fixed
+
+- **`SpacePageController.cacheControl` now also accepts a function of the loader's resolved data and
+  the request's own `PageContext`, not just a fixed string** (`space-page-controller.ts`). A fixed
+  string can't express a caching policy that depends on per-request state — a session-gated page
+  needing `'private, no-cache'` for a signed-in visitor but `'no-store'` for an anonymous one had no
+  way to say so, short of disabling caching for everyone. This matters specifically because a
+  browser's own back/forward cache (bfcache) is gated on `Cache-Control: no-store` being present —
+  omitting the header entirely does NOT opt a response out of bfcache — so a page that must never be
+  served from bfcache once a session ends needs the function form to choose `no-store` deliberately,
+  not just "no header at all." `handleGet` now calls the option when it's a function, passing it the
+  loader's own resolved data and `pageCtx`, before falling into the existing ETag/`If-None-Match`
+  304 short-circuit unchanged — a function returning `undefined` disables caching for that response
+  exactly like omitting the field does for a page that never opts in.
+
 ## [1.11.0] - 2026-09-10
 
 ### Added

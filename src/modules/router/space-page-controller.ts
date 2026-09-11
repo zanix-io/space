@@ -199,8 +199,25 @@ export abstract class SpacePageController<
    * computed from `loader`'s resolved data (see `computeEtag`'s own doc for why not the rendered
    * HTML). A request whose `If-None-Match` matches gets a bodyless `304` instead of a full render.
    * Omit for a page with no HTTP caching.
+   *
+   * Also accepts a function of `loader`'s resolved data and the request's own `PageContext`, for a
+   * caching policy that depends on per-request state (e.g. whether a session is present) rather
+   * than a fixed value. Returning `undefined` means no `Cache-Control` for THIS response, same as
+   * omitting the field entirely. A browser's own back/forward cache (bfcache) is gated specifically
+   * on `Cache-Control: no-store` being present — omitting the header does not opt a response out of
+   * bfcache — so a session-gated page choosing between `'private, no-cache'` and `'no-store'` per
+   * request needs exactly this function form, not a fixed string.
    */
-  public static cacheControl?: string
+  // `(data: any, ctx: PageContext<unknown>)`, not `(data: unknown, ctx: PageContext<Params>)` — for
+  // the SAME reason `head`'s own function form below is `(data: any) => ...`: a static member can
+  // never reference its own class's type parameters (`Params` included), and a narrowed `data`
+  // parameter needs the same bivariant `any` `head` already documents. `PageContext<unknown>` is the
+  // established shape for exactly this situation — `RedirectConfig.condition` (`typings/page.ts`)
+  // already types its own static, per-page context parameter the same way.
+  public static cacheControl?:
+    | string
+    // deno-lint-ignore no-explicit-any
+    | ((data: any, ctx: PageContext<unknown>) => string | undefined)
   /**
    * Response headers for this page — `Content-Security-Policy` (via the `csp` field, defaulting to
    * a nonce-based policy safe with this framework's own inline initial-state script — see
@@ -351,7 +368,10 @@ export abstract class SpacePageController<
     try {
       const data = await this.loader?.(pageCtx)
 
-      const { cacheControl } = Ctor
+      const { cacheControl: cacheControlOption } = Ctor
+      const cacheControl = typeof cacheControlOption === 'function'
+        ? cacheControlOption(data, pageCtx as PageContext<unknown>)
+        : cacheControlOption
       if (cacheControl) {
         // `population` folded in ONLY when a theme resolver is configured — see `computeEtag`'s own
         // `extra` param doc for exactly what this does and does not fix (a same-origin ETag/304

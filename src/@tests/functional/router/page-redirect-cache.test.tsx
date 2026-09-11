@@ -138,3 +138,79 @@ Deno.test(
     assert((await response.text()).includes('cached'))
   },
 )
+
+Deno.test(
+  'SpacePageController.handleGet: cacheControl as a function derives its value from loader data and ctx',
+  async () => {
+    class SessionCachedPage extends SpacePageController {
+      public static override cacheControl = (
+        _data: unknown,
+        ctx: { session?: unknown },
+      ) => (ctx.session ? 'private, no-cache' : 'no-store')
+      public override component = View
+      public override loader = () => ({ value: 'session-aware' })
+    }
+
+    const anonymousCtx = mockHandlerContext()
+    const anonymousResponse = await new SessionCachedPage(anonymousCtx).handleGet(anonymousCtx)
+    assertEquals(anonymousResponse.headers.get('cache-control'), 'no-store')
+    await anonymousResponse.body?.cancel()
+
+    const sessionCtx = mockHandlerContext({
+      // deno-lint-ignore no-explicit-any
+      session: { userId: 'u1' } as any,
+    })
+    const sessionResponse = await new SessionCachedPage(sessionCtx).handleGet(sessionCtx)
+    assertEquals(sessionResponse.headers.get('cache-control'), 'private, no-cache')
+    await sessionResponse.body?.cancel()
+  },
+)
+
+Deno.test(
+  'SpacePageController.handleGet: cacheControl as a function returning undefined disables caching for that response',
+  async () => {
+    class ConditionallyCachedPage extends SpacePageController {
+      public static override cacheControl = () => undefined
+      public override component = View
+      public override loader = () => ({ value: 'uncached' })
+    }
+
+    const ctx = mockHandlerContext()
+    const response = await new ConditionallyCachedPage(ctx).handleGet(ctx)
+
+    assertEquals(response.status, 200)
+    assertEquals(response.headers.get('cache-control'), null)
+    assertEquals(response.headers.get('etag'), null)
+    assert((await response.text()).includes('uncached'))
+  },
+)
+
+Deno.test(
+  'SpacePageController.handleGet: a matching If-None-Match still short-circuits to 304 under the function form',
+  async () => {
+    class SessionCachedPage extends SpacePageController {
+      public static override cacheControl = () => 'private, no-cache'
+      public override component = View
+      public override loader = () => ({ value: 'session-aware' })
+    }
+
+    const first = await new SessionCachedPage(mockHandlerContext()).handleGet(
+      mockHandlerContext(),
+    )
+    const etag = first.headers.get('etag')
+    assert(etag)
+    await first.body?.cancel()
+
+    const secondCtx = mockHandlerContext({
+      req: new Request('http://localhost/', {
+        headers: { 'if-none-match': etag },
+      }),
+    })
+    const second = await new SessionCachedPage(secondCtx).handleGet(secondCtx)
+
+    assertEquals(second.status, 304)
+    assertEquals(second.headers.get('etag'), etag)
+    assertEquals(second.headers.get('cache-control'), 'private, no-cache')
+    assertEquals(await second.text(), '')
+  },
+)

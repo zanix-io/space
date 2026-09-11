@@ -83,8 +83,12 @@ export function shouldPrefetch(input: {
 /** A prefetched fragment's own resolved HTML, plus the SAME `Content-Security-Policy` header its
  * response carried — never discarded the way it used to be (a plain `response.text()`), since
  * `swapOutlet` (`orbit.ts`) needs it for the exact same CSP-mismatch check a live, uncached fetch
- * already runs. See `csp-signature.ts`'s own module doc for the full "why". */
-type PrefetchedFragment = { html: string; cspHeader: string | null }
+ * already runs. See `csp-signature.ts`'s own module doc for the full "why". `finalUrl` is the SAME
+ * response's own `response.url` — `fetch()` follows a server redirect (e.g. an unauthenticated page
+ * visit bounced to `/login?redirect_to=...`) transparently, so the requested `href` and the URL the
+ * returned `html` actually renders for can genuinely differ; `swapOutlet` needs this to update
+ * `history` with the page the caller is actually looking at, not the one they clicked. */
+type PrefetchedFragment = { html: string; cspHeader: string | null; finalUrl: string }
 
 type PrefetchEntry = {
   promise: Promise<PrefetchedFragment>
@@ -160,7 +164,9 @@ export function schedulePrefetch(href: string): void {
       // the currently active document's own signature before ever using this prefetch, the same
       // check a live, uncached fetch already runs. See `csp-signature.ts`'s own module doc.
       const cspHeader = response.headers.get('content-security-policy')
-      return { html: await response.text(), cspHeader }
+      // See `orbit.ts`'s own `performSwap` doc: `response.url` is only populated by a real network
+      // fetch, so this falls back to the requested `href` for a synthetic test double.
+      return { html: await response.text(), cspHeader, finalUrl: response.url || href }
     })
     .catch((error) => {
       // A failed prefetch must never be replayed to a real click later — evict it immediately

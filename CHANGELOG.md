@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.11.2] - 2026-09-10
+
+### Added
+
+- **`loadMessages()` now supports a segmented base catalog** (`load-messages.ts`). The base catalog
+  for a `(lang)` was previously always exactly `{messagesDir}/{lang}/index.json` — an app with a
+  large catalog had no way to split it by feature/domain. `loadMessages()` now merges every `.json`
+  file found directly under `{messagesDir}/{lang}/` (never recursing into the `populations/`
+  override folder) into one base catalog, e.g. `index.json` + `iam.json` + `profile.json` +
+  `chat.json` — `index.json` remains a fine single-file default, not a hardcoded requirement. Merge
+  order is filename-sorted for determinism; segments are expected to be namespaced/disjoint, so
+  order only matters for the unrecommended case of two segments sharing a key. Composes with
+  `messagesDir`'s own array/host-composition semantics unchanged: a segment present only in a later
+  root is still discovered and merged, same first-match-wins precedence per file. Fully backward
+  compatible — an app with only `index.json` behaves identically to before, including the exact "no
+  base file found" warning and per-file malformed-catalog isolation. No change needed in
+  `@zanix/cli`'s own `zanix space build` compiler (`compile-messages.ts`), which already compiled
+  every `.json` file under `messagesDir` generically, not just `index.json`.
+
+### Fixed
+
+- **Orbit client-side navigation now updates `history` with the URL the server actually rendered,
+  not the one that was clicked** (`orbit.ts`, `prefetch.ts`). `performSwap`'s fragment `fetch()`
+  transparently follows a server redirect (e.g. `redirectUnauthenticatedPageVisit` bouncing an
+  unauthenticated visit to a guarded page over to `/login?redirect_to=...`) — the returned HTML was
+  already the redirected page's own content, but `history.pushState`/`replaceState` kept using the
+  originally requested `href` instead of the response's own final URL. A user clicking a link to a
+  session-gated page while logged out saw the login form render correctly, but the address bar kept
+  showing the guarded page's own URL — reloading, copying the link, or using back/forward from that
+  point all disagreed with what was actually on screen. `PrefetchedFragment` now also carries
+  `finalUrl` (`response.url`, falling back to the requested `href` for a same-origin non-redirected
+  response) so a prefetched navigation gets the identical fix.
+
 ## [1.11.1] - 2026-09-10
 
 ### Fixed

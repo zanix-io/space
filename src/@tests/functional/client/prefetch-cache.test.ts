@@ -27,7 +27,7 @@ Deno.test(
       schedulePrefetch(href) // same href, still fresh — must NOT trigger a second fetch
 
       const fragment = await getPrefetchedFragment(href)
-      assertEquals(fragment, { html: 'fragment for /dedup', cspHeader: null })
+      assertEquals(fragment, { html: 'fragment for /dedup', cspHeader: null, finalUrl: href })
       assertEquals(requestCount, 1)
     } finally {
       await server.shutdown()
@@ -175,7 +175,11 @@ Deno.test(
       // so a real click falls through to its own normal fetch — simulated here directly.
       schedulePrefetch(href)
       const fragment = await getPrefetchedFragment(href)
-      assertEquals(fragment, { html: 'fragment for real this time', cspHeader: null })
+      assertEquals(fragment, {
+        html: 'fragment for real this time',
+        cspHeader: null,
+        finalUrl: href,
+      })
       assertEquals(requestCount, 2)
     } finally {
       await server.shutdown()

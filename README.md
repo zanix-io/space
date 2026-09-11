@@ -328,11 +328,13 @@ function PageContent() {
 }
 ```
 
-Reads `{messagesDir}/{lang}/index.json` (a base catalog) and, when `population` is given, an
-override file, shallow-merging them — cached for the process lifetime, bypassed under
-`znx space dev`. `loadMessages()` stays opaque to ICU/FormatJS on purpose — `@zanix/space-ui`'s
-`IntlProvider`/`useIntl` is what actually formats a message. See [`docs/i18n.md`](./docs/i18n.md)
-for the full contract.
+Reads every `.json` file directly under `{messagesDir}/{lang}/` as the base catalog — `index.json`
+alone is the conventional default, but a large catalog can split into feature-segmented files
+instead (`iam.json`, `profile.json`, `chat.json`, ...), all merged together — and, when `population`
+is given, an override file, shallow-merging them on top — cached for the process lifetime, bypassed
+under `znx space dev`. `loadMessages()` stays opaque to ICU/FormatJS on purpose —
+`@zanix/space-ui`'s `IntlProvider`/`useIntl` is what actually formats a message. See
+[`docs/i18n.md`](./docs/i18n.md) for the full contract.
 
 ### Head management
 

@@ -366,6 +366,15 @@ function swapOutlet(href: string, replace: boolean): Promise<void> {
 async function performSwap(href: string, replace: boolean): Promise<void> {
   let html: string
   let cspHeader: string | null
+  // Defaults to the requested `href` — overwritten below with the response's own `response.url`
+  // whenever the fragment request actually redirected (an unauthenticated visit to a guarded page
+  // bounced server-side to `/login?redirect_to=...`, the same real case `redirectUnauthenticatedPageVisit`
+  // covers — see `app-manifest-and-composition`/`space-middleware-and-security`). `fetch()` follows
+  // that redirect transparently, so `response.ok`/the returned `html` are for the FINAL page, not the
+  // one actually clicked — `history` below must reflect that same final page, or the address bar
+  // shows one URL while the outlet renders a different page's markup (e.g. `/profile` in the bar
+  // while a login form is what's actually on screen).
+  let finalUrl = href
   try {
     // A fresh prefetched fragment (if any) is consumed first. A prefetch that's already KNOWN to
     // have failed is never handed back at all (see `getPrefetchedFragment`'s own doc) — this click
@@ -376,7 +385,7 @@ async function performSwap(href: string, replace: boolean): Promise<void> {
     // already-evicted-as-failed, or fail while in flight, without changing anything below.
     const prefetched = getPrefetchedFragment(href)
     if (prefetched) {
-      ;({ html, cspHeader } = await prefetched)
+      ;({ html, cspHeader, finalUrl } = await prefetched)
     } else {
       const response = await fetch(href, {
         headers: { [ORBIT_FRAGMENT_HEADER]: '1' },
@@ -389,6 +398,11 @@ async function performSwap(href: string, replace: boolean): Promise<void> {
       }
       cspHeader = response.headers.get('content-security-policy')
       html = await response.text()
+      // `response.url` is only ever populated by a real network fetch (a synthetic `new
+      // Response(...)`, as every non-redirect test double here constructs, always reports `''`) —
+      // falls back to the requested `href` for that case, which is already the correct URL when
+      // nothing redirected.
+      finalUrl = response.url || href
     }
   } catch {
     location.href = href
@@ -483,8 +497,8 @@ async function performSwap(href: string, replace: boolean): Promise<void> {
   if (document.startViewTransition) document.startViewTransition(swap)
   else swap()
 
-  if (replace) history.replaceState(null, '', href)
-  else history.pushState(null, '', href)
+  if (replace) history.replaceState(null, '', finalUrl)
+  else history.pushState(null, '', finalUrl)
 }
 
 /**

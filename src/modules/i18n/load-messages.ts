@@ -27,7 +27,9 @@ export type Messages = Record<string, string | CompiledMessageNode[]>
 /** Options for {@linkcode loadMessages}. */
 export type LoadMessagesOptions = {
   /** The language to load — matches `langPreHandler`'s own `availableLangs`/`:lang` route segment,
-   * e.g. `'en'`. Looked up as `{messagesDir}/{lang}/index.json`. */
+   * e.g. `'en'`. Resolved from every `.json` file directly under `{messagesDir}/{lang}/` (see
+   * {@linkcode loadMessages}'s own doc for how those merge) — `index.json` is the conventional
+   * default, not the only file read. */
   lang: string
   /** The population/segment to overlay on top of the base language catalog, e.g. from
    * `populationGuard`'s own `ctx.population`. Omitted entirely (not just falsy) skips override
@@ -99,6 +101,45 @@ async function resolveFirstMatch(
   return undefined
 }
 
+/** Every `.json` file directly under `dir` — non-recursive, so a `populations/` subdirectory entry
+ * is skipped exactly like any other directory entry, never walked into. This is the discovery half
+ * of base-catalog segmentation ({@linkcode resolve}'s own doc): a plain filename list, not yet
+ * resolved against `messagesDir`'s own array/first-match-wins semantics. `[]`, not a throw, when
+ * `dir` itself doesn't exist — a root with no catalog at all for this `lang` is normal, mirrored by
+ * every OTHER root still getting its own chance in {@linkcode resolve}. */
+async function listSegmentFiles(dir: string): Promise<string[]> {
+  const names: string[] = []
+  try {
+    for await (const entry of Deno.readDir(dir)) {
+      if (entry.isFile && entry.name.endsWith('.json')) names.push(entry.name)
+    }
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) return names
+    // Same "never leak a raw native error out of a `loader`" contract `readJsonObject` already
+    // documents in full — see that function's own comment for why.
+    throw new InternalError('Failed to list a message catalog directory from disk.', {
+      code: 'SPACE_I18N_MESSAGES_READ_FAILED',
+      meta: { source: 'zanix', path: dir },
+      cause: error,
+    })
+  }
+  return names
+}
+
+/** Every distinct base-segment filename across every root, for one `lang` — the UNION, not just
+ * the first root's own listing, so a segment that exists only in a later root (host composition,
+ * same as `resolveFirstMatch`'s own per-file precedent) still gets discovered and merged. Sorted so
+ * merge order is deterministic across roots/platforms/directory-read ordering, not just
+ * per-root-insertion-order — segments are expected to be namespaced/disjoint (see `loadMessages`'s
+ * own doc), so this order only matters for the rare, non-recommended case of an actual key
+ * collision between two segment files. */
+async function listBaseSegmentNames(dirs: string[], lang: string): Promise<string[]> {
+  const perRoot = await Promise.all(dirs.map((dir) => listSegmentFiles(join(dir, lang))))
+  const names = new Set<string>()
+  for (const found of perRoot) for (const name of found) names.add(name)
+  return [...names].sort()
+}
+
 async function resolve(lang: string, population: string | undefined): Promise<Messages> {
   const configured = getMessagesDir()
   if (configured === undefined) {
@@ -121,16 +162,25 @@ async function resolve(lang: string, population: string | undefined): Promise<Me
     ? roots.map((_, index) => `${buildDir}/messages/${index}`)
     : roots
 
-  const [base, override] = await Promise.all([
-    resolveFirstMatch(dirs, `${lang}/index.json`),
+  const segmentNames = await listBaseSegmentNames(dirs, lang)
+  const [segments, override] = await Promise.all([
+    Promise.all(segmentNames.map((name) => resolveFirstMatch(dirs, `${lang}/${name}`))),
     population ? resolveFirstMatch(dirs, `${lang}/populations/${population}.json`) : undefined,
   ])
 
-  if (!base) {
+  // A name resolves to `undefined` when every root's copy was malformed (already logged by
+  // `readJsonObject` itself) — filtered out here rather than failing the whole catalog, same
+  // per-file isolation `compileMessagesTree`'s own doc in `@zanix/cli` establishes for the
+  // build-time compiler. Zero valid segments (no files found at all, or every one malformed)
+  // collapses to the same "no message file" signal a single missing/malformed `index.json` always
+  // gave before segmentation existed — this is what keeps that case's warning behavior unchanged.
+  const validSegments = segments.filter((segment): segment is Messages => segment !== undefined)
+  if (validSegments.length === 0) {
     logger.warn(`No message file for lang '${lang}' in any configured messagesDir`)
     return override ?? {}
   }
 
+  const base = validSegments.reduce((merged, segment) => ({ ...merged, ...segment }), {})
   return override ? { ...base, ...override } : base
 }
 
@@ -141,11 +191,19 @@ async function resolve(lang: string, population: string | undefined): Promise<Me
  * cache, and returns a plain {@linkcode Messages} object; formatting (plurals, dates, ICU) is
  * entirely the consuming app's own concern, using whatever library it prefers.
  *
- * Reads `{messagesDir}/{lang}/index.json` (the base catalog) and, when `population` is given,
+ * Reads the BASE catalog as every `.json` file found directly under `{messagesDir}/{lang}/` (never
+ * recursing into `populations/`, which stays reserved for overrides below) — `index.json` is the
+ * conventional single-file default, not a hardcoded requirement: an app free to split its base
+ * catalog into feature-segmented files instead, e.g. `iam.json`, `profile.json`, `chat.json`,
+ * alongside (or instead of) `index.json`. Every segment file found is shallow-merged together, in
+ * filename-sorted order, into one base catalog — segments are expected to be namespaced/disjoint
+ * (`'profile/name'`, `'chat/heading'`, ...), so merge order only matters for the unrecommended case
+ * of two segment files actually sharing a key. When `population` is given,
  * `{messagesDir}/{lang}/populations/{population}.json` (an override — only the keys that differ
- * from the base need to be present), then shallow-merges them: `{ ...base, ...override }`. This is
- * only correct because catalogs are flat, namespaced-string-key objects, never nested — a nested
- * shape would need a real deep merge instead, silently losing sibling keys otherwise.
+ * from the base need to be present) is shallow-merged on top of that merged base: `{ ...base,
+ * ...override }`. This is only correct because catalogs are flat, namespaced-string-key objects,
+ * never nested — a nested shape would need a real deep merge instead, silently losing sibling keys
+ * otherwise.
  *
  * **In production, with `clientBuildDir` configured, reads from `{clientBuildDir}/messages/...`
  * instead** — where `zanix space build` compiles this app's ICU catalogs to AST, mirroring
@@ -155,13 +213,15 @@ async function resolve(lang: string, population: string | undefined): Promise<Me
  * `clientBuildDir`'s own consumption already uses.
  *
  * A missing override file is normal (not every population overrides every language) and resolves
- * silently to the base catalog. A missing BASE file logs a warning and resolves to `{}` (or the
- * override alone, if one somehow exists without a base) — language-level fallback (redirecting to
+ * silently to the base catalog. Finding NO base segment file at all (no `index.json`, no other
+ * `.json` file directly under `{lang}/`) logs a warning and resolves to `{}` (or the override
+ * alone, if one somehow exists without a base) — language-level fallback (redirecting to
  * `defaultLang`) is `langPreHandler`'s job, not this function's; by the time a page's `loader` calls
  * this, the URL's `lang` is already one of `availableLangs`. A MALFORMED file (invalid JSON, or not
- * a flat object) logs an error and is treated as missing — critically, the base and override are
- * each read and validated INDEPENDENTLY: a broken override file degrades to base-only instead of
- * discarding otherwise-valid base content.
+ * a flat object) logs an error and is treated as missing — critically, every base segment and the
+ * override are each read and validated INDEPENDENTLY: one broken segment file degrades the merge to
+ * every OTHER valid segment plus the override, never discarding otherwise-valid content elsewhere in
+ * the catalog; only finding zero valid segments falls back to the "no base catalog" warning above.
  *
  * Cached for the process lifetime, keyed by `${lang}:${population ?? ''}` — the explicit delimiter
  * keeps two different `(lang, population)` pairs from ever colliding on the same concatenated

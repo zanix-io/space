@@ -71,6 +71,18 @@ function okResponse(html: string): Response {
   return new Response(html, { status: 200 })
 }
 
+/** Same as {@linkcode okResponse}, but with its own `url` overridden to `finalUrl` — the shape a
+ * REAL `fetch()` response has after transparently following a server redirect (a plain `new
+ * Response(...)` always reports `url: ''`, since that field is only ever populated by the actual
+ * network fetch algorithm, never settable through the constructor). Used to prove `performSwap`
+ * updates `history` with the page the fragment response actually renders, not the originally
+ * clicked `href` — see `orbit.ts`'s own `finalUrl` doc. */
+function redirectedResponse(html: string, finalUrl: string): Response {
+  const response = new Response(html, { status: 200 })
+  Object.defineProperty(response, 'url', { value: finalUrl, configurable: true })
+  return response
+}
+
 /** Same as {@linkcode okResponse}, plus a `Content-Security-Policy` header — the shape
  * `applySecurityGuards` actually produces server-side, needed for every CSP-mismatch scenario
  * below. */
@@ -191,6 +203,35 @@ Deno.test(
     assertEquals(outlet.innerHTML, '<p>new content</p>')
     assertEquals(view.document.title, 'New title')
     assertEquals(historyCalls, [{ method: 'pushState', url: 'https://example.com/checkout' }])
+  },
+)
+
+Deno.test(
+  'onClick: a fragment request that server-redirected (e.g. an unauthenticated visit bounced to ' +
+    "/login) updates history with the RESPONSE'S OWN final URL, not the originally clicked href — " +
+    'otherwise the address bar shows one page while the outlet renders a different one',
+  async () => {
+    const { anchor, outlet } = setUp()
+    fetchImpl = () =>
+      Promise.resolve(redirectedResponse(
+        outletHtml('<p>login form</p>', 'Ingresar'),
+        'https://example.com/login?redirect_to=%2Fcheckout',
+      ))
+
+    const event = click(anchor)
+    await flush()
+
+    assert(event.defaultPrevented)
+    assertEquals(
+      fetchCalls[0].url,
+      'https://example.com/checkout',
+      'the fragment request itself still targets the clicked href',
+    )
+    assertEquals(outlet.innerHTML, '<p>login form</p>')
+    assertEquals(view.document.title, 'Ingresar')
+    assertEquals(historyCalls, [
+      { method: 'pushState', url: 'https://example.com/login?redirect_to=%2Fcheckout' },
+    ])
   },
 )
 

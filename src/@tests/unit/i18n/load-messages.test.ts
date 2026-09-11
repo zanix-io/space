@@ -232,6 +232,117 @@ Deno.test(
   },
 )
 
+Deno.test(
+  'loadMessages: multiple base segment files under {lang}/ merge into one base catalog',
+  async () => {
+    reset()
+    const dir = await withTempDir(async (dir) => {
+      await writeJson(join(dir, 'en', 'index.json'), { 'home/title': 'Welcome' })
+      await writeJson(join(dir, 'en', 'iam.json'), { 'login/submit': 'Sign in' })
+      await writeJson(join(dir, 'en', 'profile.json'), { 'profile/name': 'Name' })
+    })
+    try {
+      setMessagesDir(dir)
+      const messages = await loadMessages({ lang: 'en' })
+      assertEquals(messages, {
+        'home/title': 'Welcome',
+        'login/submit': 'Sign in',
+        'profile/name': 'Name',
+      })
+    } finally {
+      await cleanup(dir)
+    }
+  },
+)
+
+Deno.test(
+  'loadMessages: segment discovery never recurses into populations/ — its files never become ' +
+    'base-catalog segments',
+  async () => {
+    reset()
+    const dir = await withTempDir(async (dir) => {
+      await writeJson(join(dir, 'en', 'iam.json'), { 'login/submit': 'Sign in' })
+      await writeJson(join(dir, 'en', 'populations', 'zanix.json'), { 'login/submit': 'Enter' })
+    })
+    try {
+      setMessagesDir(dir)
+      const messages = await loadMessages({ lang: 'en' })
+      assertEquals(messages, { 'login/submit': 'Sign in' })
+    } finally {
+      await cleanup(dir)
+    }
+  },
+)
+
+Deno.test(
+  'loadMessages: a population override still overlays on top of a multi-segment base, override ' +
+    'keys win regardless of which segment file they shadow',
+  async () => {
+    reset()
+    const dir = await withTempDir(async (dir) => {
+      await writeJson(join(dir, 'en', 'index.json'), { 'home/title': 'Welcome' })
+      await writeJson(join(dir, 'en', 'profile.json'), { 'profile/name': 'Name' })
+      await writeJson(join(dir, 'en', 'populations', 'zanix.json'), {
+        'profile/name': 'Zanix name',
+      })
+    })
+    try {
+      setMessagesDir(dir)
+      const messages = await loadMessages({ lang: 'en', population: 'zanix' })
+      assertEquals(messages, { 'home/title': 'Welcome', 'profile/name': 'Zanix name' })
+    } finally {
+      await cleanup(dir)
+    }
+  },
+)
+
+Deno.test(
+  'loadMessages: a segment present only in a later messagesDir[] root is still discovered and ' +
+    'merged — segmentation composes with host composition',
+  async () => {
+    reset()
+    const hostDir = await Deno.makeTempDir({ dir: TMP_ROOT })
+    const baseDir = await Deno.makeTempDir({ dir: TMP_ROOT })
+    try {
+      await writeJson(join(hostDir, 'en', 'index.json'), { 'home/title': 'Welcome' })
+      await writeJson(join(baseDir, 'en', 'iam.json'), { 'login/submit': 'Sign in' })
+      setMessagesDir([hostDir, baseDir])
+      const messages = await loadMessages({ lang: 'en' })
+      assertEquals(messages, { 'home/title': 'Welcome', 'login/submit': 'Sign in' })
+    } finally {
+      await cleanup(hostDir, baseDir)
+    }
+  },
+)
+
+Deno.test(
+  'loadMessages: a malformed segment file degrades to every OTHER valid segment plus the override ' +
+    '— it never discards unrelated valid content',
+  async () => {
+    reset()
+    const dir = await withTempDir(async (dir) => {
+      await writeJson(join(dir, 'en', 'index.json'), { 'home/title': 'Welcome' })
+      await Deno.writeTextFile(join(dir, 'en', 'iam.json'), '{ not valid json')
+    })
+    try {
+      setMessagesDir(dir)
+      const error = countCalls('error')
+      const warn = countCalls('warn')
+      try {
+        const messages = await loadMessages({ lang: 'en' })
+        assertEquals(messages, { 'home/title': 'Welcome' })
+        assertEquals(error.count(), 1)
+        assertEquals(warn.count(), 0)
+      } finally {
+        error.restore()
+        warn.restore()
+      }
+    } finally {
+      await cleanup(dir)
+    }
+  },
+)
+
 Deno.test('loadMessages: a second call for the same key reuses the cache, no re-read', async () => {
   reset()
   const dir = await withTempDir(async (dir) => {
@@ -413,16 +524,23 @@ Deno.test(
  * fallback (that boundary only catches RENDER errors, not a `loader` throw). Fixed by wrapping
  * into `InternalError` — this proves the specific class + `code`, not a generic `Error`/message
  * substring.
+ *
+ * Two distinct sites now do this wrapping, since base-segment discovery (`listSegmentFiles`,
+ * `Deno.readDir`) runs BEFORE any individual file read (`readJsonObject`, `Deno.readTextFile`) —
+ * both are covered below rather than assuming the older single-file repro still exercises the
+ * (now earlier) discovery step.
  */
 Deno.test(
-  'loadMessages: a non-NotFound native read failure is wrapped into InternalError, never rethrown raw',
+  'loadMessages: a non-NotFound failure LISTING the {lang}/ directory is wrapped into ' +
+    'InternalError, never rethrown raw',
   async () => {
     reset()
     const dir = await Deno.makeTempDir({ dir: TMP_ROOT })
     try {
-      // A directory where the base catalog file is expected — a real, deterministic,
-      // cross-platform way to trigger `Deno.errors.IsADirectory` (never `NotFound`).
-      await Deno.mkdir(join(dir, 'en', 'index.json'), { recursive: true })
+      // `{lang}` itself is a plain file, not a directory — `Deno.readDir` on it throws
+      // `Deno.errors.NotADirectory` (never `NotFound`), a real, deterministic, cross-platform way
+      // to fail segment DISCOVERY itself, before any individual catalog file is even read.
+      await Deno.writeTextFile(join(dir, 'en'), 'not a directory')
       setMessagesDir(dir)
 
       const error = await assertRejects(
@@ -430,7 +548,37 @@ Deno.test(
         InternalError,
       )
       assertEquals(error.code, 'SPACE_I18N_MESSAGES_READ_FAILED')
-      assertEquals(error.cause instanceof Deno.errors.IsADirectory, true)
+      assertEquals(error.cause instanceof Deno.errors.NotADirectory, true)
+    } finally {
+      await cleanup(dir)
+    }
+  },
+)
+
+Deno.test(
+  'loadMessages: a non-NotFound failure READING a discovered segment file is wrapped into ' +
+    'InternalError, never rethrown raw',
+  async () => {
+    reset()
+    const dir = await Deno.makeTempDir({ dir: TMP_ROOT })
+    try {
+      // A real file discovered by segment listing, made unreadable — a real, deterministic way to
+      // fail the per-file read (`readJsonObject`) rather than discovery itself.
+      const segmentPath = join(dir, 'en', 'index.json')
+      await writeJson(segmentPath, { 'home/title': 'Welcome' })
+      await Deno.chmod(segmentPath, 0o000)
+      setMessagesDir(dir)
+
+      try {
+        const error = await assertRejects(
+          () => loadMessages({ lang: 'en' }),
+          InternalError,
+        )
+        assertEquals(error.code, 'SPACE_I18N_MESSAGES_READ_FAILED')
+        assertEquals(error.cause instanceof Deno.errors.PermissionDenied, true)
+      } finally {
+        await Deno.chmod(segmentPath, 0o644)
+      }
     } finally {
       await cleanup(dir)
     }

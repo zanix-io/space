@@ -166,6 +166,44 @@ Deno.test(
 )
 
 Deno.test(
+  "runExternalModule: a workspace-MEMBER project's own declared version wins over the " +
+    "workspace root's, even though `getSharedLoader` resolves to the workspace root's own " +
+    '`deno.json` (`findDenoConfigPath` deliberately prefers a workspace-bearing ancestor over ' +
+    'the nearest plain one) — the real, reported gap: a referrer-less `resolveDenoAt` call has ' +
+    "no way to reach the MEMBER's own scoped import-map entry, silently falling through to the " +
+    "ambient-fallback `import(specifier)` below instead of the served project's own pin. A " +
+    'member with NO `deno.lock` of its own (the lock living at the workspace root instead) is ' +
+    'exactly the shape this reproduces.',
+  async () => {
+    const workspaceRoot = await Deno.makeTempDir({ dir: TMP_ROOT })
+    try {
+      const memberDir = join(workspaceRoot, 'member')
+      await Deno.mkdir(memberDir)
+      await Deno.writeTextFile(
+        join(workspaceRoot, 'deno.json'),
+        JSON.stringify({ workspace: ['./member'] }),
+      )
+      await Deno.writeTextFile(
+        join(memberDir, 'deno.json'),
+        JSON.stringify({ imports: { '@zanix/errors': 'jsr:@zanix/utils@4.0.0/errors' } }),
+      )
+
+      const evaluator = new RealImportEvaluator(memberDir, memberDir)
+      const sentinel = `znxruntime://${encodeURIComponent('@zanix/errors')}`
+      const mod = await evaluator.runExternalModule(sentinel) as { HttpError: typeof HttpError }
+
+      assert(
+        mod.HttpError !== HttpError,
+        "expected the workspace member's own pinned 4.0.0 HttpError, not this package's own",
+      )
+      assertEquals(new mod.HttpError('FORBIDDEN').name, 'HttpError')
+    } finally {
+      await Deno.remove(workspaceRoot, { recursive: true })
+    }
+  },
+)
+
+Deno.test(
   'runExternalModule: resolves a bare npm-style SUBPATH the served project never itself declared ' +
     "— a real, confirmed regression: `@preact/preset-vite`'s own devtools sub-plugin injects " +
     '`import "preact/debug"` into a real route file on its own, so the project\'s `deno.json` has ' +

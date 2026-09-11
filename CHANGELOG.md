@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.11.3] - 2026-09-11
+
+### Fixed
+
+- **`runExternalModule` now threads a real, root-anchored referrer through `resolveDenoAt`, instead
+  of `undefined`** (`ssr-module-evaluator.ts`). A Deno **workspace-member** served project — its own
+  `deno.json`/`deno.jsonc` with no `deno.lock` of its own, the lock living at the workspace root
+  instead — could silently diverge: `getSharedLoader`'s own `findDenoConfigPath` deliberately
+  resolves to the workspace ROOT's config for this shape, and a referrer-less `resolveSync` call has
+  no way to reach the MEMBER's own scoped import-map entry, falling through to the ambient-fallback
+  `import(specifier)` path below instead of the served project's own pinned `@zanix/*` version.
+  Reproduced against a real workspace-member consumer app: a route's bare `@zanix/auth` import
+  resolved to a stale, mismatched copy under `zanix space dev`, diverging enough that even a
+  synthetic `HttpError` built from the served project's own `@zanix/errors` import failed
+  `error instanceof HttpError` inside `@zanix/auth`'s own `redirectUnauthenticatedPageVisit` — a
+  guarded page's `401` fell through to a raw JSON body instead of a login redirect, dev-mode only,
+  never in production. `resolveDenoAt`'s other two callers (`deno-optimize-deps-alias.ts`,
+  `discover-comets.ts`) already always threaded a real file referrer for the identical reason; this
+  was the one call site left behind. The referrer file need not exist — Import Map `scopes` matching
+  is pure URL-prefix comparison, and the granularity this needs is the member's own directory, not
+  any specific file inside it. Harmless for a non-workspace project too: with no `scopes` in play,
+  resolution with or without a referrer falls back to the same top-level `imports` map either way.
+
 ## [1.11.2] - 2026-09-10
 
 ### Added

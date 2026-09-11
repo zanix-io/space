@@ -226,7 +226,22 @@ export class RealImportEvaluator implements ModuleEvaluator {
       return import(specifier)
     }
     const loader = await getSharedLoader(this.#root)
-    const resolved = await resolveDenoAt(normalized, loader, undefined)
+    // A real, root-anchored referrer — never `undefined` — so a workspace-MEMBER project's own
+    // import map/lock wins over the workspace root's whenever `getSharedLoader` resolves to the
+    // workspace root's own config instead of the member's (see that function's own
+    // `findDenoConfigPath` doc: it deliberately prefers the root). `resolveDenoAt`'s other two
+    // callers (`deno-optimize-deps-alias.ts`, `discover-comets.ts`) already always thread a real
+    // file referrer for the identical reason — this was the one call site left behind, and a
+    // referrer-less resolution here silently diverges into the ambient-fallback path below for
+    // any workspace member (confirmed: a served project whose own `deno.json` has no `deno.lock`
+    // of its own, the lock living at the workspace root instead). The referrer file need not
+    // exist — Import Map `scopes` matching is pure URL-prefix comparison, and the granularity
+    // this needs is the member's own DIRECTORY (`this.#root`), not any specific file inside it.
+    // Harmless for a non-workspace project too: with no `scopes` in play, resolution with or
+    // without a referrer falls back to the same top-level `imports` map either way (see
+    // `bare-specifier-resolve.ts`'s own doc on `referrerUrlFor`).
+    const referrer = toFileUrl(join(this.#root, 'mod.ts')).href
+    const resolved = await resolveDenoAt(normalized, loader, referrer)
     // Falls back to the ORIGINAL specifier, never `normalized` — a bare `'@zanix/space/comet'`
     // has no guaranteed meaning against the ambient process on its own (that's the exact gap this
     // whole method exists to route around), while the original, possibly `jsr:`-qualified text

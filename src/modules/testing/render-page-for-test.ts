@@ -1,9 +1,18 @@
 import type { ClassConstructor, HandlerContext, ZanixInteractorGeneric } from '@zanix/server'
 import type { SpacePageController } from 'modules/router/space-page-controller.ts'
+import { resolvePendingPage } from 'modules/router/page-decorator.ts'
 import { mockHandlerContext } from './mock-handler-context.ts'
 
 /** What {@linkcode renderPageForTest} resolves to. */
 export type RenderPageForTestResult = { response: Response; html: string }
+
+// Gives every call its own synthetic route path — never reused, even across repeated calls for
+// the SAME `Controller` — so two DIFFERENT pathless pages rendered in the same test run never
+// collide on `ProgramModule`'s own duplicate-path check (`registerPage` registers under this path
+// exactly like a real `loadRoutes()` import would). Harmless for a Controller that already has a
+// live route (explicit-path, or a pathless one `loadRoutes()` already resolved): `resolvePendingPage`
+// below is a no-op in both cases and never reads this value.
+let testPageSequence = 0
 
 /**
  * Runs a `SpacePageController` subclass's real `loader`→`component`→render pipeline in-process —
@@ -71,6 +80,19 @@ export async function renderPageForTest<
       ...ctxOverrides.payload,
     },
   })
+
+  // A pathless `@Page({ Interactor })` defers its Interactor wiring to `loadRoutes()`, which this
+  // helper never calls (see this function's own doc — it drives `handleGet` directly, no real
+  // router involved). Without this, such a page's `loader` touching `this.interactor` would throw
+  // (`ProgramModule.targets.getInteractor` resolving an Interactor that was never registered)
+  // instead of exercising the real loader→component pipeline this helper promises. A no-op for
+  // every other case: an explicit-path page (already registered at decoration time) or a pathless
+  // one a prior `loadRoutes()` already resolved (`resolvePendingPage` checks `hasRoutesForTarget`
+  // itself before doing anything).
+  resolvePendingPage(
+    Controller as unknown as ClassConstructor<SpacePageController>,
+    `__render-page-for-test__/${Controller.name}/${testPageSequence++}`,
+  )
 
   const instance = new Controller(ctx as never)
   const response = await instance.handleGet(ctx)

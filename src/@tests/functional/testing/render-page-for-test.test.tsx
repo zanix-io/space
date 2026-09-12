@@ -4,8 +4,8 @@ import '../../../../mod-react.ts'
 import { assert, assertEquals } from '@std/assert'
 import { createElement as preactElement } from 'preact'
 import type { ComponentType as PreactComponentType } from 'preact'
-import type { ZanixInteractor } from '@zanix/server'
-import { SpacePageController } from 'modules/router/mod.ts'
+import { Interactor, ZanixInteractor } from '@zanix/server'
+import { Page, SpacePageController } from 'modules/router/mod.ts'
 import { renderPageForTest } from 'modules/testing/mod.ts'
 import { setActiveRenderer } from 'modules/router/active-renderer.ts'
 import { getPageRenderer, setPageRenderer } from 'modules/router/page-renderer-registry.ts'
@@ -112,5 +112,35 @@ Deno.test(
     assertEquals(response.status, 200)
     assert(html.includes('data-testid="product-id"'), html)
     assert(html.includes('99'), html)
+  },
+)
+
+@Interactor()
+class LabelInteractor extends ZanixInteractor {
+  public getLabel(id: string) {
+    return `label-${id}`
+  }
+}
+
+// Decorated with a pathless `@Page`, unlike every other page above — the actual shape
+// `PageOptions.Interactor`'s own JSDoc recommends, and the one `renderPageForTest` used to
+// instantiate without ever resolving.
+@Page({ Interactor: LabelInteractor })
+class LabelPage extends SpacePageController<ProductParams, LabelInteractor> {
+  public override loader = (ctx: { params: ProductParams }) => ({
+    label: this.interactor.getLabel(ctx.params.id),
+  })
+  public override component = ({ label }: { label: string }) => <p data-testid='label'>{label}</p>
+}
+
+Deno.test(
+  'renderPageForTest: resolves a pathless @Page({ Interactor }) whose loader calls this.interactor — ' +
+    'the real runtime path, not just a type that happens to compile',
+  async () => {
+    const { response, html } = await renderPageForTest(LabelPage, { id: '7' })
+
+    assertEquals(response.status, 200)
+    assert(html.includes('data-testid="label"'), html)
+    assert(html.includes('label-7'), html)
   },
 )

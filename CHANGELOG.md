@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.12.1] - 2026-09-12
+
+### Fixed
+
+- **`renderPageForTest` now resolves a pathless `@Page({ Interactor })`'s Interactor wiring before
+  instantiating the page** (`modules/testing/render-page-for-test.ts`). Previously, a page decorated
+  the recommended way — `@Page({ Interactor: X })` with no explicit `path` (exactly the shape
+  `Page()`'s own JSDoc shows as its example) — had its Interactor wiring deferred to `loadRoutes()`,
+  which `renderPageForTest` never calls; any `loader` touching `this.interactor` threw
+  `TargetError`/"Target is not a constructor" instead of exercising the real loader→component
+  pipeline this helper promises. Fixed by calling `resolvePendingPage` (the same function
+  `loadRoutes()` itself calls) under a synthetic per-call route path before instantiating the
+  `Controller` — a no-op for every other page shape (explicit-path, or already resolved by a prior
+  `loadRoutes()` call). `Page()`'s own JSDoc example now also decorates its `Interactor` class with
+  `@Interactor()`, which it always required but never showed.
+
 ## [1.12.0] - 2026-09-12
 
 ### Added

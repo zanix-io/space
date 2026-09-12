@@ -275,9 +275,14 @@ export function resolvePendingPage(
  * ```tsx
  * // A page whose loader needs cached data — resolved through its own Interactor, never directly
  * // on the page itself (see SpacePageController's own doc on the Interactor type parameter).
+ * // `@Interactor()` is required here — this class is looked up by the key it assigns, the same
+ * // way any other `@zanix/server` Interactor is. `renderPageForTest` resolves a pathless `@Page`'s
+ * // own Interactor wiring for you; instantiating `ProductPage` any other way (skipping
+ * // `loadRoutes()`) leaves `this.interactor` unresolved.
  * import { Page, SpacePageController } from '@zanix/space'
- * import { ZanixInteractor } from '@zanix/server'
+ * import { Interactor, ZanixInteractor } from '@zanix/server'
  *
+ * @Interactor()
  * class ProductsInteractor extends ZanixInteractor {
  *   // `this.cache` is `CoreBaseClass`'s own sugar for `this.providers.get('cache')` — the
  *   // abstract `ZanixCacheProvider` contract itself is never resolved directly by class

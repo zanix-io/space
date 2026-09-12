@@ -171,9 +171,13 @@ export interface AssetRecord {
  * `'audio'`/`'video'`, this is never populated from a per-request query param — see
  * `AssetsControllerOptions.imageOptimizeOptions`'s own doc for why image optimization is a fixed,
  * operator-configured policy applied to every upload through one controller instance, rather than a
- * caller-chosen one. `'video'` exposes only `breakpoint`/`format`, mirroring the audio member's own
- * minimal, HTTP-caller-facing surface — never `width`/`bitrateKbps`/`outputPath`, which stay
- * `AssetService`'s own transform-time decisions.
+ * caller-chosen one. `'video'` exposes `breakpoint`/`format`/`thumbnail`, mirroring the audio
+ * member's own minimal, HTTP-caller-facing surface — never `width`/`bitrateKbps`/`outputPath`,
+ * which stay `AssetService`'s own transform-time decisions; `thumbnail` is deliberately just a
+ * boolean opt-in for the same reason — a caller says WHETHER it wants one, never the frame
+ * timestamp/dimensions/format extracting it uses, which stay `runVideoTransformation`'s own fixed,
+ * declared policy (see that function's own doc) until a real second caller needs something
+ * different.
  */
 export type AssetTransformRequest =
   | {
@@ -182,4 +186,7 @@ export type AssetTransformRequest =
     options: Omit<VoiceAudioTransformOptions, 'outputPath' | 'profile'>
   }
   | { kind: 'image'; options?: ImagesOptimizeOptions }
-  | { kind: 'video'; options?: { breakpoint?: VideoBreakpointName; format?: 'mp4' | 'webm' } }
+  | {
+    kind: 'video'
+    options?: { breakpoint?: VideoBreakpointName; format?: 'mp4' | 'webm'; thumbnail?: boolean }
+  }

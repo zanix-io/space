@@ -232,6 +232,49 @@ Deno.test(
 )
 
 Deno.test(
+  'createVideoAsset: ?thumbnail=true forwards options.thumbnail:true; anything else (including ' +
+    'omitted) forwards no `thumbnail` field at all — never a literal `false`',
+  async () => {
+    const { service, calls } = createSpyAssetService()
+    const ControllerClass = createAssetsController({
+      service,
+      prefix: 'assets-video-thumbnail-test',
+      guards: { write: [allowAllGuard], read: [allowAllGuard] },
+    })
+
+    async function createWith(thumbnail: string | undefined) {
+      const ctx = mockHandlerContext({
+        req: uploadRequest('video/mp4'),
+        payload: {
+          params: {},
+          search: { breakpoint: undefined, format: undefined, thumbnail } as VideoUploadQueryRTO,
+          body: undefined,
+        },
+      })
+      await new ControllerClass(ctx).createVideoAsset(ctx)
+    }
+
+    await createWith('true')
+    await createWith('false')
+    await createWith(undefined)
+
+    assertEquals(calls.length, 3)
+    assertEquals(calls[0].transformRequest, {
+      kind: 'video',
+      options: { breakpoint: undefined, format: undefined, thumbnail: true },
+    })
+    assertEquals(calls[1].transformRequest, {
+      kind: 'video',
+      options: { breakpoint: undefined, format: undefined },
+    })
+    assertEquals(calls[2].transformRequest, {
+      kind: 'video',
+      options: { breakpoint: undefined, format: undefined },
+    })
+  },
+)
+
+Deno.test(
   'createVoiceAsset: reads the real upload and forwards the search query format into ' +
     'transformRequest.options',
   async () => {

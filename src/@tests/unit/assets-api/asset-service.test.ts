@@ -20,6 +20,8 @@ import type {
   AudioTransformOptions,
 } from 'modules/media/audio/audio-transcoder.ts'
 import type {
+  ThumbnailOptions,
+  ThumbnailResult,
   TranscodeInput,
   TranscodeOptions,
   TranscodeResult,
@@ -107,9 +109,12 @@ function createFailingTransformer(message: string): AssetTransformer {
  * bytes untouched (real optimization is `sharp`'s own concern, out of scope for this suite, same
  * "fakes only" boundary the audio suite above already establishes); `transformVideo` writes a real
  * file to `options.outputPath` (asset-service always reads it back when `neverWorsened` is
- * false) and reports `neverWorsened` per `behavior`. */
+ * false) and reports `neverWorsened` per `behavior`. `transformThumbnail` stays `notUsed` unless
+ * `withThumbnail` is passed — only `runVideoTransformation`'s own `options.thumbnail: true` tests
+ * need it real; every other test in this suite must never call it at all. */
 function createImageVideoTransformer(
   behavior: 'optimized' | 'never-worsened' = 'optimized',
+  withThumbnail = false,
 ): AssetTransformer {
   return {
     transformImage: notUsed,
@@ -138,7 +143,19 @@ function createImageVideoTransformer(
         neverWorsened: false,
       }
     },
-    transformThumbnail: notUsed,
+    transformThumbnail: withThumbnail
+      ? async (_: TranscodeInput, options: ThumbnailOptions): Promise<ThumbnailResult> => {
+        // Real bytes, deliberately distinct from the transcoded video's own — proves a test
+        // reading the thumbnail variant's stored bytes back isn't accidentally seeing the video's.
+        const frame = new Uint8Array([9, 9, 9])
+        await Deno.writeFile(options.outputPath, frame)
+        return {
+          outputPath: options.outputPath,
+          bytesWritten: frame.byteLength,
+          mimeType: 'image/jpeg',
+        }
+      }
+      : notUsed,
     transformAudio: notUsed,
   }
 }
@@ -812,6 +829,64 @@ Deno.test(
     assertEquals(record.status, 'failed')
     // See the "source vanished" test above for why this is the CODE, not the `meta.reason` text.
     assertEquals(record.error?.message, 'BAD_REQUEST')
+  },
+)
+
+Deno.test(
+  "createAsset: video upload with options.thumbnail:true -> a real second 'thumbnail' variant, " +
+    'alongside the transcoded video one, both independently stored',
+  async () => {
+    const storage = createInMemoryAssetStorage()
+    const repository = createInMemoryAssetRepository()
+    const service = createAssetService({
+      transformer: createImageVideoTransformer('optimized', true),
+      storage,
+      repository,
+    })
+
+    const record = await service.createAsset({
+      upload: { stream: streamFrom(mp4Fixture()), contentType: 'video/mp4' },
+      transformRequest: { kind: 'video', options: { thumbnail: true } },
+    })
+
+    assertEquals(record.status, 'completed')
+    assertEquals(record.variants.length, 2, 'the video variant AND the thumbnail variant')
+    const [video, thumbnail] = record.variants
+    assertEquals(video.kind, 'video')
+    assertEquals(thumbnail.kind, 'thumbnail')
+    assertEquals(thumbnail.format, 'jpeg')
+    assertEquals(thumbnail.contentType, 'image/jpeg')
+    assertEquals(thumbnail.transformId, 'video-thumbnail')
+    assert(
+      thumbnail.storageKey !== video.storageKey,
+      "the thumbnail must be its own stored object, never sharing the video variant's key",
+    )
+  },
+)
+
+Deno.test(
+  'createAsset: video upload with no options.thumbnail -> exactly one variant, transformThumbnail ' +
+    'never called at all',
+  async () => {
+    const storage = createInMemoryAssetStorage()
+    const repository = createInMemoryAssetRepository()
+    // `withThumbnail: false` (the default) wires `transformThumbnail` to `notUsed` — this test
+    // passes only because `runVideoTransformation` genuinely never calls it when `thumbnail` is
+    // omitted; a regression that called it unconditionally would fail here with "not used in this
+    // test", not silently pass.
+    const service = createAssetService({
+      transformer: createImageVideoTransformer('optimized'),
+      storage,
+      repository,
+    })
+
+    const record = await service.createAsset({
+      upload: { stream: streamFrom(mp4Fixture()), contentType: 'video/mp4' },
+      transformRequest: { kind: 'video' },
+    })
+
+    assertEquals(record.status, 'completed')
+    assertEquals(record.variants.length, 1)
   },
 )
 

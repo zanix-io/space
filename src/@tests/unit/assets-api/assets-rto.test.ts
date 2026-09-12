@@ -55,10 +55,27 @@ Deno.test(
 )
 
 Deno.test(
-  'VideoUploadQueryRTO: both fields are genuinely optional — omitting them validates cleanly',
+  'VideoUploadQueryRTO: all three fields are genuinely optional — omitting them validates cleanly',
   async () => {
     const rto = await classValidation(VideoUploadQueryRTO, {})
     assertEquals(rto.breakpoint, undefined)
     assertEquals(rto.format, undefined)
+    assertEquals(rto.thumbnail, undefined)
+  },
+)
+
+Deno.test(
+  "VideoUploadQueryRTO: thumbnail is validated and exposed as the raw 'true'/'false' STRING, " +
+    "never coerced to a real boolean here — the controller is what reads it as `=== 'true'`",
+  async () => {
+    const rto = await classValidation(VideoUploadQueryRTO, { thumbnail: 'true' })
+    assertEquals(rto.thumbnail, 'true')
+  },
+)
+
+Deno.test(
+  'VideoUploadQueryRTO: thumbnail rejects a non-boolean-string value',
+  async () => {
+    await assertRejects(() => classValidation(VideoUploadQueryRTO, { thumbnail: 'yes' }))
   },
 )

@@ -25,7 +25,10 @@ import {
   VOICE_TRANSFORM_POLICY_VERSION,
 } from '../media/audio/policies/voice.ts'
 import type { VoiceAudioTransformOptions } from '../media/audio/policies/voice.ts'
-import { VIDEO_TRANSFORM_POLICY_VERSION } from '../media/cached-video-transcoder.ts'
+import {
+  THUMBNAIL_TRANSFORM_POLICY_VERSION,
+  VIDEO_TRANSFORM_POLICY_VERSION,
+} from '../media/cached-video-transcoder.ts'
 import type { VideoBreakpointName } from '../media/video-breakpoints.ts'
 import type { ImagesOptimizeOptions } from '../assets/image-optimize-types.ts'
 import { buildOriginalStorageKey, buildVariantStorageKey } from './keys.ts'
@@ -89,15 +92,13 @@ export function createAssetService(options: AssetServiceOptions): AssetService {
           request.options,
         )
       case 'video':
-        return [
-          await runVideoTransformation(
-            input.assetId,
-            input.sourceKey,
-            sourceBytes,
-            source.object.contentType,
-            request.options,
-          ),
-        ]
+        return await runVideoTransformation(
+          input.assetId,
+          input.sourceKey,
+          sourceBytes,
+          source.object.contentType,
+          request.options,
+        )
       default: {
         // Exhaustiveness guard — mirrors `system-ffmpeg-audio-transcoder.ts`'s own pattern. Now
         // checked against the whole `request` (every member handled above narrows it to `never`
@@ -328,12 +329,33 @@ export function createAssetService(options: AssetServiceOptions): AssetService {
     return variants
   }
 
+  /** Fixed, declared policy for the ONE still-frame thumbnail `runVideoTransformation` extracts
+   * when `options.thumbnail` is `true` — see `AssetTransformRequest`'s own `'video'` member doc
+   * for why this stays a library-owned default rather than an HTTP-caller-facing knob. `jpeg` at
+   * the frame's own real dimensions (no forced resize — a caller that needs a smaller grid tile
+   * gets there the same way `PhotosField`-style consumers already do for images, an app-level
+   * `?variant=` policy of ITS own, not something this generic library should assume every consumer
+   * wants baked into the derived asset itself), one second in (the same "avoid a black/blank first
+   * frame" reasoning `ThumbnailOptions.atSeconds`'s own doc already gives for its `1`-second
+   * default — left unset here so a bump to that default upstream in `video-transcoder.ts` is
+   * inherited automatically, never silently pinned to today's value).
+   */
+  const VIDEO_THUMBNAIL_FORMAT = 'jpeg' as const
+
   /**
    * Mirrors `runVoiceTransformation`'s own temp-file/never-worsened shape exactly, over
    * `AssetTransformer.transformVideo()` instead of `transformAudio()`. `breakpoint` defaults to
    * `'mlg'` (mobile-large) when the HTTP caller doesn't specify one — a real, working default, not
    * a placeholder; a caller that wants a different preset passes `options.breakpoint` explicitly
    * (see `AssetTransformRequest`'s own `'video'` member).
+   *
+   * Always returns at least the transcoded video variant; a truthy `options.thumbnail` additionally
+   * extracts ONE still frame from the same already-downloaded source bytes (via
+   * `AssetTransformer.transformThumbnail()`, real ffmpeg) and appends it as a second, `'thumbnail'`
+   * -kind variant — unlike the video transcode itself, a thumbnail has no "original" to fall back
+   * to on failure (see `ThumbnailResult`'s own doc), so extraction failure here fails the WHOLE
+   * upload rather than silently omitting the thumbnail; a caller that can't tolerate that shouldn't
+   * request one.
    *
    * @throws {HttpError} `BAD_REQUEST` for a content-type outside the mp4/webm allowlist.
    */
@@ -342,8 +364,12 @@ export function createAssetService(options: AssetServiceOptions): AssetService {
     originalStorageKey: string,
     sourceBytes: Uint8Array,
     sourceContentType: string,
-    requestOptions: { breakpoint?: VideoBreakpointName; format?: 'mp4' | 'webm' } = {},
-  ): Promise<AssetVariant> {
+    requestOptions: {
+      breakpoint?: VideoBreakpointName
+      format?: 'mp4' | 'webm'
+      thumbnail?: boolean
+    } = {},
+  ): Promise<AssetVariant[]> {
     const sourceExtension = VIDEO_EXTENSION_BY_CONTENT_TYPE[sourceContentType]
     if (!sourceExtension) {
       throw new HttpError('BAD_REQUEST', {
@@ -359,6 +385,12 @@ export function createAssetService(options: AssetServiceOptions): AssetService {
     const sourcePath = await Deno.makeTempFile({ suffix: sourceExtension })
     const outputSuffix = requestOptions.format ? `.${requestOptions.format}` : sourceExtension
     const outputPath = await Deno.makeTempFile({ suffix: outputSuffix })
+    // Only allocated when a thumbnail is actually requested — see this function's own doc.
+    const thumbnailOutputPath = requestOptions.thumbnail
+      ? await Deno.makeTempFile({
+        suffix: `.${VIDEO_THUMBNAIL_FORMAT === 'jpeg' ? 'jpg' : VIDEO_THUMBNAIL_FORMAT}`,
+      })
+      : undefined
     try {
       await Deno.writeFile(sourcePath, sourceBytes)
       const result = await transformer.transformVideo(
@@ -379,7 +411,7 @@ export function createAssetService(options: AssetServiceOptions): AssetService {
           contentType: result.mimeType,
         })
 
-      return {
+      const variants: AssetVariant[] = [{
         variantId,
         kind: 'video',
         format: (requestOptions.format ?? sourceExtension.slice(1)) as string,
@@ -389,10 +421,42 @@ export function createAssetService(options: AssetServiceOptions): AssetService {
         checksum: object.checksum,
         transformId: `video-${breakpoint}`,
         policyVersion: VIDEO_TRANSFORM_POLICY_VERSION,
+      }]
+
+      if (thumbnailOutputPath) {
+        // Extracted from the ORIGINAL source, not the just-transcoded `outputPath` — the source is
+        // already decoded/available here, and extracting from it rather than waiting on the
+        // transcode's own output means a slow/failed transcode-quality choice never affects
+        // whether a thumbnail can be produced at all.
+        const thumbnailResult = await transformer.transformThumbnail(
+          { sourcePath },
+          { outputPath: thumbnailOutputPath, format: VIDEO_THUMBNAIL_FORMAT },
+        )
+        const thumbnailVariantId = generateUUID()
+        const thumbnailStorageKey = buildVariantStorageKey(assetId, thumbnailVariantId)
+        const thumbnailObject = await storage.put(
+          thumbnailStorageKey,
+          await Deno.readFile(thumbnailOutputPath),
+          { contentType: thumbnailResult.mimeType },
+        )
+        variants.push({
+          variantId: thumbnailVariantId,
+          kind: 'thumbnail',
+          format: VIDEO_THUMBNAIL_FORMAT,
+          contentType: thumbnailResult.mimeType,
+          storageKey: thumbnailStorageKey,
+          size: thumbnailObject.size,
+          checksum: thumbnailObject.checksum,
+          transformId: 'video-thumbnail',
+          policyVersion: THUMBNAIL_TRANSFORM_POLICY_VERSION,
+        })
       }
+
+      return variants
     } finally {
       await Deno.remove(sourcePath).catch(() => {})
       await Deno.remove(outputPath).catch(() => {})
+      if (thumbnailOutputPath) await Deno.remove(thumbnailOutputPath).catch(() => {})
     }
   }
 

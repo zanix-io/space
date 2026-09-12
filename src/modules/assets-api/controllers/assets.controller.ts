@@ -62,7 +62,9 @@ export interface AssetsControllerInstance extends ZanixController {
    * that option is omitted. */
   createImageAsset(ctx: HandlerContext): Promise<Record<string, unknown>>
   /** `POST /assets/video` — uploads an mp4/webm and transcodes it at `breakpoint` (default
-   * `'mlg'`). */
+   * `'mlg'`). `?thumbnail=true` additionally extracts one still-frame thumbnail variant
+   * (`kind: 'thumbnail'`) from the same upload — see `asset-service.ts`'s own
+   * `runVideoTransformation` doc for the fixed frame/format policy this applies. */
   createVideoAsset(
     ctx: HandlerContext<{ search: VideoUploadQueryRTO }>,
   ): Promise<Record<string, unknown>>
@@ -144,6 +146,11 @@ export function createAssetsController(
           options: {
             breakpoint: ctx.payload.search.breakpoint,
             format: ctx.payload.search.format,
+            // Omitted entirely (never a literal `false`) unless the caller explicitly opted in —
+            // matches every other knob here (`breakpoint`/`format` are `undefined`, not a default
+            // value, when the caller doesn't send them), and keeps `runVideoTransformation`'s own
+            // `requestOptions.thumbnail` check a plain truthiness test with no `=== true` needed.
+            ...(ctx.payload.search.thumbnail === 'true' ? { thumbnail: true } : {}),
           },
         },
       })

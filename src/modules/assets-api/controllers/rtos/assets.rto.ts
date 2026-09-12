@@ -1,4 +1,4 @@
-import { BaseRTO, IsEnum, IsUUID } from '@zanix/validator'
+import { BaseRTO, IsBooleanString, IsEnum, IsUUID } from '@zanix/validator'
 
 /** Route params for `GET /assets/:id`, `/:id/status`, `/:id/download`. `id` is always a real
  * `generateUUID()` value minted server-side (`AssetService`) — `@IsUUID` rejects anything else at
@@ -19,15 +19,21 @@ export class VoiceUploadQueryRTO extends BaseRTO {
   accessor format!: 'aac' | 'opus'
 }
 
-/** Query validation for `POST /assets/video` — both optional, same reasoning `VoiceUploadQueryRTO`
+/** Query validation for `POST /assets/video` — all optional, same reasoning `VoiceUploadQueryRTO`
  * gives: everything else `AssetTransformRequest`'s `'video'` member could carry
  * (`width`/`bitrateKbps`/`outputPath`) stays `AssetService`'s own transform-time decision, never an
  * HTTP-caller-facing knob. `breakpoint` defaults to `'mlg'` when omitted — see
- * `asset-service.ts`'s own `runVideoTransformation`. */
+ * `asset-service.ts`'s own `runVideoTransformation`. `thumbnail` stays a plain query STRING
+ * (`'true'`/`'false'`), never coerced to a real `boolean` here — `IsBooleanString` only validates
+ * the shape; the controller reads it as `search.thumbnail === 'true'` when building
+ * `AssetTransformRequest`. */
 export class VideoUploadQueryRTO extends BaseRTO {
   @IsEnum(['msm', 'mlg', 'dmd', 'dlg'], { expose: true, optional: true })
   accessor breakpoint: 'msm' | 'mlg' | 'dmd' | 'dlg' | undefined
 
   @IsEnum(['mp4', 'webm'], { expose: true, optional: true })
   accessor format: 'mp4' | 'webm' | undefined
+
+  @IsBooleanString({ expose: true, optional: true })
+  accessor thumbnail: string | undefined
 }

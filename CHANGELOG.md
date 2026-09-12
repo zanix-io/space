@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.12.0] - 2026-09-12
+
+### Added
+
+- **`POST /assets/video` can now also extract a real still-frame thumbnail, opt-in per request**
+  (`assets-api/typings.ts`, `asset-service.ts`, `assets.controller.ts`, `assets.rto.ts`). Video
+  transcoding already produced no derived poster image at all — a consumer wanting one had no way to
+  ask for it, even though `AssetTransformer.transformThumbnail()` (real, ffmpeg-backed) already
+  existed and `AssetVariant`'s own discriminated union already modeled a `'thumbnail'` kind; neither
+  was ever reachable from the HTTP upload flow. `AssetTransformRequest`'s `'video'` member gains an
+  optional `thumbnail?: boolean`, forwarded from a new `?thumbnail=true` query param
+  (`VideoUploadQueryRTO`, validated as a boolean STRING via `IsBooleanString`, never auto-coerced).
+  Deliberately just a boolean, not per-request timestamp/dimensions/format knobs — those stay
+  `runVideoTransformation`'s own fixed, declared policy (one second in, `jpeg`, the frame's own real
+  size), the same "explicit opt-in, no HTTP-caller-facing tuning knobs" posture
+  `breakpoint`/`format` already established for this same route. Extraction runs from the SAME
+  already-downloaded source bytes the video transcode itself uses, producing a second `AssetVariant`
+  (`kind: 'thumbnail'`, `transformId: 'video-thumbnail'`) stored independently of the video variant;
+  omitting `thumbnail` entirely (the default) costs nothing extra — `transformThumbnail` is never
+  called at all in that case, proven by a real unit test asserting on a transformer whose
+  `transformThumbnail` throws if reached. A thumbnail extraction failure fails the whole upload
+  (there is no "original" a thumbnail can fall back to, unlike the video transcode's own
+  never-worsen fallback) — a caller that can't tolerate that shouldn't request one.
+
 ## [1.11.3] - 2026-09-11
 
 ### Fixed

@@ -12,9 +12,27 @@
  * @module
  */
 
-import type { MiddlewareGuard } from '@zanix/server'
+import type { GenericPayload, HandlerContext, MiddlewareGuard } from '@zanix/server'
 import type { AssetService } from '../asset-service-types.ts'
 import type { ImagesOptimizeOptions } from '../../assets/image-optimize-types.ts'
+
+/**
+ * Resolves the identity of whoever is making the current request — a plain, INTEGRATOR-supplied
+ * extractor, never an auth mechanism this package picks (same "never assumed" posture `guards`
+ * itself already has — see `guards/deny-all-guard.ts`'s own doc). `undefined` means "no identity
+ * available for this request" (e.g. unauthenticated).
+ *
+ * Used two ways, deliberately with the SAME function so "who created this" and "who's asking now"
+ * resolve identically: `AssetsControllerOptions.resolveCallerId` stamps a newly created asset's
+ * `AssetRecord.ownerId` with its result, and `createOwnerScopedGuard()`
+ * (`guards/owner-scoped-guard.ts`) later compares it against that stored `ownerId`.
+ */
+export type ResolveCallerId = (
+  // `Partial<GenericPayload>`, not the default `GenericPayload` — this must accept every route's
+  // own narrower `HandlerContext<{search: ...}>`/`HandlerContext<{params: ...}>`, not just the
+  // fully-generic one, since every write/read/delete route below passes its own payload-typed `ctx`.
+  context: HandlerContext<Partial<GenericPayload>>,
+) => string | undefined | Promise<string | undefined>
 
 /** Options for `createAssetsController`. */
 export interface AssetsControllerOptions {
@@ -54,4 +72,15 @@ export interface AssetsControllerOptions {
    * decision, not a default this field should silently grow into.
    */
   imageOptimizeOptions?: ImagesOptimizeOptions
+  /**
+   * Resolves the caller's own id for every write request — when given, `POST /assets/audio`,
+   * `/assets/image` and `/assets/video` all stamp the created `AssetRecord.ownerId` with its
+   * result. Omitted (the default): `ownerId` stays unset, exactly as if this option didn't exist —
+   * no behavior change for an integrator with no ownership concept.
+   *
+   * Pass the SAME function to `createOwnerScopedGuard()` (`guards/owner-scoped-guard.ts`) to
+   * enforce it later on `guards.read`/`guards.delete` — see `ResolveCallerId`'s own doc for why
+   * this stays a plain extractor rather than a built-in auth mechanism.
+   */
+  resolveCallerId?: ResolveCallerId
 }

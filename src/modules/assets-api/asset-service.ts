@@ -505,6 +505,7 @@ export function createAssetService(options: AssetServiceOptions): AssetService {
         size: sourceBytes.byteLength,
         checksum,
         storageKey,
+        ownerId: command.ownerId,
       })
 
       await jobs.dispatch({

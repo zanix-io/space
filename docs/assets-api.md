@@ -60,6 +60,38 @@ mechanism this ecosystem's Templates/Triggers admin APIs already use. `guards.wr
 `POST` route; `guards.read` gates every `GET` route; they're independent, so read-only public access
 without write access is a normal configuration.
 
+#### Per-asset ownership
+
+`AssetRecord.ownerId?: string` is an opaque owner reference — never interpreted by this package
+itself — for a consumer that needs to answer "who owns this asset" (almost any real per-user upload
+app). It's unset unless populated:
+
+```ts
+createAssetsController({
+  service,
+  guards: { write: [authGuard], read: [authGuard], delete: [authGuard, ownerGuard] },
+  // Stamps every newly-created AssetRecord.ownerId with this request's caller id.
+  resolveCallerId: (ctx) => getSessionUserId(ctx), // your own auth, never assumed by this package
+})
+```
+
+`resolveCallerId` is a plain extractor YOU supply — same "never assumed" posture `guards` itself
+already has (see above); this package has no notion of JWTs/sessions/roles of its own. Pass the SAME
+function to `createOwnerScopedGuard(service, { resolveCallerId })` to build a guard that denies
+whenever the resolved caller id doesn't match the target asset's own `ownerId` (fails CLOSED — a
+missing caller id or a record with no `ownerId` on file is always denied, never treated as public):
+
+```ts
+import { createOwnerScopedGuard } from '@zanix/space/assets-api'
+
+const ownerGuard = createOwnerScopedGuard(service, { resolveCallerId: getSessionUserId })
+createAssetsController({ service, guards: { delete: [authGuard, ownerGuard] } })
+```
+
+A missing asset is deliberately not this guard's concern — it passes through so the route's own
+existing `404 NOT_FOUND` check runs. Omitting `resolveCallerId`/`createOwnerScopedGuard` entirely
+leaves `ownerId` unset and every route's behavior unchanged — this is purely additive.
+
 ### Upload contract
 
 There's no multipart support in this API — one file per request, and the entire request body IS the
@@ -217,9 +249,9 @@ production backend itself:
   itself; this package's own `dependency-boundary.test.ts` proves `@zanix/datamaster` never reaches
   `assets-api`'s published module graph, at compile time or runtime.
 - **`createAssetRepositoryOverFiles(files)`** — maps `AssetRecord`'s domain fields
-  (`kind`/`status`/`variants`/`error`) onto a generic file registry's free-form `metadata` bag,
-  given any object matching the structurally-declared `FileRepositoryLike` shape — the exact shape
-  `@zanix/datamaster/files`'s `MongoFileRepository` already has. Again, no import of
+  (`kind`/`status`/`variants`/`ownerId`/`error`) onto a generic file registry's free-form `metadata`
+  bag, given any object matching the structurally-declared `FileRepositoryLike` shape — the exact
+  shape `@zanix/datamaster/files`'s `MongoFileRepository` already has. Again, no import of
   `@zanix/datamaster` from this package; a consuming application passes its own
   `MongoFileRepository` instance (or anything else matching the shape) directly.
 
@@ -264,8 +296,10 @@ already implied by the shapes above, or plumbing most integrators never call dir
   `@zanix/datamaster/files`'s own `MongoFileRepository`/`FileRecord`/`CreateFileInput`/
   `UpdateFileInput` without importing them.
 - **`AssetsControllerInstance`/`AssetsControllerOptions`** — the types behind
-  `createAssetsController`'s return value and options (`service`/`prefix`/`guards`), documented
-  above.
+  `createAssetsController`'s return value and options
+  (`service`/`prefix`/`guards`/`resolveCallerId`), documented above.
+- **`ResolveCallerId`/`createOwnerScopedGuard`/`OwnerScopedGuardOptions`** — the per-asset ownership
+  pieces, documented in "Per-asset ownership" above.
 - **`AssetIdParamsRTO`/`VideoUploadQueryRTO`/`VoiceUploadQueryRTO`** — the `@zanix/validator` RTOs
   validating, respectively, the `:id` route param and the `/assets/video`/`/assets/audio` query
   strings shown above.

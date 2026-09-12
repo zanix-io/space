@@ -15,7 +15,7 @@
  * `AssetStorage` needs no adapter of its own — `S3ObjectStorage` (`@zanix/datamaster/storage`)
  * already structurally satisfies it (identical `put`/`get`/`delete`/`exists` shape). Only the
  * metadata side needs one: `createAssetRepositoryOverFiles` (`adapters/asset-repository-over-files.ts`)
- * maps `AssetRecord`'s domain fields (`kind`/`status`/`variants`/`error`) onto a generic file
+ * maps `AssetRecord`'s domain fields (`kind`/`status`/`variants`/`ownerId`/`error`) onto a generic file
  * registry's free-form `metadata` bag, given any object matching `FileRepositoryLike` (a real
  * `MongoFileRepository` in production).
  *
@@ -122,8 +122,16 @@ export type {
   AssetsControllerInstance,
   /** Options for {@linkcode createAssetsController}: `service`/`prefix`/`guards`. */
   AssetsControllerOptions,
+  /** Extracts the current caller's own id — shared between `AssetsControllerOptions.resolveCallerId`
+   * and {@linkcode createOwnerScopedGuard}. */
+  ResolveCallerId,
 } from './controllers/assets.controller.ts'
 export { denyAllGuard } from './controllers/guards/deny-all-guard.ts'
+export { createOwnerScopedGuard } from './controllers/guards/owner-scoped-guard.ts'
+export type {
+  /** Options for {@linkcode createOwnerScopedGuard}. */
+  OwnerScopedGuardOptions,
+} from './controllers/guards/owner-scoped-guard.ts'
 export {
   AssetIdParamsRTO,
   VideoUploadQueryRTO,

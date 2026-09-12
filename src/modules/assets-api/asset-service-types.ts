@@ -26,6 +26,9 @@ export interface CreateAssetCommand {
   upload: UploadedAsset
   /** What transform to run against the upload — see `AssetTransformRequest`. */
   transformRequest: AssetTransformRequest
+  /** Copied verbatim onto the created `AssetRecord.ownerId` — see that field's own doc. Omitted:
+   * the record's `ownerId` stays unset, exactly as if this field didn't exist. */
+  ownerId?: string
 }
 
 /**

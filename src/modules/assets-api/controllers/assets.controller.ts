@@ -3,7 +3,9 @@
  * touches ffmpeg/sharp/filesystem/storage backends directly (see `src/@tests/unit/assets-api/
  * controller.test.ts`'s own import-boundary check) — every real operation goes through `service`.
  * Guards default to deny-all (see `guards/deny-all-guard.ts`'s own doc) — passing a real `guards`
- * list is how an integrator opts these routes into real access control.
+ * list is how an integrator opts these routes into real access control. `resolveCallerId`
+ * (`AssetsControllerOptions`'s own doc) is the separate, optional hook for per-asset ownership —
+ * stamping `AssetRecord.ownerId` on write, enforced later via `guards/owner-scoped-guard.ts`.
  *
  * `ZanixController`, not `ZanixSsrController` — this is a genuine JSON REST resource API, the same
  * shape Templates/Triggers/DLQ-style admin APIs already use in this ecosystem, not a page/byte
@@ -20,9 +22,9 @@ import { HttpError } from '@zanix/errors'
 import { readUploadedAssetFromRequest } from '../upload.ts'
 import { denyAllGuard } from './guards/deny-all-guard.ts'
 import { AssetIdParamsRTO, VideoUploadQueryRTO, VoiceUploadQueryRTO } from './rtos/assets.rto.ts'
-import type { AssetsControllerOptions } from './assets-controller-types.ts'
+import type { AssetsControllerOptions, ResolveCallerId } from './assets-controller-types.ts'
 
-export type { AssetsControllerOptions }
+export type { AssetsControllerOptions, ResolveCallerId }
 
 /** Combines a guard list into ONE guard: runs each in order, short-circuiting on the first
  * denial. Empty/omitted lists fall back to `[denyAllGuard]` — the concrete mechanism behind
@@ -96,7 +98,7 @@ export interface AssetsControllerInstance extends ZanixController {
 export function createAssetsController(
   options: AssetsControllerOptions,
 ): new (context: HandlerContext) => AssetsControllerInstance {
-  const { service, prefix = 'assets', imageOptimizeOptions } = options
+  const { service, prefix = 'assets', imageOptimizeOptions, resolveCallerId } = options
   const writeGuard = combineGuards(options.guards?.write)
   const readGuard = combineGuards(options.guards?.read)
   const deleteGuard = combineGuards(options.guards?.delete)
@@ -116,6 +118,7 @@ export function createAssetsController(
           profile: 'voice',
           options: { format: ctx.payload.search.format },
         },
+        ownerId: await resolveCallerId?.(ctx),
       })
       return { ...record }
     }
@@ -129,6 +132,7 @@ export function createAssetsController(
         transformRequest: imageOptimizeOptions
           ? { kind: 'image', options: imageOptimizeOptions }
           : { kind: 'image' },
+        ownerId: await resolveCallerId?.(ctx),
       })
       return { ...record }
     }
@@ -153,6 +157,7 @@ export function createAssetsController(
             ...(ctx.payload.search.thumbnail === 'true' ? { thumbnail: true } : {}),
           },
         },
+        ownerId: await resolveCallerId?.(ctx),
       })
       return { ...record }
     }

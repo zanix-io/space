@@ -661,6 +661,46 @@ Deno.test(
 )
 
 Deno.test(
+  'createAsset: command.ownerId is copied verbatim onto the persisted AssetRecord.ownerId',
+  async () => {
+    const repository = createInMemoryAssetRepository()
+    const service = createAssetService({
+      transformer: createImageTransformer(),
+      storage: createInMemoryAssetStorage(),
+      repository,
+    })
+
+    const record = await service.createAsset({
+      upload: { stream: streamFrom(jpegFixture()), contentType: 'image/jpeg' },
+      transformRequest: { kind: 'image' },
+      ownerId: 'user-42',
+    })
+
+    assertEquals(record.ownerId, 'user-42')
+    assertEquals((await repository.findById(record.id))?.ownerId, 'user-42')
+  },
+)
+
+Deno.test(
+  'createAsset: an omitted ownerId leaves AssetRecord.ownerId unset — no behavior change for a ' +
+    'consumer with no ownership concept',
+  async () => {
+    const service = createAssetService({
+      transformer: createImageTransformer(),
+      storage: createInMemoryAssetStorage(),
+      repository: createInMemoryAssetRepository(),
+    })
+
+    const record = await service.createAsset({
+      upload: { stream: streamFrom(jpegFixture()), contentType: 'image/jpeg' },
+      transformRequest: { kind: 'image' },
+    })
+
+    assertEquals(record.ownerId, undefined)
+  },
+)
+
+Deno.test(
   'createAsset: an image content-type outside jpeg/png/webp marks the record failed with a real, ' +
     'actionable BAD_REQUEST message',
   async () => {

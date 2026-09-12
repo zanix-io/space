@@ -32,6 +32,7 @@ export function createInMemoryAssetRepository(): AssetRepository {
         size: input.size,
         checksum: input.checksum,
         storageKey: input.storageKey,
+        ownerId: input.ownerId,
         variants: [],
         createdAt: now,
         updatedAt: now,

@@ -86,7 +86,34 @@ Deno.test(
     const stored = await files.findById('asset-1')
     assert(stored)
     assertEquals(stored.key, 'assets/asset-1/original')
-    assertEquals(stored.metadata, { kind: 'image', status: 'pending', variants: [] })
+    assertEquals(
+      stored.metadata,
+      { kind: 'image', status: 'pending', variants: [], ownerId: undefined },
+    )
+  },
+)
+
+Deno.test(
+  'createAssetRepositoryOverFiles.create persists ownerId in the metadata bag, and update() ' +
+    'never clears it',
+  async () => {
+    const repository = createAssetRepositoryOverFiles(createFakeFileRepository())
+
+    const created = await repository.create({
+      id: 'asset-1',
+      kind: 'image',
+      contentType: 'image/jpeg',
+      size: 1024,
+      checksum: 'abc123',
+      storageKey: 'assets/asset-1/original',
+      ownerId: 'user-42',
+    })
+    assertEquals(created.ownerId, 'user-42')
+
+    // `status` is the only field in `changes` — the read-modify-write merge (see this adapter's
+    // own doc) must carry `ownerId` forward from the existing record, same as `kind`.
+    const updated = await repository.update('asset-1', { status: 'completed' })
+    assertEquals(updated.ownerId, 'user-42')
   },
 )
 

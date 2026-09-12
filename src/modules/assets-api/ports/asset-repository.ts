@@ -5,7 +5,7 @@
  * consuming application's own composition concern, not this package's or `@zanix/datamaster`'s:
  * `@zanix/datamaster/files`'s `MongoFileRepository` is a generic, durable file-record registry
  * (key/contentType/size/checksum/filename/free-form `metadata`) that a real deployment maps
- * `AssetRecord`'s own fields (`kind`/`status`/`variants`/`error`) onto — most naturally through its
+ * `AssetRecord`'s own fields (`kind`/`status`/`variants`/`ownerId`/`error`) onto — most naturally through its
  * `metadata` bag — rather than `@zanix/datamaster` gaining any Asset-specific knowledge of its own.
  * That mapping isn't implemented anywhere yet; `InMemoryAssetRepository` (`../adapters/`) is this
  * package's only own implementation today.
@@ -38,6 +38,8 @@ export interface CreateAssetInput {
   checksum: string
   /** Logical storage key of the original upload — see `../keys.ts`. */
   storageKey: string
+  /** Copied verbatim onto the created `AssetRecord.ownerId` — see that field's own doc. */
+  ownerId?: string
 }
 
 /** Partial update applied to an existing `AssetRecord` — every field is optional, only the ones

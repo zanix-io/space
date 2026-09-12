@@ -202,6 +202,44 @@ Deno.test(
 )
 
 Deno.test(
+  'createImageAsset: a configured resolveCallerId stamps its result onto ownerId',
+  async () => {
+    const { service, calls } = createSpyAssetService()
+    const ControllerClass = createAssetsController({
+      service,
+      prefix: 'assets-image-owner-test',
+      guards: { write: [allowAllGuard], read: [allowAllGuard] },
+      resolveCallerId: () => 'user-42',
+    })
+    const ctx = mockHandlerContext({ req: uploadRequest('image/jpeg') })
+    const controller = new ControllerClass(ctx)
+
+    await controller.createImageAsset(ctx)
+
+    assertEquals(calls.length, 1)
+    assertEquals(calls[0].ownerId, 'user-42')
+  },
+)
+
+Deno.test(
+  'createImageAsset: an omitted resolveCallerId leaves ownerId unset — no behavior change',
+  async () => {
+    const { service, calls } = createSpyAssetService()
+    const ControllerClass = createAssetsController({
+      service,
+      prefix: 'assets-image-no-owner-test',
+      guards: { write: [allowAllGuard], read: [allowAllGuard] },
+    })
+    const ctx = mockHandlerContext({ req: uploadRequest('image/jpeg') })
+    const controller = new ControllerClass(ctx)
+
+    await controller.createImageAsset(ctx)
+
+    assertEquals(calls[0].ownerId, undefined)
+  },
+)
+
+Deno.test(
   'createVideoAsset: reads the real upload and forwards the search query ' +
     '(breakpoint/format) straight into transformRequest.options',
   async () => {

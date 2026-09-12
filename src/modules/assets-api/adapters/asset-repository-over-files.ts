@@ -1,7 +1,7 @@
 /**
  * Adapts a generic file-record registry — the exact shape `@zanix/datamaster/files`'s
  * `MongoFileRepository` already has — into this package's own `AssetRepository` port, mapping
- * `AssetRecord`'s domain fields (`kind`/`status`/`variants`/`error`) onto the generic registry's
+ * `AssetRecord`'s domain fields (`kind`/`status`/`variants`/`ownerId`/`error`) onto the generic registry's
  * free-form `metadata` bag, exactly as `ports/asset-repository.ts`'s own top-level doc already
  * describes as the intended real-deployment mapping.
  *
@@ -98,6 +98,7 @@ interface AssetMetadata {
   kind?: AssetKind
   status?: AssetStatus
   variants?: AssetVariant[]
+  ownerId?: string
   error?: { message: string }
 }
 
@@ -134,6 +135,7 @@ function toAssetRecord(file: FileRecordLike): AssetRecord {
     checksum: file.checksum,
     storageKey: file.key,
     variants: meta.variants ?? [],
+    ownerId: meta.ownerId,
     error: meta.error,
     createdAt: file.createdAt,
     updatedAt: file.updatedAt,
@@ -149,7 +151,7 @@ function toAssetRecord(file: FileRecordLike): AssetRecord {
  * `update()` does a real read-modify-write of `metadata`: the underlying registry's own
  * `update()` contract replaces `metadata` wholesale (it has no partial-field semantics of its
  * own, matching a plain Mongo `$set`), so this adapter reads the CURRENT record first and merges
- * `changes` on top of its existing `kind`/`status`/`variants`/`error` before writing the full
+ * `changes` on top of its existing `kind`/`status`/`variants`/`ownerId`/`error` before writing the full
  * metadata object back — the same merge shape `InMemoryAssetRepository`'s own in-process `update()`
  * already has (an omitted field in `changes` never clears a previously-set one; only a field
  * actually present in `changes` overrides).
@@ -172,6 +174,7 @@ export function createAssetRepositoryOverFiles(files: FileRepositoryLike): Asset
           kind: input.kind,
           status: 'pending',
           variants: [],
+          ownerId: input.ownerId,
         } satisfies AssetMetadata,
       })
       return toAssetRecord(created)
@@ -193,6 +196,7 @@ export function createAssetRepositoryOverFiles(files: FileRepositoryLike): Asset
           kind: existingMeta.kind,
           status: changes.status ?? existingMeta.status,
           variants: changes.variants ?? existingMeta.variants ?? [],
+          ownerId: existingMeta.ownerId,
           error: changes.error ?? existingMeta.error,
         } satisfies AssetMetadata,
       })

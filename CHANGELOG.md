@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.12.2] - 2026-09-12
+
+### Added
+
+- **`AssetRecord.ownerId?: string`** (`assets-api/typings.ts`) — an opaque owner reference, never
+  interpreted by this package itself, plumbed end to end through `CreateAssetCommand.ownerId`
+  (`asset-service.ts`), `CreateAssetInput.ownerId` (`ports/asset-repository.ts`), and both
+  `AssetRepository` adapters (`adapters/in-memory-asset-repository.ts`,
+  `adapters/asset-repository-over-files.ts`, packed into its generic `metadata` bag). Previously,
+  `AssetRecord` had no extension point at all for "who owns this asset" — any consumer with a
+  per-user ownership concern had to build a full parallel resource just to answer that question.
+- **`AssetsControllerOptions.resolveCallerId`** (`controllers/assets-controller-types.ts`) — an
+  optional, integrator-supplied extractor that stamps every write route's created
+  `AssetRecord.ownerId` with the current caller's id. Deliberately a plain function, never an auth
+  mechanism this package picks — same "never assumed" posture `guards` itself already has.
+- **`createOwnerScopedGuard`** (`controllers/guards/owner-scoped-guard.ts`) — a `MiddlewareGuard`
+  factory built on the same `resolveCallerId` extractor, denying a request unless the target asset's
+  own `ownerId` matches the resolved caller id. Fails closed whenever either side is missing; a
+  missing asset passes through so the route's own `NOT_FOUND` check runs. Both are purely additive —
+  omitted, every route's behavior is unchanged.
+
 ## [1.12.1] - 2026-09-12
 
 ### Fixed

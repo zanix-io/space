@@ -143,6 +143,13 @@ export interface AssetRecord {
   storageKey: string
   /** Transformed outputs produced from the original upload. */
   variants: AssetVariant[]
+  /** Opaque owner reference, e.g. a user/tenant id — never interpreted by this package itself
+   * (same posture as `wallet`'s own opaque `ownerId`). Unset unless the caller populates
+   * `CreateAssetCommand.ownerId`, or `AssetsControllerOptions.resolveCallerId` is configured on
+   * the controller. Exists so a consumer with an ownership concept (almost any real per-user
+   * upload app) can answer "who owns this asset" directly off the record, instead of maintaining
+   * a parallel resource just to track it. */
+  ownerId?: string
   /** Set only when `status === 'failed'`. */
   error?: { message: string }
   /** ISO timestamp of when the record was created. */

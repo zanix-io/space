@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.13.0] - 2026-09-13
+
+### Added
+
+- **`attachSubmitIntercept`/`useSubmitIntercept`** (`src/modules/comets/submit-intercept.ts`,
+  React/Preact bindings) — a new comet primitive for a consumer that needs to intercept a form's
+  real `submit`, run its own async decision (a `fetch()` lookup, typically), and either handle it
+  entirely itself or let the original submission proceed. Real, confirmed gap this closes:
+  `SubmitGuard`/`ManagedForm({ submitGuard: true })` disables a form's own submit control
+  SYNCHRONOUSLY, on the very first `submit` event — a consumer's own hand-rolled interceptor that
+  later called `form.requestSubmit()` once its async work resolved hit a real bug, reproduced live
+  in a real consumer app: `requestSubmit()` requires an enabled submitter and silently no-ops
+  without one, so the deferred submission never fired at all — the visitor stuck on a
+  permanently-disabled button, no navigation, no visible error. `attachSubmitIntercept` closes this
+  at the source: it disables/re-enables the form's own controls itself, coordinated with its own
+  `intercept` callback's async work, and — on `'proceed'` (or a rejected `intercept` promise,
+  treated identically, since this is never the authoritative decision) — submits via `form.submit()`
+  instead, which neither requires nor looks at any control's `disabled` state, and — unlike
+  `requestSubmit()` — never re-fires a second cancelable `submit` event, so there's no re-entrancy
+  to guard against either. Compatible with `SubmitGuard`/`ManagedForm` staying mounted on the same
+  form (confirmed by a real regression test reproducing the original bug's exact shape):
+  `SubmitGuard` never sees this primitive's own final `form.submit()` call, so nothing conflicts,
+  though a consumer using `SubmitIntercept` usually doesn't need `submitGuard: true` too, since this
+  primitive already gives that same double-submit protection, coordinated with the async decision.
+  `useSubmitIntercept` is a plain hook (not a `defineComet`-wrapped boundary like `SubmitGuard`/
+  `ManagedForm`), since `intercept` is a real function and a Comet's own props must cross the wire
+  as JSON — meant to be called from inside a consumer's own `'use comet'` file.
+- **`ManagedFormOptions.intercept`** — `attachManagedForm` composes `attachSubmitIntercept` too now,
+  a fourth option alongside `draft`/`submitGuard`/`unsavedChanges`. Reachable only by calling
+  `attachManagedForm` directly (the rendered `ManagedForm` Comet's own public prop type excludes it,
+  same JSON-boundary reasoning as `useSubmitIntercept` itself).
+
+### Fixed
+
+- **`managed-form.ts`'s own module doc overstated when "attaching more than one behavior to the same
+  `submit` event is safe by construction."** True for listeners that only ever react to one `submit`
+  event, not qualified for a listener with a synchronous side effect (`SubmitGuard` disabling
+  controls) that breaks a DIFFERENT listener needing to re-fire the submission later, after async
+  work — the exact bug `attachSubmitIntercept` above exists to close. The doc now states this
+  qualification explicitly and points at the new primitive as the fix.
+
 ## [1.12.2] - 2026-09-12
 
 ### Added

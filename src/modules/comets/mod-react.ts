@@ -21,6 +21,8 @@ export { default as FormDraftPersistence } from './form-draft-persistence-react.
 export type { DraftStorageKind, FormDraftPersistenceOptions } from './form-draft-persistence.ts'
 export { default as SubmitGuard } from './submit-guard-react.tsx'
 export type { SubmitGuardOptions } from './submit-guard.ts'
+export { useSubmitIntercept } from './submit-intercept-react.tsx'
+export type { SubmitInterceptOptions } from './submit-intercept.ts'
 export { default as ScrollRestoration } from './scroll-restoration-react.tsx'
 export type { ScrollRestorationOptions } from './scroll-restoration.ts'
 export { default as UnsavedChangesGuard } from './unsaved-changes-guard-react.tsx'

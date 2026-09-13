@@ -5,12 +5,17 @@ import { attachManagedForm } from './managed-form.ts'
 import type { ManagedFormOptions } from './managed-form.ts'
 import type { CometBoundaryComponent, CometProps } from 'typings/comet.ts'
 
+/** `ManagedFormOptions` minus `intercept` — see `managed-form-react.tsx`'s own `ManagedForm` doc
+ * for why: `intercept` is a real function, never JSON-serializable, so this Comet boundary's own
+ * props can never carry it. */
+export type ManagedFormComponentProps = Omit<ManagedFormOptions, 'intercept'>
+
 /**
  * Identical to `@zanix/space/comet/react`'s `ManagedForm`, wiring the same hook-free
  * {@linkcode attachManagedForm} into `preact/hooks`' own `useEffect` instead — see that module's
- * own doc for the full contract.
+ * own doc for the full contract, including why `intercept` is excluded from this component's props.
  */
-export function ManagedForm(props: ManagedFormOptions): null {
+export function ManagedForm(props: ManagedFormComponentProps): null {
   useEffect(() => attachManagedForm(props), [
     props.formId,
     props.draft,
@@ -28,5 +33,5 @@ export function ManagedForm(props: ManagedFormOptions): null {
  * no-slow-types reasoning, not a Preact-specific concern.
  */
 export default defineComet(ManagedForm, import.meta.url) as CometBoundaryComponent<
-  ManagedFormOptions & CometProps
+  ManagedFormComponentProps & CometProps
 >

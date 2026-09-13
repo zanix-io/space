@@ -92,6 +92,22 @@ A missing asset is deliberately not this guard's concern — it passes through s
 existing `404 NOT_FOUND` check runs. Omitting `resolveCallerId`/`createOwnerScopedGuard` entirely
 leaves `ownerId` unset and every route's behavior unchanged — this is purely additive.
 
+**Write `getSessionUserId` to read a session off BOTH `ctx.session` and `ctx.locals.session` — real
+bug, confirmed empirically, if it only reads one.** `resolveCallerId` gets called from two genuinely
+different pipeline stages: `createOwnerScopedGuard` calls it from a Guard (`delete`), which runs
+BEFORE `@zanix/server`'s own `contextSettingPipe` promotes `ctx.locals.session` onto the frozen
+`ctx.session` (only `ctx.locals.session` is populated yet); `createAssetsController`'s own write
+handlers call it from INSIDE THE HANDLER, which runs AFTER that promotion (`contextSettingPipe`
+deletes `ctx.locals.session` in the same step, so only `ctx.session` exists by then). A
+`getSessionUserId` reading only `ctx.locals.session` silently stamps every real upload's `ownerId`
+as `undefined` — never throwing, never logging:
+
+```ts
+function getSessionUserId(ctx: HandlerContext): string | undefined {
+  return ctx.session?.subject ?? ctx.locals.session?.subject
+}
+```
+
 ### Upload contract
 
 There's no multipart support in this API — one file per request, and the entire request body IS the

@@ -37,6 +37,8 @@ export type {
 } from './form-draft-persistence.ts'
 export { attachSubmitGuard } from './submit-guard.ts'
 export type { SubmitGuardOptions } from './submit-guard.ts'
+export { attachSubmitIntercept } from './submit-intercept.ts'
+export type { SubmitInterceptOptions } from './submit-intercept.ts'
 export { attachScrollRestoration } from './scroll-restoration.ts'
 export type { ScrollRestorationOptions } from './scroll-restoration.ts'
 export { attachUnsavedChangesGuard } from './unsaved-changes-guard.ts'

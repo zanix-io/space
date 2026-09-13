@@ -407,6 +407,70 @@ export default defineComet(ConnectionBanner, import.meta.url)
 `attachNetworkStatus` (`@zanix/space/comet`) is the callback-based primitive both `NetworkStatus`
 Comets wire their own DOM write into.
 
+### Asynchronous submit interception
+
+A hook-free primitive letting a Comet intercept a `<form>`'s real submission ASYNCHRONOUSLY —
+decide, after awaiting a `fetch()` or other async work, whether the submission should proceed for
+real or was already fully handled in place (e.g. a second step revealed, never navigating at all):
+
+```tsx
+// login-two-step.comet.tsx
+'use comet'
+import { defineComet } from '@zanix/space/comet'
+import { useSubmitIntercept } from '@zanix/space/comet/react' // or '@zanix/space/comet/preact'
+
+function LoginTwoStep({ formId }: { formId: string }) {
+  useSubmitIntercept({
+    formId,
+    intercept: async (form) => {
+      const hasPassword = await checkHasPassword(form)
+      if (hasPassword) {
+        revealPasswordStep()
+        return 'handled'
+      }
+      return 'proceed'
+    },
+  })
+  return null
+}
+export default defineComet(LoginTwoStep, import.meta.url)
+```
+
+On the form's first real `submit`: calls `event.preventDefault()` unconditionally, disables every
+submit-triggering control itself while `intercept` is pending (the same double-submit protection
+`SubmitGuard` gives, coordinated with the async work instead of blind to it — a second real `submit`
+while `intercept` is still pending is rejected outright), then calls `intercept(form)`. `'handled'`
+re-enables the controls and stops there. `'proceed'` — or a REJECTED promise, treated identically,
+the same never-the-authoritative-decision fallback a network-dependent `intercept` should already
+follow — re-enables the controls and calls `form.submit()`, **never** `form.requestSubmit()`.
+
+**Why `form.submit()`, specifically**: `requestSubmit()` needs a real, enabled submit control to act
+as the submitter and silently no-ops without one; `form.submit()` neither requires nor looks at any
+control's `disabled` state at all. This is the actual fix for a real, confirmed bug — a Comet
+intercepting `submit` with its own raw listener, doing async work, then calling
+`form.requestSubmit()` once it resolved, on a form that also had `SubmitGuard` disabling every
+submit control SYNCHRONOUSLY on that same first `submit`. By the time the async work resolved, the
+only control was already disabled and `requestSubmit()` silently no-oped — the submission never
+fired, the button stuck forever, nothing thrown anywhere. `form.submit()` also never dispatches a
+second, cancelable `submit` event, so there is no re-entrancy into this same handler to guard
+against.
+
+`useSubmitIntercept` (unlike `SubmitGuard`/`ManagedForm`) is a **plain hook, not a `defineComet`
+boundary** — `intercept` is a real function, and a Comet's own props must cross the server/client
+boundary as plain JSON, so there is no way to hand a rendered Comet boundary a callback prop at all.
+Call it from within your own `'use comet'` file's component body instead, the same way
+`useCometStableId` already works.
+
+**Compatible with `SubmitGuard`/`ManagedForm({ submitGuard: true })` on the same form, but usually
+redundant with it**: `SubmitGuard` never sees this primitive's own final `form.submit()` call (it
+doesn't dispatch a `submit` event at all), so the two don't fight over the final submission — but a
+consumer using `SubmitIntercept` almost certainly doesn't need `submitGuard: true` too, since this
+primitive already gives the same double-submit protection on its own, coordinated with the async
+decision.
+
+`attachSubmitIntercept` (`@zanix/space/comet`) is the hook-free primitive `useSubmitIntercept` wires
+into its own `useEffect`.
+
 ### Composing form behaviors: `ManagedForm`
 
 A ready-made Comet composing `FormDraftPersistence`/`SubmitGuard`/`UnsavedChangesGuard` under one
@@ -428,12 +492,21 @@ import { ManagedForm } from '@zanix/space/comet/react' // or '@zanix/space/comet
 — it has no default-enabled state, since `storageKey`/`hasServerValues` are themselves required);
 `submitGuard`/`unsavedChanges` each take `true` for their own defaults, an options object (again
 minus `formId`) to customize, or omit/`false` to leave that one disabled. Attaching more than one to
-the same `submit`/`input`/`change` event is safe by construction — each is an independent
-`addEventListener` call; native DOM listeners never overwrite each other, and one calling
-`event.preventDefault()` (`SubmitGuard`, rejecting a second submission) doesn't stop the others from
-also running.
+the same `submit`/`input`/`change` event is safe by construction FOR A LISTENER THAT ONLY EVER
+REACTS to that one event — each is an independent `addEventListener` call; native DOM listeners
+never overwrite each other, and one calling `event.preventDefault()` (`SubmitGuard`, rejecting a
+second submission) doesn't stop the others from also running. It is NOT safe for a listener with a
+synchronous side effect (disabling controls) that breaks another one needing to re-trigger the
+submission LATER, after async work — see "Asynchronous submit interception" above for the real bug
+that surfaced, and why `attachSubmitIntercept` exists to fix it properly.
 
-**Does not render the `<form>` itself**, same reason none of the three primitives it composes do: a
+`attachManagedForm` also accepts `intercept` (`SubmitInterceptOptions` minus `formId`) as a fourth
+composed behavior — omit for the common case. Since `intercept` is a real function, it's never
+JSON-serializable, so it's excluded from `ManagedForm`'s own rendered Comet boundary props; pass it
+only by calling `attachManagedForm` directly from your own `'use comet'` file, the same way
+`useSubmitIntercept` already works standalone.
+
+**Does not render the `<form>` itself**, same reason none of the primitives it composes do: a
 Comet's own props must be plain JSON, so a component that also needs to accept arbitrary field
 markup as `children` — closures, event handlers, none of it JSON-serializable — can't be one
 hydratable boundary. The `<form>` and its fields stay ordinary, server-rendered markup; this only

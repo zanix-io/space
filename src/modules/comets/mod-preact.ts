@@ -9,6 +9,8 @@ export { default as FormDraftPersistence } from './form-draft-persistence-preact
 export type { DraftStorageKind, FormDraftPersistenceOptions } from './form-draft-persistence.ts'
 export { default as SubmitGuard } from './submit-guard-preact.tsx'
 export type { SubmitGuardOptions } from './submit-guard.ts'
+export { useSubmitIntercept } from './submit-intercept-preact.tsx'
+export type { SubmitInterceptOptions } from './submit-intercept.ts'
 export { default as ScrollRestoration } from './scroll-restoration-preact.tsx'
 export type { ScrollRestorationOptions } from './scroll-restoration.ts'
 export { default as UnsavedChangesGuard } from './unsaved-changes-guard-preact.tsx'

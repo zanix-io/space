@@ -5,6 +5,9 @@ import { attachManagedForm } from './managed-form.ts'
 import type { ManagedFormOptions } from './managed-form.ts'
 import type { CometBoundaryComponent, CometProps } from 'typings/comet.ts'
 
+/** `ManagedFormOptions` minus `intercept` — see {@linkcode ManagedForm}'s own doc for why. */
+export type ManagedFormComponentProps = Omit<ManagedFormOptions, 'intercept'>
+
 /**
  * Ready-made Comet wiring {@linkcode attachManagedForm} into React's own `useEffect` — the default
  * a consumer app reaches for to enable more than one form behavior without a separate
@@ -24,8 +27,14 @@ import type { CometBoundaryComponent, CometProps } from 'typings/comet.ts'
  *   unsavedChanges
  * />
  * ```
+ *
+ * **Never accepts `intercept`** — `ManagedFormOptions.intercept` is a real function, and this
+ * component's own props cross the server/client boundary as plain JSON (`defineComet`'s own
+ * `stringifyForWire` call), the same reason no ready-made Comet in this package accepts a callback
+ * prop. Compose `attachManagedForm({ ..., intercept })` directly inside your own `'use comet'` file
+ * instead when you need it — see `managed-form.ts`'s own `intercept` doc.
  */
-export function ManagedForm(props: ManagedFormOptions): null {
+export function ManagedForm(props: ManagedFormComponentProps): null {
   useEffect(() => attachManagedForm(props), [
     props.formId,
     props.draft,
@@ -43,5 +52,5 @@ export function ManagedForm(props: ManagedFormOptions): null {
  * no-slow-types reasoning.
  */
 export default defineComet(ManagedForm, import.meta.url) as CometBoundaryComponent<
-  ManagedFormOptions & CometProps
+  ManagedFormComponentProps & CometProps
 >

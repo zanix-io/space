@@ -161,6 +161,29 @@ Deno.test(
 )
 
 Deno.test(
+  'attachManagedForm: intercept composes attachSubmitIntercept, scoped to this formId',
+  async () => {
+    setUp()
+    const form = buildForm('m8')
+    let submitCalls = 0
+    form.submit = () => {
+      submitCalls++
+    }
+    const detach = attachManagedForm({
+      formId: 'm8',
+      intercept: { intercept: () => Promise.resolve('proceed') },
+    })
+
+    fireSubmit(form)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    assertEquals(submitCalls, 1)
+    detach()
+  },
+)
+
+Deno.test(
   'attachManagedForm: cleanup detaches every behavior it enabled',
   () => {
     setUp()

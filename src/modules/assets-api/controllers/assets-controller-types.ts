@@ -26,6 +26,26 @@ import type { ImagesOptimizeOptions } from '../../assets/image-optimize-types.ts
  * resolve identically: `AssetsControllerOptions.resolveCallerId` stamps a newly created asset's
  * `AssetRecord.ownerId` with its result, and `createOwnerScopedGuard()`
  * (`guards/owner-scoped-guard.ts`) later compares it against that stored `ownerId`.
+ *
+ * **Real trap, confirmed empirically by a real integrator (not hypothetical) — read a session off
+ * BOTH `context.session` and `context.locals.session`, never just one.** `@zanix/server`'s own
+ * `contextSettingPipe` (`modules/infra/middlewares/defaults/context.pipe.ts`) merges
+ * `context.locals.session` into the frozen top-level `context.session` and then DELETES
+ * `context.locals.session` in that same step — but this function gets called from two genuinely
+ * different pipeline stages depending on which guard group invokes it: `createOwnerScopedGuard()`
+ * calls it from a Guard (`delete`), which runs BEFORE `contextSettingPipe`, so only
+ * `context.locals.session` is populated yet; `createAssetsController`'s own write handlers
+ * (`createImageAsset`/`createVideoAsset`) call it from INSIDE THE HANDLER, which runs AFTER
+ * `contextSettingPipe`, so only `context.session` exists by then (`locals.session` is already
+ * gone). The natural-looking single-field version —
+ * `(ctx) => ctx.locals.session?.subject` — silently stamps `ownerId: undefined` on every real
+ * upload, never throwing or logging anything, since nothing here validates its result beyond
+ * "did I get a string or not." A real consumer:
+ *
+ * ```ts
+ * const resolveCallerId: ResolveCallerId = (ctx) =>
+ *   ctx.session?.subject ?? ctx.locals.session?.subject
+ * ```
  */
 export type ResolveCallerId = (
   // `Partial<GenericPayload>`, not the default `GenericPayload` — this must accept every route's

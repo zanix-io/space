@@ -519,6 +519,11 @@ Deno.test('onClick: startViewTransition is used when the browser supports it', a
   view.document.startViewTransition = (callback: () => void) => {
     transitionRan = true
     callback()
+    return {
+      finished: Promise.resolve(),
+      ready: Promise.resolve(),
+      updateCallbackDone: Promise.resolve(),
+    }
   }
 
   try {
@@ -531,6 +536,90 @@ Deno.test('onClick: startViewTransition is used when the browser supports it', a
     delete view.document.startViewTransition
   }
 })
+
+Deno.test(
+  'performSwap: document.startViewTransition throwing synchronously (a previous transition on ' +
+    "this document hasn't fully settled yet) falls back to swap() directly — the same fallback " +
+    "the feature-detection branch already takes when the API doesn't exist at all — so the " +
+    'navigation still completes instead of the throw propagating',
+  async () => {
+    const { outlet } = setUp()
+    fetchImpl = () => Promise.resolve(okResponse(outletHtml('<p>new content</p>')))
+    view.document.startViewTransition = () => {
+      throw new DOMException('Transition was aborted because of invalid state', 'InvalidStateError')
+    }
+
+    try {
+      await navigate('/checkout')
+
+      assertEquals(outlet.innerHTML, '<p>new content</p>')
+      assertEquals(historyCalls, [{ method: 'pushState', url: 'https://example.com/checkout' }])
+    } finally {
+      delete view.document.startViewTransition
+    }
+  },
+)
+
+Deno.test(
+  "swapOutlet: a second, overlapping navigation waits for the FIRST transition's own `finished` " +
+    'promise before starting its own — not just for its synchronous swap() — and a `finished` ' +
+    'that REJECTS (a transition getting skipped/aborted, not a real failure) never propagates out ' +
+    'of either navigation. The real bug this closes: before this fix, `performSwap` resolved (and ' +
+    "`pendingSwap` cleared) the instant swap() ran, well before the browser's own view transition " +
+    'had actually settled, letting a second startViewTransition call land on one still mid-flight',
+  async () => {
+    const { outlet } = setUp()
+    fetchImpl = (input) =>
+      Promise.resolve(
+        okResponse(outletHtml(String(input).endsWith('/a') ? '<p>a</p>' : '<p>b</p>')),
+      )
+
+    let startViewTransitionCalls = 0
+    let rejectFirstFinished: (reason: unknown) => void = () => {}
+    const firstFinished = new Promise<void>((_resolve, reject) => {
+      rejectFirstFinished = reject
+    })
+    view.document.startViewTransition = (callback: () => void) => {
+      startViewTransitionCalls += 1
+      callback()
+      return {
+        finished: startViewTransitionCalls === 1 ? firstFinished : Promise.resolve(),
+        ready: Promise.resolve(),
+        updateCallbackDone: Promise.resolve(),
+      }
+    }
+
+    try {
+      const first = navigate('/a')
+      const second = navigate('/b')
+      await flush()
+
+      assertEquals(fetchCalls.length, 1)
+      assertEquals(
+        startViewTransitionCalls,
+        1,
+        'the second navigation must not start its own transition until the first has settled',
+      )
+      assertEquals(outlet.innerHTML, '<p>a</p>')
+      assertEquals(historyCalls, [{ method: 'pushState', url: 'https://example.com/a' }])
+
+      rejectFirstFinished(new DOMException('aborted', 'AbortError'))
+      await first
+      await second
+      await flush()
+
+      assertEquals(fetchCalls.length, 2)
+      assertEquals(startViewTransitionCalls, 2)
+      assertEquals(outlet.innerHTML, '<p>b</p>', 'the second destination must still land correctly')
+      assertEquals(historyCalls, [
+        { method: 'pushState', url: 'https://example.com/a' },
+        { method: 'pushState', url: 'https://example.com/b' },
+      ])
+    } finally {
+      delete view.document.startViewTransition
+    }
+  },
+)
 
 Deno.test(
   'onClick: a persist-tagged boundary reused across the swap carries its own ' +

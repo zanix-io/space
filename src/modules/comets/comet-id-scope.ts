@@ -13,13 +13,26 @@ import type { RendererKind } from '../router/active-renderer.ts'
 // deno-lint-ignore no-explicit-any
 export type CometIdScopeProvider = (props: { value: string; children?: any }) => unknown
 
-const providers: { react?: CometIdScopeProvider; preact?: CometIdScopeProvider } = {}
+// Stored on `globalThis`, not a plain module-scoped object — same reasoning as
+// `element-factory.ts`'s own identical registry: a module-scoped object is only a real singleton
+// if every reader and writer resolves through the SAME module instance, which a dev-server bundler
+// serving a large Comet chunk under load doesn't always guarantee.
+const PROVIDERS_KEY = '__znx_comet_id_scope_providers__'
+
+function getProviders(): { react?: CometIdScopeProvider; preact?: CometIdScopeProvider } {
+  const globalObject = globalThis as Record<string, unknown>
+  if (!globalObject[PROVIDERS_KEY]) globalObject[PROVIDERS_KEY] = {}
+  return globalObject[PROVIDERS_KEY] as {
+    react?: CometIdScopeProvider
+    preact?: CometIdScopeProvider
+  }
+}
 
 /** Registers one renderer's own Provider — called once, at module load, by
  * `installRendererRuntime` (`router/renderer-runtime.ts`), the same seam `setCometElementFactory`
  * already uses. */
 export function setCometIdScopeProvider(kind: RendererKind, provider: CometIdScopeProvider): void {
-  providers[kind] = provider
+  getProviders()[kind] = provider
 }
 
 /**
@@ -32,7 +45,7 @@ export function setCometIdScopeProvider(kind: RendererKind, provider: CometIdSco
  */
 export function getCometIdScopeProvider(): CometIdScopeProvider {
   const renderer = getActiveRenderer()
-  const provider = providers[renderer]
+  const provider = getProviders()[renderer]
   if (!provider) {
     throw new InternalError(
       `The active renderer is '${renderer}', but no ${renderer} Comet id-scope provider is ` +
@@ -46,6 +59,6 @@ export function getCometIdScopeProvider(): CometIdScopeProvider {
 /** Test-only reset — drops every registered provider, restoring the state a fresh process starts
  * in. Never called by library code. */
 export function resetCometIdScopeProviders(): void {
-  delete providers.react
-  delete providers.preact
+  delete getProviders().react
+  delete getProviders().preact
 }

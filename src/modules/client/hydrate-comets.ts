@@ -26,6 +26,19 @@ import { scheduleCometHydration } from './schedule-comet-hydration.ts'
 import { registerPersistHandle } from './comet-persistence.ts'
 import { setCometHydrator } from './hydrator-registry.ts'
 import { isNestedComet } from './nested-comet-guard.ts'
+import { setActiveRenderer } from '../router/active-renderer.ts'
+import { setCometElementFactory } from '../comets/element-factory.ts'
+import type { CometElementFactory } from '../comets/element-factory.ts'
+import { setCometIdScopeProvider } from '../comets/comet-id-scope.ts'
+
+// Registers this renderer's CLIENT-SAFE runtime pieces — see `hydrate-comets-preact.ts`'s own
+// identical registration for the full "why" (this file's own Preact counterpart hit the exact
+// same gap, for the exact same reason). `createElement`/`CometIdScopeProvider` above are already
+// imported for the top-level hydrate path itself, so this adds no new dependency and pulls in none
+// of the SSR-only renderers `installRendererRuntime` also carries server-side.
+setActiveRenderer('react')
+setCometElementFactory('react', createElement as CometElementFactory)
+setCometIdScopeProvider('react', CometIdScopeProvider)
 
 async function hydrateBoundary(boundary: HTMLElement): Promise<void> {
   const moduleUrl = boundary.getAttribute(COMET_MODULE_ATTR)

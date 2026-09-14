@@ -5,6 +5,56 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.14.1] - 2026-09-14
+
+### Fixed
+
+- **The client bundle never installed a renderer's `createElement`/active-renderer/Comet
+  id-scope-provider registries at all — a Comet composed directly inside another already-hydrating
+  Comet's own render tree (e.g. `ProductImage` inside a card component nested in a page-level Comet)
+  crashed on hydration, unconditionally, every single time, not intermittently.** A TOP-LEVEL Comet
+  boundary hydrates by calling Preact's/React's own `createElement` directly
+  (`hydrate-comets-preact.ts`/`hydrate-comets.ts`), so it never needed these registries — but a
+  Comet nested inside one reaches it transitively, through `defineComet`'s own `CometBoundary`,
+  which DOES read `getCometElementFactory()`/`getActiveRenderer()`/`getCometIdScopeProvider()` to
+  build its own markup. Nothing in this package's auto-generated client entry
+  (`client-entry-plugin.ts`) — or anywhere else reachable from a real client bundle — ever populated
+  those registries: `installRendererRuntime()` is called only by `@zanix/space/react`/
+  `@zanix/space/preact`, both SERVER-side entry points a client bundle must never import (each also
+  carries three SSR-only renderers — `renderPage`/`renderNotFound`/`renderLoaderError` — that would
+  otherwise ship to the browser). Real, confirmed-live regression: a wishlist card's own product
+  thumbnail (`ProductImage`, nested inside `WishlistCard`, itself nested inside the
+  `WishlistWorkspace` Comet) threw
+  `InternalError: The active renderer is 'react', but no react
+  element factory is registered` on
+  every hydration the moment a list held a real product — this had nothing to do with 1.14.0's own
+  `globalThis`-backed registries (a real, separate fix for a module-instance-duplication risk under
+  a dev-server bundler), which never closed this gap because the registries were never written to AT
+  ALL on the client, in any process, any module instance. Fixed by having
+  `hydrate-comets-preact.ts`/`hydrate-comets.ts` register their own renderer's CLIENT-SAFE pieces
+  (`createElement`, already imported for the top-level hydrate path itself, plus the matching
+  `CometIdScopeProvider`) at module load — the same "install once, at import time" shape
+  `installPreactRuntime`/`installReactRuntime` already establish server-side, scoped to only what a
+  client bundle can safely ship.
+- **`comet-id-scope.ts`'s own per-renderer `providers` registry moved to `globalThis`**, closing the
+  identical module-instance-duplication gap `active-renderer.ts`/`element-factory.ts` already closed
+  in 1.14.0 — this registry carried the exact same module-scoped-object shape and was missed in that
+  pass.
+- **`performSwap`'s `document.startViewTransition(swap)` call was fire-and-forget: the function
+  returned, and `pendingSwap` cleared, the instant `swap()`'s own synchronous DOM mutation finished
+  — well before the browser's own transition had actually settled.** A second, overlapping
+  navigation landing while the first one's visual transition was still mid-flight could call
+  `document.startViewTransition` again while one was already in flight, throwing
+  `InvalidStateError:
+  Transition was aborted because of invalid state`, or silently drop the
+  navigation. Fixed by awaiting the returned `ViewTransition`'s own `finished` promise (a skip/abort
+  rejection there is swallowed — the browser's own lifecycle settling one way or another, never a
+  real failure) before `performSwap` resolves, and by falling back to running `swap()` directly —
+  the same fallback already used when `document.startViewTransition` doesn't exist at all — when the
+  call itself throws synchronously. `history.replaceState`/`history.pushState` still run at the
+  exact same point they always did: synchronously, right after the transition is triggered, never
+  delayed until the transition's own animation finishes.
+
 ## [1.14.0] - 2026-09-13
 
 ### Added

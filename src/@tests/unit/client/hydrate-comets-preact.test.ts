@@ -254,6 +254,48 @@ Deno.test(
   },
 )
 
+const nestedCometFixtureUrl = new URL(
+  './fixtures/hydrate-widget-nested-comet-preact.ts',
+  import.meta.url,
+).href
+
+Deno.test(
+  "hydrateBoundary (real import): a Comet nested inside the mounted Comet's own render tree " +
+    "hydrates too — the real, confirmed regression this closes: this file's own module-load " +
+    'registration (`setActiveRenderer`/`setCometElementFactory`/`setCometIdScopeProvider` in ' +
+    'hydrate-comets-preact.ts) is the ONLY renderer registration this test ever triggers — no ' +
+    'SSR entry point (`mod-preact.ts`) is imported anywhere in this file — so a pass here means ' +
+    "the CLIENT bundle alone, exactly as a real app's own client-entry.ts ships it, is enough " +
+    "for a nested Comet (defineComet used directly inside another Comet's own JSX, the same " +
+    'shape `ProductImage` inside a wishlist card composes) to render without the ' +
+    '`InternalError: no react element factory is registered` crash that used to fire ' +
+    'unconditionally, every time, before this file registered anything at all.',
+  async () => {
+    resetDom()
+    const boundary = document.createElement('div')
+    boundary.setAttribute(COMET_MODULE_ATTR, nestedCometFixtureUrl)
+    boundary.setAttribute(COMET_STRATEGY_ATTR, 'only')
+    boundary.setAttribute(COMET_PROPS_ATTR, '{"label":"z"}')
+    document.body.appendChild(boundary)
+
+    const errors = countErrors()
+    try {
+      hydrateComets(fakeRoot([boundary]))
+      await sleep(150)
+
+      assertEquals(errors.count(), 0, 'the nested Comet must not have thrown/logged anything')
+      assert(boundary.innerHTML.includes('outer:z'), boundary.innerHTML)
+      assert(
+        boundary.innerHTML.includes('inner:z'),
+        'the NESTED Comet must have rendered its own real content, not silently nothing — ' +
+          boundary.innerHTML,
+      )
+    } finally {
+      errors.restore()
+    }
+  },
+)
+
 Deno.test(
   'hydrateBoundary (real import): a persist-tagged boundary registers a real reuse/dispose ' +
     "handle — exercised through comet-persistence's own real consumption paths, never called " +

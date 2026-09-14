@@ -494,11 +494,42 @@ async function performSwap(href: string, replace: boolean): Promise<void> {
     rescanPrefetchTargets(outlet)
   }
 
-  if (document.startViewTransition) document.startViewTransition(swap)
-  else swap()
+  // `document.startViewTransition(swap)` itself can throw SYNCHRONOUSLY — a transition already in
+  // flight on this document that hasn't fully settled yet makes a second call to this API invalid
+  // — falling back to running `swap()` directly, the exact same fallback the feature-detection
+  // branch below already takes when the API doesn't exist at all.
+  //
+  // When a transition IS actually started, `performSwap`'s own returned promise (what `pendingSwap`
+  // tracks, above) doesn't resolve until that transition has genuinely settled: `transitionSettled`
+  // is set to `transition.finished`, never left as the immediately-resolved default. Without this, a
+  // second, overlapping `swapOutlet` call only ever waits for `swap()`'s own synchronous DOM
+  // mutation to finish — not for the browser's own visual transition — and can call
+  // `document.startViewTransition` again while the first is still mid-flight, exactly the invalid
+  // state this same fallback exists to recover from. `.finished` can itself reject (a transition
+  // that gets skipped or aborted rejects it — the browser's own lifecycle settling one way or
+  // another, never a real failure of the swap that already happened); that rejection is swallowed
+  // right here so it never surfaces as an unhandled rejection or reaches `swapOutlet`'s own
+  // `.finally()` cleanup.
+  let transitionSettled: Promise<void> = Promise.resolve()
+  if (document.startViewTransition) {
+    try {
+      const transition = document.startViewTransition(swap)
+      transitionSettled = transition.finished.catch(() => {})
+    } catch {
+      swap()
+    }
+  } else {
+    swap()
+  }
 
+  // Still runs here, synchronously, right after the transition is triggered — never delayed until
+  // `transitionSettled` resolves. The address bar must reflect the destination immediately, exactly
+  // like before this fix; only WHEN `performSwap`'s own returned promise settles changes, never
+  // when `history` does.
   if (replace) history.replaceState(null, '', finalUrl)
   else history.pushState(null, '', finalUrl)
+
+  await transitionSettled
 }
 
 /**

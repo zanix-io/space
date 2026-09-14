@@ -21,6 +21,29 @@ import { scheduleCometHydration } from './schedule-comet-hydration.ts'
 import { registerPersistHandle } from './comet-persistence.ts'
 import { setCometHydrator } from './hydrator-registry.ts'
 import { isNestedComet } from './nested-comet-guard.ts'
+import { setActiveRenderer } from '../router/active-renderer.ts'
+import { setCometElementFactory } from '../comets/element-factory.ts'
+import type { CometElementFactory } from '../comets/element-factory.ts'
+import { setCometIdScopeProvider } from '../comets/comet-id-scope.ts'
+
+// Registers this renderer's CLIENT-SAFE runtime pieces — never the full `installRendererRuntime`
+// an app's main module installs server-side (`@zanix/space/preact`), which also carries three
+// SSR-only renderers (`renderPage`/`renderNotFound`/`renderLoaderError`) that must never reach a
+// client bundle. `defineComet`'s own boundary (`define-comet.ts`) reads `getCometElementFactory`/
+// `getActiveRenderer`/`getCometIdScopeProvider` to build a NESTED Comet's markup — one composed
+// directly inside another already-hydrating Comet's own render tree (e.g. `ProductImage` inside a
+// card component nested in a page-level Comet), as opposed to a top-level boundary, which this
+// file's own `hydrateBoundary` mounts by calling `createElement(Component, props)` directly and
+// never touches these registries at all. Real, confirmed gap this closes: this package's own
+// auto-generated client entry (`client-entry-plugin.ts`) never imported anything that populated
+// these registries, so every top-level Comet hydrated fine (it never needed them) while ANY Comet
+// nested inside one threw `InternalError: no react element factory is registered` on every single
+// hydration — unconditionally, not a race, just nothing ever having been registered client-side.
+// `createElement`/`CometIdScopeProvider` above are already imported for the top-level hydrate path
+// itself, so this adds no new dependency and pulls in none of the server-only renderers.
+setActiveRenderer('preact')
+setCometElementFactory('preact', createElement as CometElementFactory)
+setCometIdScopeProvider('preact', CometIdScopeProvider)
 
 async function hydrateBoundary(boundary: HTMLElement): Promise<void> {
   const moduleUrl = boundary.getAttribute(COMET_MODULE_ATTR)

@@ -165,16 +165,25 @@ export function withPendingReplacement<T>(
 }
 
 /** Wires `GET`/`POST` to `handleGet`/`handlePost` for `path`, registers `Target` under `'ssr'`
- * (with `Interactor`, if the page declared one), and records its `headers` choice as a static
- * property (same pattern as `redirect`/`cacheControl`) — `SpacePageController.handleGet` reads it
- * directly and applies `cspGuard`/`securityHeadersGuard` itself, as plain functions, not via
- * `@Guard`/`registerGlobalGuard`. That decorator-based path requires a real TC39 decorator
- * `context` (it branches on `context?.kind === 'class'`) to know it's registering a class-level
- * guard — calling it directly, as `Guard(fn)(Target)`, supplies no such context and silently falls
- * into the METHOD-queuing branch instead, keyed by `Target.name` as if it were a method name, which
- * never gets flushed to anything. Shared by both `Page()` code paths (immediate, explicit-path
- * registration and the pending path `loadRoutes()` completes later) so there's exactly one place
- * that does the actual wiring. */
+ * (with `Interactor`, if the page declared one), and records its `headers`/`action` choice as a
+ * static property (same pattern as `redirect`/`cacheControl`) — `SpacePageController.handleGet`
+ * reads `headers` directly and applies `cspGuard`/`securityHeadersGuard` itself, as plain
+ * functions, not via `@Guard`/`registerGlobalGuard`. That decorator-based path requires a real
+ * TC39 decorator `context` (it branches on `context?.kind === 'class'`) to know it's registering a
+ * class-level guard — calling it directly, as `Guard(fn)(Target)`, supplies no such context and
+ * silently falls into the METHOD-queuing branch instead, keyed by `Target.name` as if it were a
+ * method name, which never gets flushed to anything. Shared by both `Page()` code paths
+ * (immediate, explicit-path registration and the pending path `loadRoutes()` completes later) so
+ * there's exactly one place that does the actual wiring.
+ *
+ * `headers`/`action` here are `PendingPageOptions`, sourced from `@Page({ headers, action })`'s
+ * own decorator options — a separate thing from `PageHeaderOptions.headers` and `action.Body`
+ * declared as ordinary `static` class fields on `Target` itself (`PageOptions.headers`'s own doc
+ * shows this as the recommended, far more common form for `headers`; every current page in this
+ * ecosystem uses it). A class field is already set on `Target` by the time this function runs —
+ * assigning `undefined` onto it whenever the DECORATOR's own option wasn't ALSO given would erase
+ * that field's real value for no reason. Only ever assigns when the decorator actually supplied a
+ * value, so a page's own class field is never clobbered by the option form's mere absence. */
 function registerPage(
   Target: ClassConstructor<SpacePageController>,
   path: string,
@@ -194,11 +203,16 @@ function registerPage(
   Post(path)(proto.handlePost)
   if (Interactor) SsrController({ Interactor })(Target)
   else SsrController()(Target)
-  ;(Target as unknown as typeof SpacePageController).headers = headers // Same stash-as-a-static mechanism `headers` uses immediately above — `handlePost`
-   // reads it per request. Deliberately NOT `Post(path, rto)`: that registers a PIPE, and a
-  // pipe throw escapes past the router's own catch to `Deno.serve`'s `onError`, which
-  // answers with JSON — the exact outcome the 422 re-render exists to avoid.
-  ;(Target as unknown as typeof SpacePageController).actionRto = action
+  // See this function's own doc — never overwrite a page's own class field with `undefined`.
+  if (headers !== undefined) {
+    ;(Target as unknown as typeof SpacePageController).headers = headers
+  }
+  // Deliberately NOT `Post(path, rto)`: that registers a PIPE, and a pipe throw escapes past the
+  // router's own catch to `Deno.serve`'s `onError`, which answers with JSON — the exact outcome
+  // the 422 re-render exists to avoid.
+  if (action !== undefined) {
+    ;(Target as unknown as typeof SpacePageController).actionRto = action
+  }
 }
 
 /**

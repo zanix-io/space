@@ -1,7 +1,13 @@
 import { assert, assertEquals, assertRejects, assertThrows } from '@std/assert'
 import { HttpError } from '@zanix/errors'
 import type { GuardContext } from '@zanix/server'
-import { CSRF_TOKEN_LOCALS_KEY, csrfGuard } from 'modules/middleware/csrf-guard.ts'
+import { attachRequestToError } from '@zanix/server'
+import {
+  CSRF_TOKEN_INVALID_CODE,
+  CSRF_TOKEN_LOCALS_KEY,
+  csrfGuard,
+  redirectCsrfFailure,
+} from 'modules/middleware/csrf-guard.ts'
 
 function mockGuardContext(overrides: {
   method?: string
@@ -173,3 +179,40 @@ Deno.test(
     assertEquals(error.code, 'UTILS_COOKIES_MISSING_KEYWORD')
   },
 )
+
+Deno.test('csrfGuard: a rejection carries CSRF_TOKEN_INVALID_CODE, not just the bare FORBIDDEN status', async () => {
+  const ctx = mockGuardContext({ method: 'POST', cookies: { 'X-Znx-Csrf': 'the-token' } })
+  const error = await assertRejects(() => Promise.resolve(csrfGuard()(ctx)), HttpError) as HttpError
+  assertEquals(error.code, CSRF_TOKEN_INVALID_CODE)
+})
+
+Deno.test(
+  'redirectCsrfFailure: a csrfGuard rejection with a request attached redirects back to the same url',
+  async () => {
+    const ctx = mockGuardContext({ method: 'POST', cookies: { 'X-Znx-Csrf': 'the-token' } })
+    const error = await assertRejects(() => Promise.resolve(csrfGuard()(ctx)), HttpError)
+    attachRequestToError(error, ctx.req)
+
+    const response = redirectCsrfFailure()(error)
+    assert(response instanceof Response)
+    assertEquals(response.status, 302)
+    assertEquals(response.headers.get('location'), ctx.req.url)
+  },
+)
+
+Deno.test('redirectCsrfFailure: declines an unrelated FORBIDDEN error (never swallows a real one)', () => {
+  const error = new HttpError('FORBIDDEN', { message: 'You cannot edit this resource.' })
+  assertEquals(redirectCsrfFailure()(error), undefined)
+})
+
+Deno.test('redirectCsrfFailure: declines a csrfGuard rejection with no request attached', () => {
+  const error = new HttpError('FORBIDDEN', {
+    code: CSRF_TOKEN_INVALID_CODE,
+    message: 'Missing or invalid CSRF token',
+  })
+  assertEquals(redirectCsrfFailure()(error), undefined)
+})
+
+Deno.test('redirectCsrfFailure: declines a non-HttpError entirely', () => {
+  assertEquals(redirectCsrfFailure()(new Error('boom')), undefined)
+})

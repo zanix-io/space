@@ -1,4 +1,5 @@
 import type { GuardContext, MiddlewareGuard } from '@zanix/server'
+import { getRequestFromError } from '@zanix/server'
 import { HttpError } from '@zanix/errors'
 import { assertZnxCookieName, SESSION_COOKIE_ATTRIBUTES } from '@zanix/helpers'
 import { CSRF_FORM_FIELD } from './csrf-form-field.ts'
@@ -6,6 +7,13 @@ import { CSRF_FORM_FIELD } from './csrf-form-field.ts'
 /** The `ctx.locals` key {@linkcode csrfGuard} stashes the current request's CSRF token under —
  * `SpacePageController` reads this back into `PageContext.csrfToken` automatically. */
 export const CSRF_TOKEN_LOCALS_KEY = 'csrfToken'
+
+/** Internal error code {@linkcode csrfGuard} sets on its own thrown `HttpError` —
+ * {@linkcode redirectCsrfFailure} matches on THIS, never the bare `status.code` (`'FORBIDDEN'`)
+ * alone, since a page's own `action` can throw its own unrelated `FORBIDDEN` for a real business
+ * reason (a permission check, a business-rule rejection) that a generic recovery handler must
+ * never swallow as if it were a stale token. */
+export const CSRF_TOKEN_INVALID_CODE = 'CSRF_TOKEN_INVALID'
 
 /** Options for {@linkcode csrfGuard}. */
 export type CsrfGuardOptions = {
@@ -125,10 +133,59 @@ export function csrfGuard(options: CsrfGuardOptions = {}): MiddlewareGuard {
     if (!existingToken || submitted !== existingToken) {
       throw new HttpError('FORBIDDEN', {
         id: ctx.id,
+        code: CSRF_TOKEN_INVALID_CODE,
         message: 'Missing or invalid CSRF token',
         meta: { source: 'zanix' },
       })
     }
     return {}
+  }
+}
+
+/**
+ * Builds a `ComposableErrorHandler` (`globalErrorHandler`, this package's own composer) that turns
+ * {@linkcode csrfGuard}'s own rejection into a redirect back to the SAME url, as a fresh `GET`,
+ * instead of `@zanix/server`'s generic JSON error response reaching what a browser navigation
+ * expects to be a full HTML page. Real, confirmed gap this closes: unlike `createNotFoundHandler()`'s
+ * own 404 recovery or `@zanix/auth`'s own `recoverRotatedSessionCookie`, a `csrfGuard` rejection had
+ * NO recovery handler anywhere in the ecosystem — every app wiring `@Guard(csrfGuard())` onto a real
+ * page was exposed to this raw JSON leak the moment a submitted token actually went stale (a
+ * browser back-button resubmission, a second tab, a cookie cleared between page load and submit),
+ * with no documented way to avoid it.
+ *
+ * A fresh `GET` to the same url re-issues a new token via `csrfGuard` itself (see its own doc for
+ * the safe-request branch) — the visitor lands back on the same form, ready to resubmit, with
+ * nothing lost and nothing to explain beyond "try again."
+ *
+ * Declines (`undefined`) for anything that isn't `csrfGuard`'s own specific rejection (checked via
+ * {@linkcode CSRF_TOKEN_INVALID_CODE}), or that arrives with no request attached
+ * (`server.ssr.attachRequestToErrors: true` required, same as `createNotFoundHandler`/any other
+ * request-reading recovery handler in this ecosystem) — composes safely with the rest of a
+ * `globalErrorHandler(...)` chain regardless of order.
+ *
+ * @returns A handler shaped `(error: unknown) => Response | undefined` — pass it to
+ * `globalErrorHandler` alongside any other recovery handlers this app needs.
+ *
+ * @example
+ * ```ts
+ * import { createNotFoundHandler, globalErrorHandler, redirectCsrfFailure } from '@zanix/space'
+ *
+ * await bootstrapRemoteApp(spaceApp, {
+ *   server: {
+ *     ssr: {
+ *       onError: globalErrorHandler(redirectCsrfFailure(), createNotFoundHandler()),
+ *       attachRequestToErrors: true,
+ *     },
+ *   },
+ * })
+ * ```
+ */
+export function redirectCsrfFailure(): (error: unknown) => Response | undefined {
+  return (error: unknown) => {
+    if (!(error instanceof HttpError) || error.code !== CSRF_TOKEN_INVALID_CODE) return undefined
+    const request = getRequestFromError(error)
+    if (!request) return undefined
+
+    return new Response(null, { status: 302, headers: { location: request.url } })
   }
 }

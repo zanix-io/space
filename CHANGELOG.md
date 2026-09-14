@@ -5,6 +5,55 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.14.0] - 2026-09-13
+
+### Added
+
+- **`redirectCsrfFailure`** (`csrf-guard.ts`) — a `ComposableErrorHandler` for `globalErrorHandler`
+  that turns `csrfGuard`'s own rejection into a redirect back to the same url as a fresh `GET`
+  (re-issuing a valid token) instead of `@zanix/server`'s generic JSON error response reaching a
+  real browser navigation. Real, confirmed gap this closes: unlike `createNotFoundHandler`'s own 404
+  recovery or `@zanix/auth`'s `recoverRotatedSessionCookie`, a `csrfGuard` rejection had NO recovery
+  handler anywhere in the ecosystem — every app wiring `@Guard(csrfGuard())` onto a real page was
+  exposed to a raw `{"name":"HttpError","message":"Missing or invalid CSRF
+  token",...}` body
+  reaching a real browser navigation the moment a submitted token went stale (a cached form from an
+  earlier page load, a browser back-button resubmission) — confirmed live.
+- **`CSRF_TOKEN_INVALID_CODE`** (`csrf-guard.ts`) — the stable `HttpError.code` `csrfGuard` now sets
+  on its own rejection, so `redirectCsrfFailure` (or a consumer's own handler) can recognize it
+  specifically rather than matching the bare `FORBIDDEN` status, which a page's own `action` can
+  also throw for an unrelated business reason.
+
+### Fixed
+
+- **The active-renderer flag (`active-renderer.ts`) and the Comet element-factory registry
+  (`element-factory.ts`) now live on `globalThis` instead of module-scoped bindings** — a plain
+  module-scoped `let`/`const` is only a real singleton if every reader and writer resolves through
+  the SAME module instance, which a dev-server bundler serving a large Comet chunk under load does
+  not always guarantee. Real, confirmed-live regression: a real app's largest, most complex Comet
+  (many concurrently-hydrating child Comets and images on the same page) intermittently threw
+  `InternalError: The active renderer is 'react', but no react element factory is registered` in the
+  browser, reproducing more reliably as page complexity grew and disappearing as it shrank — a
+  load-dependent module-identity gap, not a permanent break. `globalThis` is the one object every
+  module instance a bundler might produce shares within the same realm, so both registries now stay
+  correctly shared regardless of how many instances of this file a given run's bundler produces.
+  Renderer-agnostic (React and Preact go through the exact same seam) and a no-op in production (a
+  built app never has more than one instance of either module to begin with).
+
+- **A page relying on file-based routing (a pathless `@Page()`, the recommended form) never got its
+  own `static headers` applied to the real response — `registerPage` (`page-decorator.ts`)
+  unconditionally overwrote `Target.headers`/`Target.actionRto` with whatever
+  `@Page({ headers,
+  action })`'s own decorator OPTIONS held, which is `undefined` for the common
+  case where a page sets `headers`/`action.Body` as an ordinary class field instead.** A page's own
+  class field is already correctly set by the time `registerPage` runs; the unconditional assignment
+  silently erased it — every field (`csp`, `frameOptions`, every other `PageHeaderOptions` entry)
+  was lost, not just CSP. An explicit-path page (`@Page({ path: '...' })`) registers synchronously,
+  at decoration time, and was unaffected — only the deferred, pathless registration path
+  (`resolvePendingPage`, completed later by `loadRoutes()`) hit this. `registerPage` now only
+  assigns `headers`/`actionRto` when the decorator's own option was actually given, leaving a page's
+  own class field untouched otherwise.
+
 ## [1.13.1] - 2026-09-13
 
 ### Fixed

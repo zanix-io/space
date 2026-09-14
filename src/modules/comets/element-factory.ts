@@ -50,7 +50,21 @@ export type CometElementFactory = (
 // the same process, and `getActiveRenderer()` is what selects between them per render — collapsing
 // the two would make the last entry point imported win globally, which is a different (and wrong)
 // contract from the one `active-renderer.ts` already establishes.
-const factories: { react?: CometElementFactory; preact?: CometElementFactory } = {}
+//
+// Stored on `globalThis`, not a plain module-scoped object: same reasoning as `active-renderer.ts`'s
+// own identical change — a module-scoped registry is only a real singleton if every reader and
+// writer resolves through the SAME module instance, which a dev-server bundler serving a large Comet
+// chunk under load doesn't always guarantee.
+const FACTORIES_KEY = '__znx_comet_element_factories__'
+
+function getFactories(): { react?: CometElementFactory; preact?: CometElementFactory } {
+  const globalObject = globalThis as Record<string, unknown>
+  if (!globalObject[FACTORIES_KEY]) globalObject[FACTORIES_KEY] = {}
+  return globalObject[FACTORIES_KEY] as {
+    react?: CometElementFactory
+    preact?: CometElementFactory
+  }
+}
 
 /**
  * Registers one renderer's own `createElement` as the factory `defineComet` uses whenever that
@@ -63,7 +77,7 @@ const factories: { react?: CometElementFactory; preact?: CometElementFactory } =
  * @param factory - That renderer's real `createElement`. Never a hand-written shim.
  */
 export function setCometElementFactory(kind: RendererKind, factory: CometElementFactory): void {
-  factories[kind] = factory
+  getFactories()[kind] = factory
 }
 
 /**
@@ -78,7 +92,7 @@ export function setCometElementFactory(kind: RendererKind, factory: CometElement
  */
 export function getCometElementFactory(): CometElementFactory {
   const renderer = getActiveRenderer()
-  const factory = factories[renderer]
+  const factory = getFactories()[renderer]
   if (!factory) {
     throw new InternalError(
       `The active renderer is '${renderer}', but no ${renderer} element factory is registered — a ` +
@@ -95,6 +109,6 @@ export function getCometElementFactory(): CometElementFactory {
  * Never called by library code.
  */
 export function resetCometElementFactories(): void {
-  delete factories.react
-  delete factories.preact
+  delete getFactories().react
+  delete getFactories().preact
 }

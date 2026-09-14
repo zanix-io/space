@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.13.1] - 2026-09-13
+
+### Fixed
+
+- **`detectVideoSource` never recognized a `blob:` URL**, the ONLY way a consumer can preview an
+  authenticated-only video it fetched itself (`URL.createObjectURL(blob)` — no file extension, no
+  filename, so it matched neither the extension-based `'file'` check nor the `http:`/`https:`-only
+  `isEmbeddableUrl` fallback) — it fell all the way through to `'unknown'`, and `@zanix/space-ui`'s
+  own `Video` component renders nothing (`null`) for that classification, by design. A real,
+  confirmed-live regression: a video previewed via its own `blob:` object URL (the documented
+  pattern for an authenticated-only asset) silently rendered as an empty element, with no error, no
+  broken-media glyph, nothing at all. `detectVideoSource` now classifies a `blob:` URL as `'file'` —
+  a real, playable local resource the browser already knows how to sniff and play without a `type`
+  hint, the same as it always does for `<video src="blob:...">`. `DetectedVideoSource`'s `'file'`
+  variant's own `mimeType` field is now optional (present only when derived from a real extension)
+  rather than always-required — confirmed no existing consumer in this package or `@zanix/space-ui`
+  ever reads it, so this widens the type with zero behavior change for every other caller.
+
 ## [1.13.0] - 2026-09-13
 
 ### Added

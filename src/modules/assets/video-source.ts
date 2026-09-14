@@ -55,7 +55,8 @@ export type VideoProvider = 'youtube' | 'vimeo'
  * - `'iframe'` — some other absolute `http(s)` URL, embeddable as-is (Facebook, Instagram,
  *   Twitter/X, TikTok, or any other host `@zanix/space` doesn't special-case).
  * - `'file'` — a path/URL whose extension is a recognized video container, with its real
- *   `Content-Type` value already resolved.
+ *   `Content-Type` value already resolved, OR a `blob:` URL (see {@linkcode isBlobUrl}'s own
+ *   doc for why that case carries no `mimeType` at all).
  * - `'unknown'` — none of the above (an empty string, a bare non-URL string, an unrecognized
  *   extension on something that isn't an absolute URL either).
  */
@@ -63,7 +64,7 @@ export type DetectedVideoSource =
   | { type: 'provider'; provider: 'youtube'; id: string; src: string }
   | { type: 'provider'; provider: 'vimeo'; id: string; src: string }
   | { type: 'iframe'; src: string }
-  | { type: 'file'; mimeType: string; src: string }
+  | { type: 'file'; mimeType?: string; src: string }
   | { type: 'unknown'; src: string }
 
 // Both patterns accept an optional scheme/`www.` prefix.
@@ -88,6 +89,29 @@ function isEmbeddableUrl(src: string): boolean {
   try {
     const url = new URL(src)
     return url.protocol === 'http:' || url.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+/** A real, confirmed gap this closes: a `blob:` URL (`URL.createObjectURL(blob)`'s own result —
+ * `blob:<origin>/<uuid>`, no file extension, no filename) used to fall all the way through to
+ * `'unknown'`, since it matches neither the extension-based {@linkcode videoMimeTypeFor} check
+ * above (no extension to read) NOR {@linkcode isEmbeddableUrl} (`url.protocol` is `'blob:'`, never
+ * `'http:'`/`'https:'`) — silently rendering NOTHING (`Video`'s own documented `'unknown'` → `null`
+ * behavior) for a genuinely common, deliberate pattern: any app that fetches an authenticated-only
+ * video itself and plays it back from the resulting local blob, the standard way to preview such an
+ * asset without exposing it over an unauthenticated `<video src>`. A `blob:` URL is unambiguously a
+ * same-origin, browser-managed local resource — real video bytes when the caller created it from
+ * one, exactly like an already-resolved local file — so it's classified `'file'` here, just like a
+ * recognized extension is, only with no `mimeType` to report (the URL string itself carries none;
+ * the browser already knows the real one internally and sniffs it during playback, same as it
+ * always does for a `<video src="blob:...">` with no `type` hint — nothing downstream reads
+ * `DetectedVideoSource['file'].mimeType` today, confirmed, so leaving it absent here changes no
+ * existing behavior for any other caller). */
+function isBlobUrl(src: string): boolean {
+  try {
+    return new URL(src).protocol === 'blob:'
   } catch {
     return false
   }
@@ -129,6 +153,10 @@ function hasUnsupportedMediaExtension(src: string): boolean {
  * detectVideoSource('/videos/clip.mp4')
  * // → { type: 'file', mimeType: 'video/mp4', src: '/videos/clip.mp4' }
  *
+ * detectVideoSource('blob:https://example.com/2f0e2b3c-…')
+ * // → { type: 'file', src: 'blob:https://example.com/2f0e2b3c-…' } — no `mimeType`, see
+ * // `isBlobUrl`'s own doc for why
+ *
  * detectVideoSource('not a video source at all')
  * // → { type: 'unknown', src: '...' }
  * ```
@@ -136,6 +164,8 @@ function hasUnsupportedMediaExtension(src: string): boolean {
 export function detectVideoSource(src: string): DetectedVideoSource {
   const trimmed = src.trim()
   if (trimmed === '') return { type: 'unknown', src: trimmed }
+
+  if (isBlobUrl(trimmed)) return { type: 'file', src: trimmed }
 
   const youtubeMatch = trimmed.match(YOUTUBE_SOURCE_PATTERN)
   if (youtubeMatch) {

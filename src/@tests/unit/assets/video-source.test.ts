@@ -167,6 +167,36 @@ for (
   )
 }
 
+// --- detectVideoSource: blob: URLs ---------------------------------------------------------------
+// A `blob:` URL — the ONLY way an app can preview an authenticated-only video it fetched itself
+// (`URL.createObjectURL(blob)`, no extension, no filename) — used to fall all the way through to
+// `'unknown'`, silently rendering NOTHING (`Video`'s own `'unknown'` → `null` behavior) for a real,
+// working, already-fetched video. See `isBlobUrl`'s own doc for the full mechanism.
+
+Deno.test('detectVideoSource: a blob: URL resolves to file, with no mimeType', () => {
+  assertEquals(detectVideoSource('blob:https://example.com/2f0e2b3c-1234-4a5b-8c9d-abcdef012345'), {
+    type: 'file',
+    src: 'blob:https://example.com/2f0e2b3c-1234-4a5b-8c9d-abcdef012345',
+  })
+})
+
+Deno.test(
+  'detectVideoSource: a blob: URL with a null-origin (opaque) prefix still resolves to file',
+  () => {
+    // A cross-origin/sandboxed context produces `blob:null/<uuid>` instead of `blob:<origin>/
+    // <uuid>` — still a real, playable local blob, classified the same way.
+    assertEquals(detectVideoSource('blob:null/2f0e2b3c-1234-4a5b-8c9d-abcdef012345').type, 'file')
+  },
+)
+
+Deno.test('detectVideoSource: a blob: URL is never treated as embeddable iframe content', () => {
+  // Confirms the blob check wins BEFORE the generic `isEmbeddableUrl` fallback would ever run —
+  // `new URL('blob:...')` parses without throwing, so without the dedicated early branch this
+  // could plausibly (wrongly) fall through differently depending on parse order.
+  const result = detectVideoSource('blob:https://example.com/2f0e2b3c-1234-4a5b-8c9d-abcdef012345')
+  assertEquals(result.type, 'file')
+})
+
 Deno.test(
   'detectVideoSource: an absolute .m3u8 URL resolves to unknown, never iframe or file',
   () => {

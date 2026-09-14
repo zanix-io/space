@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.14.2] - 2026-09-14
+
+### Fixed
+
+- **`resolveCometModuleUrl`'s own `devRoot` parameter defaulted to `Deno.cwd()` IN THE FUNCTION
+  SIGNATURE — a default parameter value, evaluated eagerly on every call that omits it, before the
+  function's own body (and its `manifest`/`http(s)://` short-circuits) ever runs.** Real,
+  confirmed-live regression this closes, only reachable once 1.14.1 fixed the client-registration
+  gap: a NESTED Comet (composed directly inside another already-hydrating Comet's own render tree —
+  `ProductImage` inside a wishlist card is the real case that surfaced this) reaches this same
+  function CLIENT-SIDE too, via `defineComet`'s own `CometBoundary`, hydrating transitively as part
+  of the outer boundary's own render. A browser has no `Deno` global at all, so every single one of
+  these threw `ReferenceError: Deno is not defined`, unconditionally — this was never actually
+  reachable before 1.14.1, since the earlier `getCometElementFactory()` gap always threw first, so
+  it looked like the SAME class of fix carried the SAME class of bug into a part of the app that had
+  simply never run before. `devRoot` is now `string | undefined`, defaulting to nothing in the
+  signature; `Deno.cwd()` is called lazily, inside the function body, only on the ONE real branch
+  that still needs it (no manifest loaded, and the source isn't a remote `http(s)://` specifier) — a
+  real SSR-only path a CLIENT-served Comet's own `import.meta.url` (always an `http(s)://` URL Vite
+  itself serves) never reaches, caught by the branch above it instead. Every existing call site
+  already omitted `devRoot` — none needed to change.
+
 ## [1.14.1] - 2026-09-14
 
 ### Fixed

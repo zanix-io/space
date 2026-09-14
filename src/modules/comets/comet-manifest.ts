@@ -155,11 +155,23 @@ function toBrowserDenoSpecifier(sourcePath: string): string {
  * @param sourceUrl - The comet's own `import.meta.url`, as passed to `defineComet`.
  * @param devRoot - The Vite project root, used to derive the dev-mode fallback path. Defaults to
  * the current working directory, which is correct whenever the SSR process itself runs from the
- * project root (the common case for this framework's own `main.ts` convention).
+ * project root (the common case for this framework's own `main.ts` convention). Left undefined
+ * rather than defaulted to `Deno.cwd()` in the signature itself — a default PARAMETER value is
+ * evaluated eagerly, on every call that omits it, before this function's own body ever runs, which
+ * used to call `Deno.cwd()` unconditionally even on a call this function's own body would go on to
+ * satisfy from `manifest` or the `http(s)://` branch below, neither of which needs it. Real,
+ * confirmed-live regression this closes: a NESTED Comet (one composed directly inside another
+ * already-hydrating Comet's own render tree) reaches this same function CLIENT-SIDE, hydrating
+ * transitively as part of the outer boundary's own render — `ReferenceError: Deno is not defined`
+ * on every single one, since a browser has no such global. `devRoot ?? Deno.cwd()` below only ever
+ * evaluates `Deno.cwd()` on the ONE real path that still needs it (no manifest loaded, and the
+ * source isn't a remote `http(s)://` specifier) — a real SSR-only branch, never reached client-side
+ * (a CLIENT-served comet's own `import.meta.url` is always an `http(s)://` URL Vite itself serves,
+ * caught by the branch above).
  */
 export function resolveCometModuleUrl(
   sourceUrl: string,
-  devRoot: string = Deno.cwd(),
+  devRoot?: string,
 ): string {
   const sourcePath = normalizeSourceKey(sourceUrl)
 
@@ -169,8 +181,9 @@ export function resolveCometModuleUrl(
     return toBrowserDenoSpecifier(sourcePath)
   }
 
+  const root = devRoot ?? Deno.cwd()
   const rootPath = normalizeSourceKey(
-    devRoot.startsWith('file://') ? devRoot : new URL(`file://${devRoot}`).href,
+    root.startsWith('file://') ? root : new URL(`file://${root}`).href,
   )
   if (sourcePath.startsWith(rootPath)) return sourcePath.slice(rootPath.length)
   return `/@fs${sourcePath}`

@@ -1,5 +1,5 @@
 {
-  "recordedAt": "2026-08-31T04:50:34.395Z",
+  "recordedAt": "2026-09-14T15:54:27.666Z",
   "variants": {
     "A: React + full hydration": {
       "htmlTransferredBytes": 15880,
@@ -9,19 +9,19 @@
     },
     "B: React + Comets (no Compiler)": {
       "htmlTransferredBytes": 22861,
-      "jsTransferredBytes": 211636,
+      "jsTransferredBytes": 215233,
       "jsRequestCount": 7,
       "hydratedBoundaryCount": 26
     },
     "C: React + Compiler + Comets": {
       "htmlTransferredBytes": 22861,
-      "jsTransferredBytes": 213110,
+      "jsTransferredBytes": 216822,
       "jsRequestCount": 7,
       "hydratedBoundaryCount": 26
     },
     "D: Preact + Comets": {
       "htmlTransferredBytes": 21977,
-      "jsTransferredBytes": 33026,
+      "jsTransferredBytes": 37434,
       "jsRequestCount": 6,
       "hydratedBoundaryCount": 26
     }

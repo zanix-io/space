@@ -110,6 +110,77 @@ Deno.test(
   },
 )
 
+// `devRoot` used to default to `Deno.cwd()` IN THE SIGNATURE — a default parameter value, evaluated
+// eagerly on every call that omits it, before this function's own body ever runs. The three tests
+// below poison `Deno.cwd` itself (never called for real; every real filesystem `cwd()` behavior stays
+// exactly what the passing-`devRoot` tests above already cover) to prove the two branches that don't
+// actually need it — `manifest` lookup, and a remote `http(s)://` source — never reach it either,
+// which is exactly the gap that broke every NESTED Comet client-side (a browser has no `Deno` at
+// all): `hydrateBoundary` (`hydrate-comets-preact.ts`/`hydrate-comets.ts`) reaches this same function,
+// via `defineComet`'s own `CometBoundary`, for a Comet composed directly inside another
+// already-hydrating Comet's own render tree.
+function poisonDenoCwd(): () => void {
+  const original = Deno.cwd
+  Deno.cwd = () => {
+    throw new Error("Deno.cwd() must never be called on this branch — see this test's own doc")
+  }
+  return () => {
+    Deno.cwd = original
+  }
+}
+
+Deno.test(
+  'resolveCometModuleUrl: with a manifest, devRoot is never needed — Deno.cwd() must never be ' +
+    'called (this is the ONLY realistic client-side case: a manifest is always loaded once a real ' +
+    'build/deploy exists)',
+  () => {
+    setCometManifest({ '/project/comets/counter.tsx': '/assets/counter-hash.js' })
+    const restore = poisonDenoCwd()
+    try {
+      const url = resolveCometModuleUrl('file:///project/comets/counter.tsx')
+      assertEquals(url, '/assets/counter-hash.js')
+    } finally {
+      restore()
+      setCometManifest(undefined)
+    }
+  },
+)
+
+Deno.test(
+  'resolveCometModuleUrl: a remote http(s):// source never needs devRoot either — Deno.cwd() must ' +
+    "never be called (this package's own ready-made Comets, e.g. SubmitGuard, resolve this way)",
+  () => {
+    setCometManifest(undefined)
+    const restore = poisonDenoCwd()
+    try {
+      const url = resolveCometModuleUrl('https://jsr.io/@zanix/space/1.0.0/src/comets/widget.ts')
+      assert(url.startsWith('/@id/__x00__deno::'), url)
+    } finally {
+      restore()
+    }
+  },
+)
+
+Deno.test(
+  "resolveCometModuleUrl: the real, confirmed-live regression — a NESTED Comet's own client-side " +
+    'source is an http(s):// url (Vite serves every module that way in the browser), so it takes ' +
+    'the SAME safe branch as the test above, never reaching Deno.cwd() — before this fix, the ' +
+    'eager default-parameter evaluation threw `ReferenceError: Deno is not defined` on EVERY ' +
+    'single one, unconditionally, the moment hydration reached it',
+  () => {
+    setCometManifest(undefined)
+    const restore = poisonDenoCwd()
+    try {
+      const url = resolveCometModuleUrl(
+        'http://localhost:20202/src/space/marketplace/product-image.comet.tsx',
+      )
+      assert(url.startsWith('/@id/__x00__deno::'), url)
+    } finally {
+      restore()
+    }
+  },
+)
+
 Deno.test('loadCometManifest: loads and installs the manifest from disk', async () => {
   const path = await Deno.makeTempFile({ suffix: '.json' })
   try {

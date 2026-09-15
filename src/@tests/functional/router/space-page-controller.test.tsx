@@ -57,6 +57,13 @@ class ActionPage extends SpacePageController {
   }
 }
 
+class ThrowingActionPage extends SpacePageController {
+  public override component = Greeting
+  public override action = (): never => {
+    throw new Error('fixture-action-boom')
+  }
+}
+
 Deno.test(
   'SpacePageController.handleGet: runs loader, renders component with its data',
   async () => {
@@ -196,3 +203,18 @@ Deno.test('SpacePageController.handlePost: invokes action with formData access',
 
   assertEquals(await response.text(), 'got Ana')
 })
+
+Deno.test(
+  "SpacePageController.handlePost: an action's uncaught throw propagates unrecovered when the " +
+    'page declares no @Page({ action: { onError } }) — the unchanged default (equivalent to ' +
+    "'json'), never inferred from the request. See page-composition.test.tsx for the " +
+    "'render' opt-in case.",
+  async () => {
+    const ctx = mockHandlerContext({
+      req: new Request('http://localhost/', { method: 'POST', body: new FormData() }),
+    })
+    const page = new ThrowingActionPage(ctx)
+
+    await assertRejects(() => page.handlePost(ctx), Error, 'fixture-action-boom')
+  },
+)

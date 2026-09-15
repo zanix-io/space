@@ -192,12 +192,14 @@ A root `routes/layout.tsx` owns the actual `<html>` document (same contract as N
 Router); with none at all, `SpacePageController` wraps every page in a minimal spec-valid default
 instead. `routesDir`'s own `not-found.tsx` renders for any unmatched route, and a thrown `loader`
 recovers into a real rendered document — the nearest `error.tsx`, or `not-found.tsx` for
-`HttpError('NOT_FOUND')` — instead of ever leaking raw JSON.
+`HttpError('NOT_FOUND')` — instead of ever leaking raw JSON. An `action`'s own uncaught error gets
+the same recovery, opt-in per page (`@Page({ action: { onError: 'render' } })`), since not every
+`action` answers a document.
 
 See [`docs/routing.md`](./docs/routing.md) for the full contract: `LayoutProps`'s renderer-neutral
 typing, the renderer-agnostic `DocumentModel` both React and Preact serialize from, `error.tsx`'s
 real current limits during server rendering, `createNotFoundHandler()`'s Orbit-aware behavior, and
-the full loader-error recovery path.
+the full loader-/action-error recovery path.
 
 ### Selective hydration ("Comets")
 

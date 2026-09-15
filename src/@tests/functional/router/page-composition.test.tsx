@@ -9,6 +9,7 @@ import LoaderNotFoundFixturePage from '../../support/fixtures/loader-not-found-r
 import NestedLoaderErrorFixturePage from '../../support/fixtures/nested-loader-error-routes/page.tsx'
 import LoaderErrorActionFixturePage from '../../support/fixtures/loader-error-action-routes/page.tsx'
 import LoaderErrorNoBoundaryFixturePage from '../../support/fixtures/loader-error-no-boundary-routes/page.tsx'
+import ActionErrorFixturePage from '../../support/fixtures/action-error-routes/page.tsx'
 
 // Static imports above resolve to the exact same module instances `loadRoutes()` itself imports
 // (same file, same resolved specifier) — so the classes below are the very ones `loadRoutes()`
@@ -159,5 +160,26 @@ Deno.test(
     const html = stripHydrationComments(await response.text())
     assert(html.includes('data-testid="fixture-action-loader-error"'), html)
     assert(html.includes('fixture-action-loader-boom'), html)
+  },
+)
+
+Deno.test(
+  "SpacePageController.handlePost: an action's uncaught throw, on a page declaring " +
+    "@Page({ action: { onError: 'render' } }), renders the nearest error.tsx with a real 500 — " +
+    'the same recovery a thrown loader already gets, opted into rather than the raw JSON error ' +
+    'response this throw would get by default',
+  async () => {
+    await loadRoutes('src/@tests/support/fixtures/action-error-routes')
+
+    const ctx = mockHandlerContext({
+      req: new Request('http://localhost/', { method: 'POST', body: new FormData() }),
+    })
+    const page = new ActionErrorFixturePage(ctx)
+    const response = await page.handlePost(ctx)
+
+    assertEquals(response.status, 500)
+    const html = stripHydrationComments(await response.text())
+    assert(html.includes('data-testid="fixture-action-error"'), html)
+    assert(html.includes('fixture-action-boom'), html)
   },
 )

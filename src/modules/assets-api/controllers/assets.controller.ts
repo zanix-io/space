@@ -200,6 +200,20 @@ export function createAssetsController(
         headers: {
           'Content-Type': download.contentType,
           'Content-Length': String(download.size),
+          // `:id` (and `?variant=<id>`) is a real, immutable `generateUUID()` minted once at
+          // upload time (`AssetIdParamsRTO`'s own doc) — there is no "replace this asset's bytes
+          // in place" operation anywhere in this module, only create-new/delete, so the exact
+          // same id NEVER resolves to different bytes across its lifetime. Safe to cache
+          // aggressively and indefinitely on that basis alone. `private`, not `public` — this
+          // same handler serves every integrator's assets regardless of how sensitive
+          // (`AssetsControllerOptions.guards.read`'s own doc: deny-all by default, an integrator
+          // opts into real access control per app — a verification selfie behind an
+          // owner-scoped guard is just as real a caller here as a public profile photo behind an
+          // allow-all one). `private` still lets the one browser that legitimately fetched a
+          // given asset cache it locally for repeat requests to the same URL, while never
+          // letting a SHARED cache (a CDN, a corporate proxy) store a response that might be
+          // access-controlled for other callers.
+          'Cache-Control': 'private, max-age=31536000, immutable',
         },
       })
     }

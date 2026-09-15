@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.15.0] - 2026-09-14
+
+### Added
+
+- **`@Page({ action: { onError: 'render' | 'json' } })` — an `action`'s own uncaught error can now
+  recover into a real rendered document, the same `error.tsx`/`DefaultErrorView` path a thrown
+  `loader` already gets, instead of always propagating to `@zanix/server`'s own generic JSON error
+  response.** Opt-in, defaulting to `'json'` (the unchanged behavior from every earlier version):
+  `handlePost` never inferred this from the request (e.g. `Sec-Fetch-Mode`), since a
+  `fetch()`-driven action (a Comet calling an action-only page for its own JSON response) and a real
+  `<form>` submission are structurally indistinguishable from inside `handlePost` alone, and a
+  request header that can be silently absent (older browsers, and every unit test that builds its
+  own request context by hand) is not a safe thing to brand this decision on. See
+  [`docs/routing.md`](./docs/routing.md) (the `action`'s uncaught error section) for the full
+  contract.
+
+### Fixed
+
+- **`assets-api`'s `GET /assets/:id/download` carried no caching directive at all — every real
+  download re-transferred the full bytes over the network, even for the exact same URL requested
+  moments earlier.** `:id` (and `?variant=<id>`) is a real, immutable `generateUUID()` minted once
+  at upload time (`AssetIdParamsRTO`'s own doc) — there is no "replace this asset's bytes in place"
+  operation anywhere in this module, only create-new/delete, so the exact same id never resolves to
+  different bytes across its lifetime. `downloadAsset` now sets
+  `Cache-Control: private, max-age=31536000, immutable` on every successful response — `private`,
+  not `public`, since this same handler serves every integrator's assets regardless of how sensitive
+  (`AssetsControllerOptions.guards.read` defaults to deny-all; an integrator opts into real access
+  control per app, so a verification selfie behind an owner-scoped guard is just as real a caller
+  here as a public profile photo behind an allow-all one) — `private` still lets the one browser
+  that legitimately fetched it cache it locally, it just never lets a shared cache (a CDN, a
+  corporate proxy) store a response that might be access-controlled for other callers. Real,
+  confirmed gap this closes: a caller re-navigating between pages rendering the same asset (e.g. the
+  same linked account's profile photo shown on two different screens) re-downloaded it in full on
+  every single page load.
+
 ## [1.14.2] - 2026-09-14
 
 ### Fixed

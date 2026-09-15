@@ -19,7 +19,7 @@ import { CSRF_TOKEN_LOCALS_KEY } from '../middleware/csrf-guard.ts'
 import { POPULATION_LOCALS_KEY } from '../middleware/population-guard.ts'
 import { getThemeResolver } from '../theme/theme-registry.ts'
 import { createDedupeCache } from './request-dedupe.ts'
-import { renderLoaderErrorPage } from './loader-error-handler.ts'
+import { renderActionErrorPage, renderLoaderErrorPage } from './loader-error-handler.ts'
 
 /** `Page()`'s combined header options — `SecurityHeadersOptions`'s own flat fields (`frameOptions`,
  * `referrerPolicy`, ...) plus `csp`, all under one `headers` option. `csp` is kept as its own field
@@ -96,6 +96,49 @@ function buildRedirectResponse(
     status: redirect.code ?? 301,
     headers: { location },
   })
+}
+
+/**
+ * Runs a page's own `action`, recovering an uncaught throw per `Ctor.actionOnError` — see
+ * {@linkcode SpacePageController.handlePost}'s own doc for the full contract.
+ *
+ * A plain module function, deliberately not a class method (unlike `#renderInvalidAction`): a
+ * method whose own signature embeds `Params` directly (rather than only through `action`/`loader`,
+ * which stay safely covered by `Params = never`'s bottom-type substitution) makes TypeScript infer
+ * `SpacePageController`'s `Params` parameter as invariant, breaking every `Target as unknown as
+ * ClassConstructor<SpacePageController>` cast this file already relies on elsewhere — confirmed via
+ * a real `deno check` failure across five unrelated call sites when this was first written as
+ * `#invokeAction`. Kept a free function, same shape as `toPageContext`/`buildRedirectResponse`
+ * above, so it's never part of the class's own structural type at all.
+ *
+ * Wraps ONLY the `action(actionCtx)` call itself, never anything else `handlePost` does before or
+ * after it (payload validation, the `METHOD_NOT_ALLOWED` throw for a page with no `action`) — those
+ * keep propagating uncaught exactly as before, regardless of `actionOnError`.
+ */
+async function invokeAction<Params>(
+  ctx: HandlerContext,
+  Ctor: typeof SpacePageController,
+  action: (actionCtx: PageActionContext<Params>) => Promise<Response>,
+  actionCtx: PageActionContext<Params>,
+): Promise<Response> {
+  try {
+    return await action(actionCtx)
+  } catch (error) {
+    if (Ctor.actionOnError !== 'render') throw error
+
+    const Target = Ctor as unknown as ClassConstructor<SpacePageController>
+    // Lazy — resolved only once we already know this `action` threw, unlike `handleGet`'s own
+    // eager resolution (every `action` still pays nothing for this on its happy path, including
+    // the far more common `actionOnError: 'json'`/default case, which never reaches this branch
+    // at all).
+    const { applySecurity } = await resolvePageChrome(ctx, Ctor.headers, actionCtx)
+    return applySecurity(
+      // Orbit never participates in a POST (see `PageActionContext`'s own doc on `action` being
+      // real HTTP, never an RPC) — `fragmentOnly` is always `false` here, same as
+      // `#renderInvalidAction`'s own call below.
+      await renderActionErrorPage(Target, actionCtx as PageContext<unknown>, false, error),
+    )
+  }
 }
 
 /**
@@ -239,6 +282,22 @@ export abstract class SpacePageController<
    * the unchanged default.
    */
   public static actionRto?: { Body?: RtoTypes['Body'] }
+
+  /**
+   * How an uncaught error thrown by this page's `action` becomes a response, as declared by
+   * `@Page({ action: { onError } })` — stashed here by `registerPage`, the same way `actionRto`
+   * is, and read per request by {@linkcode SpacePageController.handlePost}.
+   *
+   * `undefined`/`'json'` (the unchanged default) lets the error propagate to `@zanix/server`'s own
+   * generic JSON error response, exactly as before this option existed — the correct choice for an
+   * `action` answering a plain `fetch()` (e.g. a Comet expecting JSON back, never a document).
+   *
+   * `'render'` recovers the error the same way a thrown `loader` already is: this route's own
+   * nearest `error.tsx` (or the built-in `DefaultErrorView`), never raw JSON — the correct choice
+   * for an `action` that's a real `<form>` submission. See `PageOptions.action.onError`'s own doc
+   * (`page-decorator.ts`) for why this is opt-in rather than inferred from the request.
+   */
+  public static actionOnError?: 'render' | 'json'
 
   /** Per-page response header overrides — `false` disables the framework's own default headers
    * for this page entirely. Unset inherits {@linkcode getDefaultPageHeaders}. */
@@ -430,6 +489,15 @@ export abstract class SpacePageController<
    * can only be known from a real instance (see this class's own doc). Not meant to be called or
    * overridden directly.
    *
+   * **An uncaught `action`** is recovered by {@linkcode renderActionErrorPage} — the SAME
+   * `error.tsx`/`DefaultErrorView` recovery `handleGet` itself uses for a thrown `loader` — only
+   * when this page declares `@Page({ action: { onError: 'render' } })`. Otherwise (the default,
+   * unchanged from before this option existed) the error propagates past this method to
+   * `@zanix/server`'s own generic JSON error response, same as any other uncaught handler-body
+   * error — the correct default for an `action` answering a plain `fetch()` rather than a real
+   * `<form>` submission. See `PageOptions.action.onError`'s own doc (`page-decorator.ts`) for why
+   * this is opt-in rather than inferred from the request.
+   *
    * @throws {HttpError} `'METHOD_NOT_ALLOWED'` if the page declares no `action`.
    */
   public async handlePost(ctx: HandlerContext): Promise<Response> {
@@ -458,7 +526,7 @@ export abstract class SpacePageController<
     }
 
     const Body = Ctor.actionRto?.Body
-    if (!Body) return await action(pageCtx)
+    if (!Body) return await invokeAction(ctx, Ctor, action, pageCtx)
 
     // Validation itself lives in `action-validation.ts` — including WHY it runs here rather than
     // as a `Post(path, rto)` pipe (a pipe's throw answers with JSON, which is the outcome the 422
@@ -473,7 +541,7 @@ export abstract class SpacePageController<
       // Mirrors what `requestValidationPipe` itself does, so an action reading `ctx.payload.body`
       // directly sees the same validated instance the typed `ctx.body` carries.
       ctx.payload.body = validated
-      return await action({ ...pageCtx, body: validated })
+      return await invokeAction(ctx, Ctor, action, { ...pageCtx, body: validated })
     }
 
     return await this.#renderInvalidAction(ctx, pageCtx, fieldErrors, submitted)

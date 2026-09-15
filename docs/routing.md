@@ -289,6 +289,34 @@ default) only ever receives `ErrorBoundaryProps.error` plus, when the app declar
 pre-resolved `messages` catalog (see [`docs/i18n.md`](./i18n.md#error-and-not-found-pages)) —
 nothing else this framework decided is safe to persist/report on its own behalf.
 
+### An `action`'s uncaught error — opt-in recovery, never inferred
+
+A thrown `loader` above is always recovered into a document. A thrown `action` is different by
+default: it propagates past `handlePost` to `@zanix/server`'s own generic JSON error response, same
+as any other uncaught handler-body error — the right default for an `action` answering a plain
+`fetch()` (a Comet calling an action-only page for its own JSON response), where a rendered document
+in place of that JSON would break the caller.
+
+For an `action` that's a real `<form>` submission instead — where the response is always a document
+either way — opt in per page:
+
+```tsx
+@Page({ path: 'checkout', action: { onError: 'render' } })
+class CheckoutPage extends SpacePageController {
+  action = async (ctx) => {/* ... */}
+}
+```
+
+With `onError: 'render'`, an uncaught `action` error gets the exact same recovery a thrown `loader`
+already does — this route's own nearest `error.tsx` (or the built-in `DefaultErrorView`), with the
+real HTTP status preserved (`502` for a `RestClient` call that failed upstream, `500` otherwise).
+Omit `onError` (or set it to `'json'`, the default) to keep today's behavior unchanged.
+
+This is deliberately explicit, never inferred from the request (e.g. from `Sec-Fetch-Mode`): a
+`fetch()`-driven action and a `<form>`-driven one are structurally indistinguishable from inside
+`handlePost` alone, and a request header that can be silently absent (older browsers, and every unit
+test that builds its own request context by hand) is not a safe thing to brand this decision on.
+
 ### Serving JSON instead of a document — `defineSpaceApp({ errorResponse: 'json' })`
 
 `errorResponse` decides what this package's own BUILT-IN not-found/error fallback renders when a

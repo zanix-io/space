@@ -55,7 +55,29 @@ export type PageOptions = {
    * }
    * ```
    */
-  action?: { Body?: RtoTypes['Body'] }
+  action?: {
+    Body?: RtoTypes['Body']
+    /**
+     * How an uncaught error thrown by THIS page's `action` becomes a response. Opt-in, explicit,
+     * never inferred from the request (e.g. from `Sec-Fetch-Mode`) — an `action` invoked by a
+     * plain `fetch()` (a Comet calling an action-only page for its own JSON response, the real
+     * shape `LoginMethodsPage` already uses in production) and an `action` submitted by a real
+     * `<form>` navigation are structurally indistinguishable from inside `handlePost` alone, and a
+     * request header that can be silently absent (older browsers, and every unit test that builds
+     * its own `HandlerContext` by hand) is not a safe thing to brand this decision on.
+     *
+     * - `'json'` (the default, and the unchanged behavior from before this option existed) — the
+     *   error propagates past `handlePost` to `@zanix/server`'s own generic `httpErrorResponse`,
+     *   same as any other uncaught handler-body error. Correct for an `action` that answers a
+     *   `fetch()`, never a document.
+     * - `'render'` — the error is recovered the same way a thrown `loader` already is: this
+     *   route's own nearest `error.tsx` (or the built-in `DefaultErrorView`, for a route that
+     *   declares none), never raw JSON. Correct for an `action` that's a real `<form>` submission,
+     *   where the response is always a document either way — see
+     *   {@linkcode SpacePageController.handlePost}'s own doc for the full recovery contract.
+     */
+    onError?: 'render' | 'json'
+  }
   /**
    * Response headers for this page — `Content-Security-Policy` (via `csp`, defaulting to a
    * nonce-based policy) plus common security headers (`frameOptions`, `referrerPolicy`, ...),
@@ -104,7 +126,7 @@ export type PageOptions = {
 type PendingPageOptions = {
   Interactor?: ZanixInteractorClass
   headers?: PageHeaderOptions | false
-  action?: { Body?: RtoTypes['Body'] }
+  action?: { Body?: RtoTypes['Body']; onError?: 'render' | 'json' }
 }
 
 /** Every class ever decorated with a pathless `@Page()`, mapped to its own options — never
@@ -211,7 +233,13 @@ function registerPage(
   // router's own catch to `Deno.serve`'s `onError`, which answers with JSON — the exact outcome
   // the 422 re-render exists to avoid.
   if (action !== undefined) {
-    ;(Target as unknown as typeof SpacePageController).actionRto = action
+    // `actionRto` keeps its own narrow shape (`{ Body }` only) — `onError` is stashed on its own
+    // static instead of folded into it, so a reader of `actionRto` never has to wonder whether an
+    // unrelated static also rides along inside it.
+    ;(Target as unknown as typeof SpacePageController).actionRto = { Body: action.Body }
+    if (action.onError !== undefined) {
+      ;(Target as unknown as typeof SpacePageController).actionOnError = action.onError
+    }
   }
 }
 

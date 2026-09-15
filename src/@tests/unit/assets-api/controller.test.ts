@@ -387,6 +387,38 @@ Deno.test(
 )
 
 Deno.test(
+  'downloadAsset: a real download carries a long-lived, browser-only Cache-Control — the id ' +
+    'is a real, immutable generateUUID() minted once at upload time, so the exact same URL ' +
+    'never resolves to different bytes across its lifetime, making it safe for the requesting ' +
+    "browser's own cache to reuse indefinitely without ever revalidating against the network",
+  async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1, 2, 3]))
+        controller.close()
+      },
+    })
+    const { service } = createSpyAssetService({
+      downloadVariant: () => Promise.resolve({ stream, contentType: 'image/jpeg', size: 3 }),
+    })
+    const ControllerClass = createAssetsController({
+      service,
+      prefix: 'assets-download-cache-control-test',
+      guards: { write: [allowAllGuard], read: [allowAllGuard] },
+    })
+    const ctx = mockHandlerContext({
+      req: new Request('http://localhost/assets/asset-1/download'),
+      payload: { params: { id: 'asset-1' } as AssetIdParamsRTO, search: {}, body: undefined },
+    })
+    const controller = new ControllerClass(ctx)
+
+    const response = await controller.downloadAsset(ctx)
+
+    assertEquals(response.headers.get('Cache-Control'), 'private, max-age=31536000, immutable')
+  },
+)
+
+Deno.test(
   'deleteAsset: an unknown id throws a real NOT_FOUND HttpError — never calls ' +
     'AssetService.deleteAsset for something that was never there',
   async () => {

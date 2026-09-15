@@ -1,9 +1,10 @@
 /**
- * Recovers a thrown `loader` into a real, rendered response — the module both of
- * `SpacePageController`'s own render call sites (`handleGet`, for a `GET`, and
- * `#renderInvalidAction`, re-running `loader` for a failed action's `422` re-render) reach for
- * whenever their own data-resolution/render pipeline throws. One implementation, two call sites —
- * see {@linkcode renderLoaderErrorPage}'s own doc.
+ * Recovers a thrown `loader` — or, via {@linkcode renderActionErrorPage}, an `action` that opted
+ * into the same treatment (`@Page({ action: { onError: 'render' } })`) — into a real, rendered
+ * response. Three call sites share one implementation: `SpacePageController.handleGet` (a `GET`'s
+ * own `loader`), `#renderInvalidAction` (re-running `loader` for a failed action's `422`
+ * re-render), and `#invokeAction` (an `action` itself, only when it opted in). See
+ * {@linkcode renderLoaderErrorPage}'s and {@linkcode renderActionErrorPage}'s own docs.
  *
  * @module
  */
@@ -94,11 +95,49 @@ import { DEFAULT_IMPLICIT_LANG, getMessagesDir } from '../i18n/messages-registry
  * @param error - The value `loader`/`resolveSegmentData` threw — never assumed to be an `Error`
  * instance (a `loader` can throw anything, same as any other function).
  */
-export async function renderLoaderErrorPage(
+export function renderLoaderErrorPage(
   Target: ClassConstructor<SpacePageController<never>>,
   pageCtx: PageContext<unknown>,
   fragmentOnly: boolean,
   error: unknown,
+): Promise<Response> {
+  return renderThrownPageError(Target, pageCtx, fragmentOnly, error, 'loader')
+}
+
+/**
+ * The `action` counterpart to {@linkcode renderLoaderErrorPage} — same recovery (this route's
+ * nearest `error.tsx`, or the built-in `DefaultErrorView`; `HttpError('NOT_FOUND')` still renders
+ * `not-found.tsx`; the real HTTP status still survives; `defineSpaceApp({ errorResponse: 'json' })`
+ * still applies), reached only from `SpacePageController.#invokeAction`, and only for a page that
+ * declared `@Page({ action: { onError: 'render' } })` — see that option's own doc
+ * (`page-decorator.ts`) for why this is opt-in. Every other detail of `renderLoaderErrorPage`'s own
+ * doc applies here unchanged; the only real difference is what gets logged (an action, not a
+ * loader) and which phrase of a page's lifecycle threw.
+ *
+ * @param Target - See {@linkcode renderLoaderErrorPage}.
+ * @param pageCtx - See {@linkcode renderLoaderErrorPage}.
+ * @param fragmentOnly - Always `false` from `#invokeAction`'s own call site — Orbit never
+ * participates in a POST (see `PageActionContext`'s own doc), so an action's error response is
+ * never a fragment. Still a real parameter here (not hardcoded) so this function's own contract
+ * matches `renderLoaderErrorPage`'s exactly.
+ * @param error - The value this page's own `action` threw — never assumed to be an `Error`
+ * instance, same as `renderLoaderErrorPage`'s own `error` param.
+ */
+export function renderActionErrorPage(
+  Target: ClassConstructor<SpacePageController<never>>,
+  pageCtx: PageContext<unknown>,
+  fragmentOnly: boolean,
+  error: unknown,
+): Promise<Response> {
+  return renderThrownPageError(Target, pageCtx, fragmentOnly, error, 'action')
+}
+
+async function renderThrownPageError(
+  Target: ClassConstructor<SpacePageController<never>>,
+  pageCtx: PageContext<unknown>,
+  fragmentOnly: boolean,
+  error: unknown,
+  phase: 'loader' | 'action',
 ): Promise<Response> {
   if (error instanceof HttpError && error.status.code === 'NOT_FOUND') {
     // Unlike `createNotFoundHandler`'s own `onError` path, this request DOES have a matched
@@ -108,7 +147,9 @@ export async function renderLoaderErrorPage(
   }
 
   logger.error(
-    `Uncaught error resolving loader data for "${pageCtx.url.pathname}"`,
+    phase === 'loader'
+      ? `Uncaught error resolving loader data for "${pageCtx.url.pathname}"`
+      : `Uncaught error running action for "${pageCtx.url.pathname}"`,
     error,
   )
 

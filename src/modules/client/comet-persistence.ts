@@ -1,6 +1,7 @@
 import logger from './client-logger.ts'
 import {
   COMET_EXPORT_ATTR,
+  COMET_ID_ATTR,
   COMET_MODULE_ATTR,
   COMET_PERSIST_ATTR,
   COMET_PROPS_ATTR,
@@ -9,35 +10,45 @@ import {
 import { parseCometProps } from '../render/serialization-codec.ts'
 
 /**
- * What a renderer's own `hydrateBoundary` hands back for a `persist`-tagged boundary, once
- * `hydrateRoot`/`hydrate` has actually mounted it — the ONLY renderer-specific surface this whole
- * module ever touches. React's closure captures the real `Root` object `hydrateRoot`/`createRoot`
- * returned (`root.render(...)`/`root.unmount()`); Preact's closure just calls `render(...)` again
- * on the SAME container (Preact keeps its own reconciliation state on the node itself — no
- * separate root object to capture, see `hydrate-comets-preact.ts`'s own doc). Neither renderer
- * file imports the other's package to produce this — both just implement the same two-function
- * shape, exactly like `hydrateComets` itself is already implemented twice, once per renderer.
+ * What a renderer's own `hydrateBoundary` hands back for EVERY top-level boundary it just mounted
+ * — the ONLY renderer-specific surface this whole module ever touches. React's closure captures
+ * the real `Root` object `hydrateRoot`/`createRoot` returned (`root.render(...)`/
+ * `root.unmount()`); Preact's closure just calls `render(...)` again on the SAME container (Preact
+ * keeps its own reconciliation state on the node itself — no separate root object to capture, see
+ * `hydrate-comets-preact.ts`'s own doc). Neither renderer file imports the other's package to
+ * produce this — both just implement the same two-function shape, exactly like `hydrateComets`
+ * itself is already implemented twice, once per renderer.
+ *
+ * Registered for EVERY hydrated top-level boundary, not just `persist`-tagged ones (the name
+ * predates that broadening — this used to be persist-only, see {@linkcode disposeOutletComets}'s
+ * own doc for the real bug that widened it) — `reuse` is simply never called for a non-persisted
+ * boundary (nothing ever puts one in {@linkcode RetainedCometCache}), while `dispose` is now the
+ * one thing EVERY boundary needs regardless: the real hook this module gives `orbit.ts` to
+ * actually unmount a Comet whose DOM is about to be ripped out from under it.
  */
-export interface OrbitPersistHandle {
-  /** Re-renders the already-mounted instance with new props, in place — never a fresh mount. */
+export interface OrbitCometHandle {
+  /** Re-renders the already-mounted instance with new props, in place — never a fresh mount.
+   * Only ever invoked for a `persist`-tagged boundary being reused from the cache. */
   reuse: (props: unknown) => void
-  /** Tears the instance down for good. Only ever called on LRU eviction or an identity mismatch
-   * (a `persist` key reused for a different comet module/export) — never as part of an ordinary
-   * detach, and never when a retained instance is about to be reused. */
+  /** Tears the instance down for good — `root.unmount()`/`render(null, boundary)`. Called for a
+   * `persist`-tagged boundary on LRU eviction or an identity mismatch, and now for EVERY ordinary
+   * boundary right before its own DOM node is discarded by an Orbit swap (`disposeOutletComets`) —
+   * the real unmount signal neither renderer would otherwise ever get. */
   dispose: () => void
 }
 
-/** `boundary element -> its own OrbitPersistHandle`, for every `persist`-tagged boundary a
- * renderer has EVER hydrated on this page load — not just the ones currently detached/retained.
- * A `WeakMap` (not a plain property stashed on the element) so a boundary that's never persisted
- * across a navigation, or one whose retained entry is later evicted, is simply garbage-collected
- * along with the DOM node itself; nothing here ever needs explicit cleanup for that case. */
-const persistHandles = new WeakMap<Element, OrbitPersistHandle>()
+/** `boundary element -> its own OrbitCometHandle`, for every top-level Comet boundary a renderer
+ * has EVER hydrated on this page load — not just `persist`-tagged ones, and not just the ones
+ * currently detached/retained. A `WeakMap` (not a plain property stashed on the element) so a
+ * boundary whose DOM node is later discarded is simply garbage-collected along with it; nothing
+ * here ever needs explicit cleanup for that case. */
+const cometHandles = new WeakMap<Element, OrbitCometHandle>()
 
-/** Called once, by whichever renderer's `hydrateBoundary` just mounted a `persist`-tagged
- * boundary — see {@linkcode OrbitPersistHandle}'s own doc for what `handle` must do. */
-export function registerPersistHandle(boundary: Element, handle: OrbitPersistHandle): void {
-  persistHandles.set(boundary, handle)
+/** Called once, by whichever renderer's `hydrateBoundary` just mounted ANY top-level boundary
+ * (`persist`-tagged or not) — see {@linkcode OrbitCometHandle}'s own doc for what `handle` must
+ * do. */
+export function registerCometHandle(boundary: Element, handle: OrbitCometHandle): void {
+  cometHandles.set(boundary, handle)
 }
 
 /** One retained, currently-detached comet instance — everything {@linkcode RetainedCometCache}
@@ -174,7 +185,7 @@ export function isCometPersisted(key: string): boolean {
  * `innerHTML`/`replaceChildren` wipe it never gets a chance to react to.
  *
  * A boundary whose lazy hydration strategy (`'idle'`/`'visible'`/`'media'`) never actually
- * triggered has no registered {@linkcode OrbitPersistHandle} at all — there is no live instance
+ * triggered has no registered {@linkcode OrbitCometHandle} at all — there is no live instance
  * to retain, so it's left exactly where it is, to be discarded normally by the caller's own
  * replace step, the same as any other non-persisted boundary.
  */
@@ -185,7 +196,7 @@ export function detachPersistedComets(outlet: ParentNode): void {
   boundaries.forEach((boundary) => {
     const key = boundary.getAttribute(COMET_PERSIST_ATTR)
     if (!key) return
-    const handle = persistHandles.get(boundary)
+    const handle = cometHandles.get(boundary)
     if (!handle) return
 
     if (seenKeys.has(key)) {
@@ -202,6 +213,49 @@ export function detachPersistedComets(outlet: ParentNode): void {
     const exportName = boundary.getAttribute(COMET_EXPORT_ATTR) ?? ''
     boundary.remove()
     liveCache.set(key, { moduleUrl, exportName, node: boundary, dispose: handle.dispose })
+  })
+}
+
+/**
+ * Disposes every NON-`persist`-tagged top-level Comet boundary still live in `outlet` — called by
+ * `swapOutlet` (`orbit.ts`) right after {@linkcode detachPersistedComets} (which has, by then,
+ * already pulled every `persist`-tagged boundary OUT of `outlet`, so this only ever reaches the
+ * ones actually about to be discarded) and BEFORE the outlet's own contents are replaced, while
+ * these nodes are still attached to a real, live renderer instance.
+ *
+ * **A real, confirmed bug this closes**: `outlet.replaceChildren(...)` (`orbit.ts`'s own `swap`)
+ * only ever removes a boundary's DOM node — it never asks React/Preact to unmount it, because
+ * neither renderer observes an external `replaceChildren`/`innerHTML` wipe as an unmount signal at
+ * all (that's `dispose()`'s own job: `root.unmount()`/`render(null, boundary)`, per
+ * {@linkcode OrbitCometHandle}'s own doc). Every ordinary (non-persisted) Comet using a hook with
+ * a cleanup function — an event listener, a timer, a subscription — leaked it on EVERY Orbit
+ * navigation before this fix: its own cleanup never ran, so the listener stayed attached to
+ * whatever it was watching (commonly `window`) for the rest of the session, with its own closure
+ * still pointing at the NOW-STALE page state it was created under.
+ *
+ * Confirmed, reproduced, real-world instance: `ScrollRestoration` (`@zanix/space/comet`) attaches a
+ * `scroll` listener to `window` keyed by `location.pathname` at mount. Leaked across a navigation,
+ * that stale listener kept firing on every scroll of a LATER, completely different page — still
+ * saving under its own original (now wrong) key — so revisiting the original page later could
+ * restore a position that actually belonged to whatever page the visitor happened to be scrolling
+ * when the leaked listener's debounce last fired. Fixed at the actual leak, not by working around
+ * its symptom.
+ *
+ * Boundaries with a lazy strategy (`'idle'`/`'visible'`/`'media'`) that never actually triggered
+ * hydration have no registered handle at all — same real "nothing to dispose" case
+ * {@linkcode detachPersistedComets}'s own doc already covers for the identical reason. A Comet
+ * composed inside another one's own tree is never queried directly here either — it has no
+ * `COMET_ID_ATTR` boundary of its OWN dispose handle to look up in the first place (only a
+ * top-level boundary ever registers one; see `hydrateBoundary` in either renderer's own
+ * `hydrate-comets*.ts`), so it's disposed transitively along with its parent, exactly like it
+ * hydrates transitively alongside it.
+ */
+export function disposeOutletComets(outlet: ParentNode): void {
+  const boundaries = outlet.querySelectorAll(`[${COMET_ID_ATTR}]`)
+
+  boundaries.forEach((boundary) => {
+    const handle = cometHandles.get(boundary)
+    handle?.dispose()
   })
 }
 
@@ -240,7 +294,7 @@ export function reuseRetainedComets(fragmentRoot: ParentNode): void {
     const node = liveCache.take(key, moduleUrl, exportName)
     if (!node) return
 
-    const handle = persistHandles.get(node)
+    const handle = cometHandles.get(node)
     // Third read site for `data-comet-props`, sharing the same decoder as both hydrate
     // modules — a retained comet must decode identically to a freshly hydrated one.
     const props = parseCometProps(placeholder.getAttribute(COMET_PROPS_ATTR))

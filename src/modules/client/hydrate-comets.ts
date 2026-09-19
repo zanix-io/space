@@ -7,7 +7,6 @@ import {
   COMET_ID_ATTR,
   COMET_MEDIA_ATTR,
   COMET_MODULE_ATTR,
-  COMET_PERSIST_ATTR,
   COMET_PROPS_ATTR,
   COMET_REUSED_ATTR,
   COMET_STRATEGY_ATTR,
@@ -23,7 +22,7 @@ import { hashSourceKey } from '../comets/comet-manifest.ts'
 import { CometIdScopeProvider } from '../comets/comet-id-scope-react.tsx'
 import { parseCometProps } from '../render/serialization-codec.ts'
 import { scheduleCometHydration } from './schedule-comet-hydration.ts'
-import { registerPersistHandle } from './comet-persistence.ts'
+import { registerCometHandle } from './comet-persistence.ts'
 import { setCometHydrator } from './hydrator-registry.ts'
 import { isNestedComet } from './nested-comet-guard.ts'
 import { setActiveRenderer } from '../router/active-renderer.ts'
@@ -48,7 +47,6 @@ async function hydrateBoundary(boundary: HTMLElement): Promise<void> {
   const strategy = (boundary.getAttribute(COMET_STRATEGY_ATTR) || 'load') as CometStrategy
   const rawProps = boundary.getAttribute(COMET_PROPS_ATTR)
   const props = parseCometProps(rawProps)
-  const persistKey = boundary.getAttribute(COMET_PERSIST_ATTR)
 
   // The SAME instance scope `define-comet.ts` computed server-side — `COMET_ID_ATTR` is already
   // that call's own `sourceHash`, and `rawProps` (read here BEFORE `parseCometProps`, never
@@ -73,30 +71,35 @@ async function hydrateBoundary(boundary: HTMLElement): Promise<void> {
   // Both branches produce the same real `Root` — `createRoot`/`hydrateRoot` differ only in
   // whether they hydrate existing SSR markup or mount fresh, never in the `Root` API surface
   // itself (`.render()`/`.unmount()`), so a single retained `root` covers both for the
-  // `persist` registration below.
+  // registration below.
   const root = strategy === 'only' ? createRoot(boundary) : hydrateRoot(boundary, element)
   if (strategy === 'only') root.render(element)
 
-  if (persistKey) {
-    registerPersistHandle(boundary, {
-      // `nextProps` is `unknown` at the OrbitPersistHandle boundary on purpose — this module
-      // doesn't know the component's own prop type any more than the dynamic `import()` above
-      // does; `Component` is already `any`-typed for the same reason. `instanceScope` is closed
-      // over from the ORIGINAL mount above, never recomputed from `nextProps` — this instance's
-      // own id-scope stays fixed for its whole persisted lifetime, matching the same contract a
-      // real hydration root's own `useId()` counter would.
-      reuse: (nextProps) =>
-        root.render(
-          createElement(
-            CometIdScopeProvider,
-            { value: instanceScope },
-            // deno-lint-ignore no-explicit-any
-            createElement(Component, nextProps as any),
-          ),
+  // Registered for EVERY top-level boundary, `persist`-tagged or not — see
+  // `disposeOutletComets`'s own doc (`comet-persistence.ts`) for the real, confirmed leak this
+  // closes: without a real `dispose()` to call, an Orbit swap's `outlet.replaceChildren(...)`
+  // only ever discards this boundary's DOM node, never its React root, leaving every hook's own
+  // cleanup — an event listener, a timer — permanently unrun. `reuse` stays real either way; it's
+  // simply never invoked for a boundary that never becomes a `RetainedCometCache` entry in the
+  // first place (that only happens via `detachPersistedComets`, `persist`-gated on ITS OWN side).
+  registerCometHandle(boundary, {
+    // `nextProps` is `unknown` at the OrbitCometHandle boundary on purpose — this module
+    // doesn't know the component's own prop type any more than the dynamic `import()` above
+    // does; `Component` is already `any`-typed for the same reason. `instanceScope` is closed
+    // over from the ORIGINAL mount above, never recomputed from `nextProps` — this instance's
+    // own id-scope stays fixed for its whole persisted lifetime, matching the same contract a
+    // real hydration root's own `useId()` counter would.
+    reuse: (nextProps) =>
+      root.render(
+        createElement(
+          CometIdScopeProvider,
+          { value: instanceScope },
+          // deno-lint-ignore no-explicit-any
+          createElement(Component, nextProps as any),
         ),
-      dispose: () => root.unmount(),
-    })
-  }
+      ),
+    dispose: () => root.unmount(),
+  })
 }
 
 /**

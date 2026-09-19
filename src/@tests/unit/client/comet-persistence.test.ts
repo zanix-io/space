@@ -1,6 +1,7 @@
 import { assert, assertEquals, assertFalse, assertStrictEquals } from '@std/assert'
 import {
   COMET_EXPORT_ATTR,
+  COMET_ID_ATTR,
   COMET_MODULE_ATTR,
   COMET_PERSIST_ATTR,
   COMET_PROPS_ATTR,
@@ -8,8 +9,9 @@ import {
 } from 'modules/comets/marker.ts'
 import {
   detachPersistedComets,
+  disposeOutletComets,
   isCometPersisted,
-  registerPersistHandle,
+  registerCometHandle,
   RetainedCometCache,
   reuseRetainedComets,
 } from 'modules/client/comet-persistence.ts'
@@ -24,7 +26,7 @@ import {
 // functions out entirely for that reason): both only ever call `querySelectorAll`/`getAttribute`/
 // `setAttribute`/`remove`/`replaceWith` on whatever `ParentNode`/`Element` they're given, so
 // `MockElement` below (a plain class, no DOM/browser required) stands in for exactly that surface —
-// the same "duck-typed object cast to the real DOM type" pattern `registerPersistHandle`'s own
+// the same "duck-typed object cast to the real DOM type" pattern `registerCometHandle`'s own
 // test already uses for `boundary`. A real-browser lifecycle test remains out of scope for the
 // reason already documented (an intermittent dev-server/browser `import()` race); this covers the
 // actual ORCHESTRATION logic (which key wins, when a handle's `dispose`/`reuse` fires, the
@@ -111,12 +113,12 @@ function entry(
 }
 
 Deno.test(
-  'registerPersistHandle: stores a handle for a boundary — a plain WeakMap.set with no DOM ' +
+  'registerCometHandle: stores a handle for a boundary — a plain WeakMap.set with no DOM ' +
     'dependency of its own; the WeakMap key only needs to be an object reference, not a real Element',
   () => {
     const boundary = {} as unknown as Element
     const handle = { reuse: () => {}, dispose: () => {} }
-    registerPersistHandle(boundary, handle)
+    registerCometHandle(boundary, handle)
   },
 )
 
@@ -337,7 +339,7 @@ Deno.test(
       [COMET_EXPORT_ATTR]: 'default',
     })
     const spy = handleSpy()
-    registerPersistHandle(boundary as unknown as Element, spy.handle)
+    registerCometHandle(boundary as unknown as Element, spy.handle)
 
     detachPersistedComets(mockOutlet([boundary]))
     assertEquals(boundary.calls.remove, 1, 'a retained boundary is really detached from its outlet')
@@ -376,8 +378,8 @@ Deno.test(
     const second = new MockElement({ [COMET_PERSIST_ATTR]: 'dup-detach' })
     const firstSpy = handleSpy()
     const secondSpy = handleSpy()
-    registerPersistHandle(first as unknown as Element, firstSpy.handle)
-    registerPersistHandle(second as unknown as Element, secondSpy.handle)
+    registerCometHandle(first as unknown as Element, firstSpy.handle)
+    registerCometHandle(second as unknown as Element, secondSpy.handle)
 
     detachPersistedComets(mockOutlet([first, second]))
 
@@ -421,7 +423,7 @@ Deno.test(
     "attributes falls back to '' for both — still detached, cached and reusable, never skipped",
   () => {
     const boundary = new MockElement({ [COMET_PERSIST_ATTR]: 'no-module-attrs' })
-    registerPersistHandle(boundary as unknown as Element, handleSpy().handle)
+    registerCometHandle(boundary as unknown as Element, handleSpy().handle)
 
     detachPersistedComets(mockOutlet([boundary]))
     assertEquals(boundary.calls.remove, 1)
@@ -443,7 +445,7 @@ Deno.test(
       [COMET_MODULE_ATTR]: '/comets/widget.tsx',
       [COMET_EXPORT_ATTR]: 'default',
     })
-    registerPersistHandle(boundary as unknown as Element, handleSpy().handle)
+    registerCometHandle(boundary as unknown as Element, handleSpy().handle)
     detachPersistedComets(mockOutlet([boundary]))
 
     const placeholder1 = new MockElement({
@@ -493,7 +495,7 @@ Deno.test(
         [COMET_MODULE_ATTR]: '/comets/lru-cap-widget.tsx',
         [COMET_EXPORT_ATTR]: 'default',
       })
-      registerPersistHandle(boundary as unknown as Element, spies[i].handle)
+      registerCometHandle(boundary as unknown as Element, spies[i].handle)
       return boundary
     })
 
@@ -524,7 +526,7 @@ Deno.test(
       [COMET_MODULE_ATTR]: '/comets/widget.tsx',
       [COMET_EXPORT_ATTR]: 'default',
     })
-    registerPersistHandle(boundary as unknown as Element, handleSpy().handle)
+    registerCometHandle(boundary as unknown as Element, handleSpy().handle)
     detachPersistedComets(mockOutlet([boundary]))
 
     assert(isCometPersisted('is-persisted-solo'))
@@ -550,7 +552,7 @@ Deno.test(
         [COMET_MODULE_ATTR]: '/comets/is-persisted-cap-widget.tsx',
         [COMET_EXPORT_ATTR]: 'default',
       })
-      registerPersistHandle(boundary as unknown as Element, handleSpy().handle)
+      registerCometHandle(boundary as unknown as Element, handleSpy().handle)
       detachPersistedComets(mockOutlet([boundary]))
     })
 
@@ -579,7 +581,7 @@ Deno.test(
         [COMET_MODULE_ATTR]: '/comets/lru-cap-widget.tsx',
         [COMET_EXPORT_ATTR]: 'default',
       })
-      registerPersistHandle(boundary as unknown as Element, handleSpy().handle)
+      registerCometHandle(boundary as unknown as Element, handleSpy().handle)
       detachPersistedComets(mockOutlet([boundary]))
     })
 
@@ -610,5 +612,67 @@ Deno.test(
       1,
       'a key within the real 5-slot cap must still be reused, not fresh-mounted',
     )
+  },
+)
+
+// `disposeOutletComets` — the real fix for a real, confirmed leak: `orbit.ts`'s own
+// `outlet.replaceChildren(...)` only ever discards a boundary's DOM node, never asks the renderer
+// to unmount it, so a Comet's own hook cleanup (a `window` event listener, a timer) never ran
+// without this, staying attached for the rest of the session with its closure still pointing at
+// whatever page state existed at mount time. See that function's own doc (`comet-persistence.ts`)
+// for the full, reproduced real-world instance (`ScrollRestoration`).
+
+Deno.test(
+  'disposeOutletComets: a boundary with a registered handle is disposed exactly once',
+  () => {
+    const spied = handleSpy()
+    const boundary = new MockElement({ [COMET_ID_ATTR]: 'a1' })
+    registerCometHandle(boundary as unknown as Element, spied.handle)
+
+    disposeOutletComets(mockOutlet([boundary]))
+
+    assertEquals(spied.state.disposed, 1)
+  },
+)
+
+Deno.test(
+  'disposeOutletComets: every boundary still in the outlet is disposed, each exactly once',
+  () => {
+    const first = handleSpy()
+    const second = handleSpy()
+    const boundaryA = new MockElement({ [COMET_ID_ATTR]: 'a1' })
+    const boundaryB = new MockElement({ [COMET_ID_ATTR]: 'b1' })
+    registerCometHandle(boundaryA as unknown as Element, first.handle)
+    registerCometHandle(boundaryB as unknown as Element, second.handle)
+
+    disposeOutletComets(mockOutlet([boundaryA, boundaryB]))
+
+    assertEquals(first.state.disposed, 1)
+    assertEquals(second.state.disposed, 1)
+  },
+)
+
+Deno.test(
+  'disposeOutletComets: a boundary with NO registered handle (a lazy strategy that never actually ' +
+    'hydrated — no live instance exists) is silently skipped, never throws',
+  () => {
+    const neverHydrated = new MockElement({ [COMET_ID_ATTR]: 'a1' })
+    disposeOutletComets(mockOutlet([neverHydrated]))
+    // Reaching this line at all is the assertion — a throw here would fail the test.
+    assert(true)
+  },
+)
+
+Deno.test(
+  'disposeOutletComets: never calls reuse — dispose is the only thing an ordinary (non-persisted) ' +
+    'boundary ever needs',
+  () => {
+    const spied = handleSpy()
+    const boundary = new MockElement({ [COMET_ID_ATTR]: 'a1' })
+    registerCometHandle(boundary as unknown as Element, spied.handle)
+
+    disposeOutletComets(mockOutlet([boundary]))
+
+    assertEquals(spied.state.reused, [])
   },
 )

@@ -4,7 +4,11 @@ import { getCometHydrator, getErrorBoundaryHydrator } from './hydrator-registry.
 import { findAnchor, resolveLinkInfo } from './link-info.ts'
 import { getPrefetchedFragment, initPrefetch, rescanPrefetchTargets } from './prefetch.ts'
 import type { PrefetchOptions } from './prefetch.ts'
-import { detachPersistedComets, reuseRetainedComets } from './comet-persistence.ts'
+import {
+  detachPersistedComets,
+  disposeOutletComets,
+  reuseRetainedComets,
+} from './comet-persistence.ts'
 import { registerPersistTransitionNames } from './comet-persist-transition.ts'
 import { getActiveCspNonce } from './active-nonce.ts'
 
@@ -475,6 +479,16 @@ async function performSwap(href: string, replace: boolean): Promise<void> {
     // exactly what lets the browser morph it in place instead of treating it as exiting-then-
     // entering.
     detachPersistedComets(outlet)
+    // Runs on whatever's left in `outlet` AFTER `detachPersistedComets` has already pulled every
+    // `persist`-tagged boundary out — so this only ever reaches boundaries genuinely about to be
+    // discarded below, unmounting each one for real (`root.unmount()`/`render(null, boundary)`)
+    // while its DOM node is still attached. A real, confirmed bug this closes: `replaceChildren`
+    // below only ever discards a boundary's DOM node — neither renderer treats that as an unmount
+    // signal on its own, so a Comet's own `useEffect` cleanup (an event listener, a timer) never
+    // ran without this, leaking for the rest of the session. See `comet-persistence.ts`'s own
+    // `disposeOutletComets` doc for the real, reproduced instance (`ScrollRestoration`) this was
+    // confirmed against.
+    disposeOutletComets(outlet)
     reuseRetainedComets(template.content)
 
     outlet.replaceChildren(template.content)

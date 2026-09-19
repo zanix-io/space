@@ -4,7 +4,7 @@ import { getActiveCspSignature, initOrbit, navigate, retryOutlet } from 'modules
 import { ORBIT_FRAGMENT_HEADER, ORBIT_OUTLET_ATTR } from 'modules/router/orbit-protocol.ts'
 import { CSP_SIGNATURE_META_NAME, CSP_SIGNATURE_NONE } from 'modules/router/csp-signature.ts'
 import { setCometHydrator, setErrorBoundaryHydrator } from 'modules/client/hydrator-registry.ts'
-import { registerPersistHandle } from 'modules/client/comet-persistence.ts'
+import { registerCometHandle } from 'modules/client/comet-persistence.ts'
 import {
   COMET_EXPORT_ATTR,
   COMET_MODULE_ATTR,
@@ -641,7 +641,7 @@ Deno.test(
     boundary.setAttribute(COMET_EXPORT_ATTR, 'Sidebar')
     outlet.appendChild(boundary)
     let disposed = false
-    registerPersistHandle(boundary, { reuse: () => {}, dispose: () => void (disposed = true) })
+    registerCometHandle(boundary, { reuse: () => {}, dispose: () => void (disposed = true) })
 
     // The destination fragment's own placeholder for the SAME persist key/module/export — what
     // makes `reuseRetainedComets` splice the RETAINED node back in, rather than leaving a fresh

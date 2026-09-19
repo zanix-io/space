@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.15.3] - 2026-09-19
+
+### Fixed
+
+- **An Orbit swap's `outlet.replaceChildren(...)` only ever discarded a non-`persist`-tagged Comet's
+  DOM node — it never asked React/Preact to unmount the instance mounted on it, since neither
+  renderer treats an external `replaceChildren`/`innerHTML` wipe as an unmount signal on its own.**
+  Every ordinary Comet using a hook with a cleanup function (an event listener, a timer, a
+  subscription) leaked it on EVERY Orbit navigation: its own cleanup never ran, so the effect stayed
+  attached — commonly to `window` — for the rest of the session, its closure still pointing at
+  whatever page state existed the moment it was created. Real, reproduced consequence:
+  `ScrollRestoration` (`@zanix/space/comet`) keys its own saved scroll position by
+  `location.pathname` at mount; a leaked instance's `scroll` listener kept firing (and saving) under
+  its OWN original key while the visitor was actually on a later, completely different page, so
+  revisiting the original page could restore a position that actually belonged to whichever page the
+  visitor happened to be scrolling when that stale listener's debounce last fired — this is also the
+  real root cause behind [1.15.1](#1151---2026-09-18) and [1.15.2](#1152---2026-09-19)'s own fixes
+  not fully closing the scroll-restoration bug either had shipped to fix; both were real, necessary
+  fixes for real, separate bugs, but neither was the actual leak. `comet-persistence.ts`'s own
+  `disposeOutletComets` now runs on every swap, right after `detachPersistedComets` (which has, by
+  then, already pulled every `persist`-tagged boundary OUT of the outlet), disposing every comet
+  still left in it — `root.unmount()`/`render(null,
+  boundary)` — while its DOM node is still
+  attached, exactly like a `persist`-tagged boundary's own identity-mismatch/LRU-eviction path
+  already does. `OrbitPersistHandle` (now `OrbitCometHandle`, reflecting that every top-level Comet
+  registers one, not just `persist`-tagged ones) and `registerPersistHandle` (now
+  `registerCometHandle`) are renamed to match — both were already internal-only, exported from
+  neither `mod.ts`/`mod-react.ts`/`mod-preact.ts`.
+
 ## [1.15.2] - 2026-09-19
 
 ### Fixed

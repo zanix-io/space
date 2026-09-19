@@ -656,6 +656,15 @@ function onPopState(): void {
  * `popstate` actually does, only what `swapOutlet` finds already warmed up when one happens.
  */
 export function initOrbit(options: { prefetch?: PrefetchOptions | false } = {}): void {
+  // The browser's own default (`'auto'`) restores/tracks scroll per HISTORY ENTRY on `popstate`,
+  // racing whatever a page's own `useEffect`-driven restoration (`attachScrollRestoration`,
+  // `scroll-restoration.ts`) does on the exact same navigation — Orbit already owns this job end to
+  // end (`swapOutlet` updates `history` itself), so the browser's own heuristic has no useful role
+  // left and only reintroduces the race. Every major SPA router (React Router, Next.js, Remix, ...)
+  // sets this same flag for the same reason. Set once, here, rather than per-app: this needs to run
+  // before the first `popstate` the browser could otherwise act on, exactly when `initOrbit` itself
+  // already needs to run.
+  if ('scrollRestoration' in history) history.scrollRestoration = 'manual'
   document.addEventListener('click', onClick)
   addEventListener('popstate', onPopState)
   initPrefetch(document, options.prefetch ?? {})

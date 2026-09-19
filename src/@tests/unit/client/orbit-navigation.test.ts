@@ -128,6 +128,10 @@ function bridgeGlobals(): void {
   }
   globals.location = { ...CURRENT }
   globals.history = {
+    // Real default in every browser — present so `initOrbit`'s own `'scrollRestoration' in
+    // history` feature-check (see `orbit.ts`) finds it here exactly like it would on the real
+    // `History` interface, rather than skipping the assignment for a reason no real browser hits.
+    scrollRestoration: 'auto',
     pushState: (_state: unknown, _title: string, url: string) => {
       historyCalls.push({ method: 'pushState', url })
     },
@@ -772,6 +776,16 @@ Deno.test(
     await flush()
 
     assertEquals(fetchCalls.length, 1, 'the same click must only ever be handled once')
+  },
+)
+
+Deno.test(
+  "initOrbit: sets history.scrollRestoration to 'manual', so the browser's own per-history-entry " +
+    "restoration never races a page's own scroll handling on the same popstate",
+  () => {
+    setUp()
+
+    assertEquals(globals.history.scrollRestoration, 'manual')
   },
 )
 

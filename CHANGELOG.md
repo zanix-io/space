@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.15.4] - 2026-09-19
+
+### Fixed
+
+- **`initOrbit()` never set `history.scrollRestoration`, leaving the browser's own default
+  (`'auto'`) active alongside Orbit's own client-side navigation.** `'auto'` makes the browser
+  itself restore/track scroll per history entry on `popstate`, racing whatever a page's own scroll
+  handling (`attachScrollRestoration`/`<ScrollRestoration />`, `scroll-restoration.ts`, or any
+  app-level equivalent) does on that exact same navigation — the same reason every major SPA router
+  (React Router, Next.js, Remix, ...) sets this flag itself. `initOrbit()` now sets
+  `history.scrollRestoration = 'manual'` once, before registering its own `click`/`popstate`
+  listeners, guarded by a `'scrollRestoration' in history` feature-check.
+
 ## [1.15.3] - 2026-09-19
 
 ### Fixed

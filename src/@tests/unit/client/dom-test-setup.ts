@@ -56,6 +56,16 @@ globals.document = dom.document
 globals.Event = dom.Event
 
 /**
+ * Installs a minimal `history` global — `initOrbit` reads `history.scrollRestoration` on every
+ * call, so a test that runs it against this bare `document` (without `orbit-navigation.test.ts`'s
+ * own fuller BOM bridge) needs at least the feature-checked property to exist, exactly like the
+ * real `History` interface has it.
+ */
+export function installHistoryStub(): void {
+  globals.history = { scrollRestoration: 'auto' }
+}
+
+/**
  * A deterministic replacement for `setTimeout`/`clearTimeout` — a fake clock a test advances by an
  * exact number of milliseconds, firing exactly the timeouts that would have fired by then, instead
  * of waiting on `STYLESHEET_LOAD_TIMEOUT_MS`'s real 4 real seconds. Same shape and reasoning as

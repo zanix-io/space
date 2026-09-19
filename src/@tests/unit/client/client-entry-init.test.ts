@@ -1,4 +1,4 @@
-import { resetDom } from './dom-test-setup.ts'
+import { installHistoryStub, resetDom } from './dom-test-setup.ts'
 import { initClientEntry } from 'modules/client/client-entry-init.ts'
 
 // `initClientEntry` has no branching of its own — a pure three-call composition
@@ -17,6 +17,7 @@ Deno.test(
   'initClientEntry: runs against a real document with nothing to hydrate, without throwing',
   () => {
     resetDom()
+    installHistoryStub()
     initClientEntry()
   },
 )
@@ -26,6 +27,7 @@ Deno.test(
     'twice',
   () => {
     resetDom()
+    installHistoryStub()
     initClientEntry({ prefetch: false })
     // `onViewport` deliberately left out — it reaches `IntersectionObserver`, which this minimal
     // test environment (unlike `orbit-navigation.test.ts`'s own fuller BOM bridge) doesn't

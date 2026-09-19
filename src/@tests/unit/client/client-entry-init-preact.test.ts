@@ -1,4 +1,4 @@
-import { resetDom } from './dom-test-setup.ts'
+import { installHistoryStub, resetDom } from './dom-test-setup.ts'
 import { initClientEntry } from 'modules/client/client-entry-init-preact.ts'
 
 // Preact-core counterpart to `client-entry-init.test.ts` — same coverage, same rationale, against
@@ -10,6 +10,7 @@ Deno.test(
   'initClientEntry (preact): runs against a real document with nothing to hydrate, without throwing',
   () => {
     resetDom()
+    installHistoryStub()
     initClientEntry()
   },
 )
@@ -19,6 +20,7 @@ Deno.test(
     'to call twice',
   () => {
     resetDom()
+    installHistoryStub()
     initClientEntry({ prefetch: false })
     initClientEntry({ prefetch: { onHover: true } })
   },

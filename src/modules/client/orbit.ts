@@ -494,6 +494,22 @@ async function performSwap(href: string, replace: boolean): Promise<void> {
     rescanPrefetchTargets(outlet)
   }
 
+  // Runs BEFORE `swap()` (whether directly or via `startViewTransition`, below) — not merely
+  // "immediately", but genuinely before the destination's own markup is hydrated. `swap()`
+  // synchronously hydrates every Comet in the new outlet (`getCometHydrator()?.(outlet)`), and at
+  // least one real, shipped primitive (`ScrollRestoration`, `@zanix/space/comet`) reads
+  // `location.pathname` at mount to key its own stored scroll position. Updating `history` after
+  // swap (this function's own previous order) left that read observing the OUTGOING page's URL for
+  // the whole duration of the destination's initial hydration — confirmed real bug: a scroll
+  // position saved under the origin page's own key gets applied to the destination instead of the
+  // reset-to-`(0, 0)` a page with nothing recorded under its OWN key should get. Moving this call
+  // earlier costs nothing observable: the address bar still updates before the swap is visible to
+  // the user either way, and `document.startViewTransition`'s own before/after snapshots are pixel
+  // (DOM) based, never keyed off `history` state, so reordering this relative to it doesn't change
+  // what gets captured.
+  if (replace) history.replaceState(null, '', finalUrl)
+  else history.pushState(null, '', finalUrl)
+
   // `document.startViewTransition(swap)` itself can throw SYNCHRONOUSLY — a transition already in
   // flight on this document that hasn't fully settled yet makes a second call to this API invalid
   // — falling back to running `swap()` directly, the exact same fallback the feature-detection
@@ -521,13 +537,6 @@ async function performSwap(href: string, replace: boolean): Promise<void> {
   } else {
     swap()
   }
-
-  // Still runs here, synchronously, right after the transition is triggered — never delayed until
-  // `transitionSettled` resolves. The address bar must reflect the destination immediately, exactly
-  // like before this fix; only WHEN `performSwap`'s own returned promise settles changes, never
-  // when `history` does.
-  if (replace) history.replaceState(null, '', finalUrl)
-  else history.pushState(null, '', finalUrl)
 
   await transitionSettled
 }

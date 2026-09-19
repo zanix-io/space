@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.15.2] - 2026-09-19
+
+### Fixed
+
+- **Orbit updated `history` AFTER swapping the outlet and hydrating the destination's own Comets,
+  not before — a page's first render after a client-side navigation observed the OUTGOING page's own
+  `location`, not its own.** `swapOutlet` calls `history.pushState`/`replaceState` once `swap()`
+  (`outlet.replaceChildren` + `getCometHydrator()?.(outlet)`) had already run, so any Comet reading
+  `location.pathname`/`location.search` at mount — `ScrollRestoration` (`@zanix/space/comet`) being
+  the shipped, confirmed case — computed its own key against the page being LEFT, not the one being
+  ENTERED. Real, observed consequence: navigating from a scrolled-down grid to a product page read
+  the grid's own saved scroll offset (real, because the visitor had just been scrolling there) under
+  what the destination believed was its own key, and applied it — the destination inherited the
+  ORIGIN's scroll position instead of the `(0, 0)` reset a page with nothing recorded under its own
+  key should get, which is the exact regression [1.15.1](#1151---2026-09-18) shipped to close, just
+  triggered one navigation later than that fix's own test coverage reached. `history` now updates
+  before `swap()` (and before `document.startViewTransition(swap)` when the browser supports it) —
+  the address bar still reflects the destination immediately either way, and `startViewTransition`'s
+  own before/after snapshots are DOM-based, never keyed off `history` state, so reordering the two
+  changes nothing observable about the transition itself.
+
 ## [1.15.1] - 2026-09-18
 
 ### Fixed

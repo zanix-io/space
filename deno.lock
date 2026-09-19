@@ -35,8 +35,8 @@
     "jsr:@zanix/auth@1": "1.2.1",
     "jsr:@zanix/datamaster@^1.7.0": "1.9.1",
     "jsr:@zanix/datamaster@^1.9.0": "1.9.1",
-    "jsr:@zanix/server@4": "4.2.3",
-    "jsr:@zanix/server@^4.1.0": "4.2.3",
+    "jsr:@zanix/server@4": "4.3.2",
+    "jsr:@zanix/server@^4.1.0": "4.3.2",
     "jsr:@zanix/space@1": "1.8.0",
     "jsr:@zanix/utils@4": "4.4.0",
     "jsr:@zanix/utils@^4.1.0": "4.4.0",
@@ -55,6 +55,7 @@
     "npm:@vanilla-extract/vite-plugin@^5.2.6": "5.2.6_vite@8.2.2",
     "npm:@vitejs/plugin-react@^6.0.5": "6.1.1_@rolldown+plugin-babel@0.2.4_babel-plugin-react-compiler@1.0.0_vite@8.2.2_@babel+core@7.29.7_rolldown@1.2.7",
     "npm:babel-plugin-react-compiler@1": "1.0.0",
+    "npm:graphql@16": "16.14.2",
     "npm:happy-dom@^20.11.2": "20.14.0",
     "npm:mongoose@8": "8.24.4",
     "npm:playwright-core@1.62.1": "1.62.1",
@@ -232,12 +233,13 @@
         "npm:redis"
       ]
     },
-    "@zanix/server@4.2.3": {
-      "integrity": "475a3b19e2bd349900948b36b41ae11d5d23506a9a588f1d5b5d768567d35fc8",
+    "@zanix/server@4.3.2": {
+      "integrity": "9db4d69afe3ead83d99487a01066d632b35fbdefd81fb9227e6382768bd5eaab",
       "dependencies": [
         "jsr:@std/http",
         "jsr:@std/path@0.224",
-        "jsr:@zanix/utils@^4.1.0"
+        "jsr:@zanix/utils@^4.1.0",
+        "npm:graphql"
       ]
     },
     "@zanix/space@1.8.0": {
@@ -1695,6 +1697,9 @@
     },
     "graceful-fs@4.2.11": {
       "integrity": "sha512-RbJ5/jmFcNNCcDV5o9eTnBLJ/HszWV0P73bc+Ff4nS/rJj+YaS6IGyiOL0VoBYX+l1Wrl3k63h/KrH+nhJ0XvQ=="
+    },
+    "graphql@16.14.2": {
+      "integrity": "sha512-Chq1s4CY7jmh8gO2qvLIJyfCDIN+EHLFW/9iShnp1z8FjBQMoodWP1kDC36VAMXXIvAjj4ARa7ntfAV2BrjsbA=="
     },
     "happy-dom@20.14.0": {
       "integrity": "sha512-4bRh1KzRvKDnFNTlLhzT1RZTpkKhQbQDl9j+7GXszWsvuspYdo29k6OHRf4PwiM6oLb8r/pMWeYiJjkfod5AvQ==",

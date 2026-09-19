@@ -10,6 +10,29 @@ import StreamingTtfbFixturePage, {
 // controls the very promise the route's own component suspends on.
 void StreamingTtfbFixturePage
 
+/** Bounds a single body `read()` — a bare `reader.read()` blocks forever when no chunk arrives, so
+ * a loop's own deadline check between reads never gets a chance to run. */
+const readWithTimeout = async (
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  ms: number,
+  what: string,
+) => {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      reader.read(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`timed out after ${ms}ms waiting for ${what}`)),
+          ms,
+        )
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 /**
  * Real time-to-first-byte verification for Space's own SSR pipeline (not `@zanix/server`'s
  * lower-level gzip-streaming test, which proves the same property one layer down with a raw,
@@ -31,6 +54,7 @@ Deno.test(
     await loadRoutes('src/@tests/support/fixtures/streaming-ttfb-routes')
 
     const servers = await bootstrapServers({ ssr: { port: 20810 } })
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
 
     try {
       const fetchPromise = fetch(
@@ -42,7 +66,7 @@ Deno.test(
       // `Deno.serve` can't send a response until the handler chain returns one.
       const outcome = await Promise.race([
         fetchPromise.then(() => 'resolved' as const),
-        new Promise<'timed-out'>((resolve) => setTimeout(() => resolve('timed-out'), 1000)),
+        new Promise<'timed-out'>((resolve) => setTimeout(() => resolve('timed-out'), 10_000)),
       ])
       assertEquals(
         outcome,
@@ -55,15 +79,19 @@ Deno.test(
       assertEquals(res.headers.get('content-length'), null) // streamed — no known length upfront
       assert(res.body, 'the response should carry a real streamed body')
 
-      const reader = res.body.getReader()
+      reader = res.body.getReader()
       const decoder = new TextDecoder()
       let received = ''
       // Pull chunks until the fallback shell shows up, or give up — proves actual bytes (not just
       // headers) reach the client before the gate is released below.
-      const deadline = performance.now() + 1000
+      const deadline = performance.now() + 10_000
       while (!received.includes('fixture-loading') && performance.now() < deadline) {
         // deno-lint-ignore no-await-in-loop -- this loop IS the read, each call depends on the last
-        const { value, done } = await reader.read()
+        const { value, done } = await readWithTimeout(
+          reader,
+          10_000,
+          'the loading.tsx fallback chunk',
+        )
         if (done) break
         received += decoder.decode(value, { stream: true })
       }
@@ -81,13 +109,18 @@ Deno.test(
       releaseStreamingGate()
       while (true) {
         // deno-lint-ignore no-await-in-loop -- same reason as above
-        const { value, done } = await reader.read()
+        const { value, done } = await readWithTimeout(reader, 5000, 'the resolved body')
         if (done) break
         received += decoder.decode(value, { stream: true })
       }
       assert(received.includes('data-testid="fixture-resolved"'), received)
       assert(received.includes('resolved-content'), received)
     } finally {
+      // On any failure above the gate is still held and the response body still open — and a
+      // graceful `stop()` waits on in-flight requests forever, which would hide the real failure
+      // behind a hung test. Settle the suspended render and drop the body first.
+      releaseStreamingGate()
+      await reader?.cancel().catch(() => {})
       await webServerManager.stop(servers)
     }
   },

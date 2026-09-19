@@ -7,6 +7,7 @@ import { setCometHydrator, setErrorBoundaryHydrator } from 'modules/client/hydra
 import { registerCometHandle } from 'modules/client/comet-persistence.ts'
 import {
   COMET_EXPORT_ATTR,
+  COMET_ID_ATTR,
   COMET_MODULE_ATTR,
   COMET_PERSIST_ATTR,
   COMET_PERSIST_VT_ATTR,
@@ -712,6 +713,34 @@ Deno.test(
     } finally {
       delete view.document.startViewTransition
     }
+  },
+)
+
+Deno.test(
+  'onClick: a NON-persist boundary in the outgoing outlet is disposed on swap — the real leak ' +
+    "`disposeOutletComets` closes: `replaceChildren` alone never unmounts a Comet's own root, so " +
+    'its hook cleanups (listeners, timers) never ran',
+  async () => {
+    const { anchor, outlet } = setUp()
+
+    const boundary = view.document.createElement('div')
+    boundary.setAttribute(COMET_ID_ATTR, 'plain-1')
+    outlet.appendChild(boundary)
+    let disposed = 0
+    let reused = 0
+    registerCometHandle(boundary, {
+      reuse: () => void reused++,
+      dispose: () => void disposed++,
+    })
+
+    fetchImpl = () => Promise.resolve(okResponse(outletHtml('<p>new content</p>')))
+
+    click(anchor)
+    await flush()
+
+    assertEquals(disposed, 1, 'the discarded boundary must be disposed exactly once')
+    assertEquals(reused, 0, 'a non-persisted boundary is never reused')
+    assertFalse(outlet.contains(boundary), 'the boundary must be gone from the swapped outlet')
   },
 )
 

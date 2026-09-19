@@ -6,7 +6,6 @@ import {
   COMET_ID_ATTR,
   COMET_MEDIA_ATTR,
   COMET_MODULE_ATTR,
-  COMET_PERSIST_ATTR,
   COMET_PROPS_ATTR,
   COMET_REUSED_ATTR,
   COMET_STRATEGY_ATTR,
@@ -154,7 +153,6 @@ Deno.test(
       assert(boundary.calls.includes(`get:${COMET_MODULE_ATTR}`))
       assert(boundary.calls.includes(`get:${COMET_EXPORT_ATTR}`))
       assert(boundary.calls.includes(`get:${COMET_PROPS_ATTR}`))
-      assert(boundary.calls.includes(`get:${COMET_PERSIST_ATTR}`))
 
       await sleep(200)
       assertEquals(errors.count(), 1)
@@ -171,7 +169,6 @@ Deno.test(
     const boundary = fakeBoundary({
       [COMET_MODULE_ATTR]: './__another-nonexistent-comet-module__.ts',
       [COMET_PROPS_ATTR]: '{"count":1}',
-      [COMET_PERSIST_ATTR]: 'widget-1',
     })
     const errors = countErrors()
     try {
@@ -180,7 +177,6 @@ Deno.test(
       assert(boundary.calls.includes(`get:${COMET_STRATEGY_ATTR}`))
       assert(boundary.calls.includes(`get:${COMET_EXPORT_ATTR}`))
       assert(boundary.calls.includes(`get:${COMET_PROPS_ATTR}`))
-      assert(boundary.calls.includes(`get:${COMET_PERSIST_ATTR}`))
 
       await sleep(200)
       assertEquals(errors.count(), 1)

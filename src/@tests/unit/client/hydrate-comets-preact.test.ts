@@ -6,7 +6,11 @@ import logger from 'modules/client/client-logger.ts'
 // nothing imported either one. Same renderer-agnostic marker protocol as `hydrate-comets.ts`'s own
 // React counterpart; see that file's test for the full "why fakes, not a DOM-shim" rationale.
 import { hydrateComets } from 'modules/client/mod-preact.ts'
-import { detachPersistedComets, reuseRetainedComets } from 'modules/client/comet-persistence.ts'
+import {
+  detachPersistedComets,
+  disposeOutletComets,
+  reuseRetainedComets,
+} from 'modules/client/comet-persistence.ts'
 import {
   COMET_EXPORT_ATTR,
   COMET_ID_ATTR,
@@ -151,7 +155,6 @@ Deno.test(
       assert(boundary.calls.includes(`get:${COMET_MODULE_ATTR}`))
       assert(boundary.calls.includes(`get:${COMET_EXPORT_ATTR}`))
       assert(boundary.calls.includes(`get:${COMET_PROPS_ATTR}`))
-      assert(boundary.calls.includes(`get:${COMET_PERSIST_ATTR}`))
 
       await sleep(200)
       assertEquals(errors.count(), 1)
@@ -168,7 +171,6 @@ Deno.test(
     const boundary = fakeBoundary({
       [COMET_MODULE_ATTR]: './__another-nonexistent-comet-module-preact__.ts',
       [COMET_PROPS_ATTR]: '{"count":1}',
-      [COMET_PERSIST_ATTR]: 'widget-1',
     })
     const errors = countErrors()
     try {
@@ -177,7 +179,6 @@ Deno.test(
       assert(boundary.calls.includes(`get:${COMET_STRATEGY_ATTR}`))
       assert(boundary.calls.includes(`get:${COMET_EXPORT_ATTR}`))
       assert(boundary.calls.includes(`get:${COMET_PROPS_ATTR}`))
-      assert(boundary.calls.includes(`get:${COMET_PERSIST_ATTR}`))
 
       await sleep(200)
       assertEquals(errors.count(), 1)
@@ -347,5 +348,33 @@ Deno.test(
         `the retained node with its fresh props — got: ${boundary1.innerHTML}`,
     )
     assert(container.contains(boundary1), 'the retained node must replace the placeholder')
+  },
+)
+
+Deno.test(
+  'hydrateBoundary (real import): a boundary WITHOUT persist still registers a real dispose ' +
+    "handle — exercised through disposeOutletComets, the real fix for Orbit's replaceChildren " +
+    "never unmounting a Comet's own root",
+  async () => {
+    resetDom()
+    const outlet = document.createElement('div')
+    document.body.appendChild(outlet)
+
+    const boundary = document.createElement('div')
+    boundary.setAttribute(COMET_ID_ATTR, 'plain-1')
+    boundary.setAttribute(COMET_MODULE_ATTR, fixtureModuleUrl)
+    boundary.setAttribute(COMET_PROPS_ATTR, '{"label":"plain"}')
+    outlet.appendChild(boundary)
+
+    hydrateComets(fakeRoot([boundary]))
+    await sleep(150)
+    assert(boundary.innerHTML.includes('widget:plain'), `not mounted: ${boundary.innerHTML}`)
+
+    disposeOutletComets(outlet)
+    assertEquals(
+      boundary.innerHTML,
+      '',
+      'dispose() (render(null, boundary)) must have unmounted the non-persist boundary for real',
+    )
   },
 )

@@ -12,12 +12,15 @@ export type { DraftStorageKind }
 
 /**
  * Session/local-scoped scroll-position restoration — for the window, or a single scrollable
- * container — across a refresh or a navigate-away-and-back. Orbit (`@zanix/space/client`'s
- * `initOrbit()`) never manages scroll position itself: a client-side swap changes the URL via
- * `history.pushState`/`replaceState` (see `orbit.ts`'s own `navigate()`) with no scroll handling
- * either side of it, so without this a page reached via Orbit keeps whatever scroll position the
- * PREVIOUS page left the viewport at. Hook-free and renderer-agnostic (zero React/Preact import),
- * same shape as `form-draft-persistence.ts`'s own core primitive.
+ * container — across a refresh or a navigate-away-and-back, WITH a reset to `(0, 0)` on a page
+ * that has no saved position yet. Orbit (`@zanix/space/client`'s `initOrbit()`) never manages
+ * scroll position itself: a client-side swap changes the URL via `history.pushState`/
+ * `replaceState` (see `orbit.ts`'s own `navigate()`) with no scroll handling either side of it, so
+ * without this a page reached via Orbit keeps whatever scroll position the PREVIOUS page left the
+ * viewport at — including a page never visited this session, which has nothing recorded to
+ * restore and so, without the reset, would just keep inheriting that leftover offset instead of
+ * starting at its own top. Hook-free and renderer-agnostic (zero React/Preact import), same shape
+ * as `form-draft-persistence.ts`'s own core primitive.
  *
  * Unlike {@linkcode FormDraftPersistenceOptions.storageKey} (deliberately required, never
  * derived), a scroll position's own stable identity genuinely IS the page being viewed — the
@@ -52,9 +55,11 @@ function isRecordedPosition(value: unknown): value is [number, number] {
 /**
  * Attaches scroll-position restoration to the window or one scrollable element — the primitive a
  * `useEffect` (React/Preact, see `@zanix/space/comet/react` and `@zanix/space/comet/preact`)
- * calls into. Restores a saved position on attach (skipped when the current URL already carries a
- * `#fragment` — an explicit anchor link wins over a remembered position from an earlier visit),
- * saves on every `scroll` (debounced).
+ * calls into. On attach: restores a saved position if one exists, otherwise resets to `(0, 0)` —
+ * a fresh page never keeps whatever offset the previously viewed page left the target scrolled
+ * to. Skipped entirely when the current URL already carries a `#fragment` — an explicit anchor
+ * link wins over both the restore and the reset. Saves the current position on every `scroll`
+ * (debounced).
  *
  * @returns A cleanup function — detaches the listener this call attached. Matches a `useEffect`
  * callback's own return contract directly: `useEffect(() => attachScrollRestoration(options), deps)`.
@@ -84,6 +89,7 @@ export function attachScrollRestoration(options: ScrollRestorationOptions = {}):
   if (!location.hash) {
     const saved = readFromStorage(backend, key)
     if (isRecordedPosition(saved)) setPosition(saved[0], saved[1])
+    else setPosition(0, 0)
   }
 
   const scrollEventTarget: EventTarget = target ?? globalThis

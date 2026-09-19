@@ -310,8 +310,10 @@ into their own `useEffect`.
 ### Scroll-position restoration
 
 A ready-made Comet restoring window (or a single container's) scroll position across a refresh or an
-Orbit navigation — Orbit (`initOrbit()`) never manages scroll itself, so without this a page reached
-via Orbit keeps whatever position the PREVIOUS page left the viewport at:
+Orbit navigation, WITH a reset to `(0, 0)` on a page that has no saved position yet — Orbit
+(`initOrbit()`) never manages scroll itself, so without this a page reached via Orbit keeps whatever
+position the PREVIOUS page left the viewport at, including a page never visited this session, which
+has nothing to restore and would otherwise just keep inheriting that leftover offset:
 
 ```tsx
 import { ScrollRestoration } from '@zanix/space/comet/react' // or '@zanix/space/comet/preact'
@@ -320,13 +322,14 @@ import { ScrollRestoration } from '@zanix/space/comet/react' // or '@zanix/space
 <ScrollRestoration />
 ```
 
-Restores a saved position on attach (skipped when the current URL already carries a `#fragment` — an
-explicit anchor link wins over a remembered position from an earlier visit), saves on every `scroll`
-(debounced). `storageKey` defaults to `location.pathname + location.search` — unlike
-`FormDraftPersistence`'s own `storageKey` (deliberately required, never derived), a scroll
-position's real identity genuinely IS the page being viewed: `/en/products` and `/es/products` are
-two distinct viewed pages, each with its own real scroll position, so the `[lang]`-segment reasoning
-that rules out a pathname-derived key for a shared FORM doesn't apply here.
+On attach: restores a saved position if one exists, otherwise resets to `(0, 0)` (skipped entirely
+when the current URL already carries a `#fragment` — an explicit anchor link wins over both), saves
+the current position on every `scroll` (debounced). `storageKey` defaults to
+`location.pathname + location.search` — unlike `FormDraftPersistence`'s own `storageKey`
+(deliberately required, never derived), a scroll position's real identity genuinely IS the page
+being viewed: `/en/products` and `/es/products` are two distinct viewed pages, each with its own
+real scroll position, so the `[lang]`-segment reasoning that rules out a pathname-derived key for a
+shared FORM doesn't apply here.
 
 Pass `targetId` to track one scrollable container instead of the whole window (a chat panel, a
 sidebar list) — a page can mix a whole-window instance with one or more container-scoped instances,

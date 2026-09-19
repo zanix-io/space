@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.15.1] - 2026-09-18
+
+### Fixed
+
+- **`attachScrollRestoration`/`ScrollRestoration` left the scroll position untouched on a page with
+  nothing saved yet, instead of resetting it to `(0, 0)`.** Orbit's own client-side navigation never
+  touches scroll itself (by design — see this module's own doc), so a page reached via Orbit for the
+  first time this session inherited whatever offset the PREVIOUS page left the viewport at rather
+  than starting at its own top — confirmed real-world case: a long product-detail page reached from
+  a scrolled-down catalog grid landed still scrolled down, showing neither the top of the new page
+  nor a restored position (there was none to restore). Now resets to `(0, 0)` whenever nothing is
+  recorded for the current key, for both the window and a `targetId`-scoped container; restoring a
+  genuinely saved position, and skipping entirely when the URL carries a `#fragment`, are unchanged.
+
 ## [1.15.0] - 2026-09-14
 
 ### Added

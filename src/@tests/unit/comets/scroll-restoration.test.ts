@@ -62,14 +62,14 @@ Deno.test(
 )
 
 Deno.test(
-  'attachScrollRestoration: nothing saved yet leaves the current position untouched',
+  'attachScrollRestoration: nothing saved yet resets to (0, 0) instead of keeping the inherited position',
   () => {
     setUp()
     globals.scrollTo(0, 77)
 
     const detach = attachScrollRestoration({})
 
-    assertEquals(globals.scrollY, 77)
+    assertEquals(globals.scrollY, 0)
     detach()
   },
 )
@@ -112,6 +112,20 @@ Deno.test(
 
     detach()
     timers.restore()
+  },
+)
+
+Deno.test(
+  'attachScrollRestoration: a container with nothing saved resets to (0, 0) too, not just the window',
+  () => {
+    setUp()
+    const container = buildContainer('panel0')
+    scrollContainerTo(container, 0, 40)
+
+    const detach = attachScrollRestoration({ targetId: 'panel0', storageKey: 'panel0-key' })
+
+    assertEquals((container as unknown as { scrollTop: number }).scrollTop, 0)
+    detach()
   },
 )
 

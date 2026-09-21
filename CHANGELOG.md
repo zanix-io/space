@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.16.2] - 2026-09-21
+
+### Fixed
+
+- **`/sw.js` answered `404` under `zanix space dev`.** For an app that sets `pwa.push` or
+  `pwa.serviceWorkerScript` and has no client build, `registerPwa` serves a service worker generated
+  on each request and every page registers it, but the dev asset handler treats any path ending in
+  `.js` as a project file for Vite to transform. Vite cannot resolve `/sw.js`, so it answered `404`
+  before the route table was consulted: the page registered a worker nothing served, and Web Push
+  never worked in dev. The exact path `/sw.js` now goes to the route table; every other `.js` path
+  is still transformed.
+
+### Changed
+
+- **`registerPwa` warns when the built `sw.js` has no push handler although `pwa.push` is set.** A
+  worker built before that option was configured is served unchanged and shows nothing for a push,
+  with no other sign that something is wrong. The warning names the file and says to run the client
+  build again.
+
 ## [1.16.1] - 2026-09-21
 
 ### Added

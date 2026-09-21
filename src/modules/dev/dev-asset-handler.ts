@@ -1,4 +1,5 @@
 import type { SpaceDevEngine } from 'modules/bundler/dev-engine.ts'
+import { SW_ROUTE } from 'modules/pwa/web-manifest.ts'
 
 /** Real source-file extensions this handler transforms through Vite — deliberately narrow (not
  * "anything with a dot"), so a request for something else entirely (a real page route with a
@@ -50,6 +51,10 @@ const DOCUMENT_FETCH_DEST = 'document'
  * two apart without needing to consult `@zanix/server`'s own route registry at all.
  */
 export function looksLikeDevAssetRequest(pathname: string): boolean {
+  // The service worker ends in `.js` but is a route the app serves itself (`registerPwa`), not a
+  // project file for Vite to transform: Vite cannot resolve it and would answer `404` before the
+  // route table is ever consulted.
+  if (pathname === SW_ROUTE) return false
   if (VITE_EXACT_VIRTUAL_MODULES.includes(pathname)) return true
   if (VITE_SPECIAL_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
     return true

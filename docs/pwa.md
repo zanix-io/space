@@ -102,7 +102,8 @@ would show a notification for the same push.
 uses and whether or not a client build exists:
 
 - With a build output, `zanix space build` writes the worker (cached shell included) and
-  `registerPwa` serves that file.
+  `registerPwa` serves that file. A build made before `pwa.push` was set has no push handler:
+  `registerPwa` logs a warning naming the file when it serves one, and the fix is to build again.
 - Without one (`zanix space dev`, or production before the first build), an app that configures
   `push` or `serviceWorkerScript` gets a worker generated on each request. It has the same push
   handlers and script but no precache and no `fetch` handler, so it never hides an edit, and

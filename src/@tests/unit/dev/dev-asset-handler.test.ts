@@ -28,6 +28,15 @@ Deno.test('looksLikeDevAssetRequest: /@react-refresh is an exact match, never a 
   assertFalse(looksLikeDevAssetRequest('/@react-refresh-something-else'))
 })
 
+Deno.test('looksLikeDevAssetRequest: the service worker is a route the app serves, never an asset', () => {
+  assertFalse(looksLikeDevAssetRequest('/sw.js'))
+  // Only that exact path: another `.js` file, or one named like it beneath a directory, is still an
+  // asset Vite transforms.
+  assert(looksLikeDevAssetRequest('/assets/sw.js'))
+  assert(looksLikeDevAssetRequest('/sw.js.map.js'))
+  assert(looksLikeDevAssetRequest('/other-sw.js'))
+})
+
 Deno.test('looksLikeDevAssetRequest: a plain page route never matches', () => {
   assertFalse(looksLikeDevAssetRequest('/'))
   assertFalse(looksLikeDevAssetRequest('/products/1'))
@@ -51,6 +60,20 @@ Deno.test(
     )
     const response = await handler(
       new Request('https://example.com/products/1', { headers: { 'sec-fetch-dest': 'document' } }),
+    )
+    assertEquals(response, null)
+  },
+)
+
+Deno.test(
+  'createDevAssetHandler: the service worker request is passed through to the route table, never answered 404',
+  async () => {
+    const handler = createDevAssetHandler(
+      fakeEngine(() => Promise.reject(new Error('Vite must never be asked for /sw.js'))),
+    )
+    // What a browser sends when it registers a worker.
+    const response = await handler(
+      new Request('https://example.com/sw.js', { headers: { 'sec-fetch-dest': 'serviceworker' } }),
     )
     assertEquals(response, null)
   },

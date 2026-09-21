@@ -69,6 +69,34 @@ function registerFileRoute(
 }
 
 /**
+ * Warns when the built worker has no `push` handler although `config.push` asks for one: it was
+ * built before that option was set, and a browser would show nothing for a push with no other sign
+ * that something is wrong. A missing file is not this function's concern: its route answers `404`.
+ *
+ * The logger is loaded on demand, as `defineSpaceApp` loads it for its own startup warnings, so it
+ * stays out of the static import graph a client bundle shares with this module. The warning is
+ * emitted on the next turn of the event loop; `registerPwa` stays synchronous.
+ */
+function warnIfBuiltWorkerLacksPush(config: PwaConfig, workerPath: string): void {
+  if (!config.push) return
+  let source: string
+  try {
+    source = Deno.readTextFileSync(workerPath)
+  } catch {
+    return
+  }
+  if (!source.includes("addEventListener('push'")) {
+    const message = `The built service worker "${workerPath}" has no push handler although ` +
+      '`pwa.push` is configured: it was built before that option was set. Run the client build ' +
+      'again.'
+    import('@zanix/logger').then(({ default: logger }) => logger.warn(message)).catch(() =>
+      // deno-lint-ignore deno-zanix-plugin/no-znx-console
+      console.warn(message)
+    )
+  }
+}
+
+/**
  * Serves a service worker generated on each request, for an app that has no client build output but
  * asks for Web Push or a script of its own. It has no precache and no `fetch` handler
  * (`caching: false`), and carries `cache-control: no-cache`: a worker that cached would hide an
@@ -148,9 +176,7 @@ export function registerPwa(config: PwaConfig): void {
     )
   }
 
-  registerFileRoute(
-    SW_ROUTE,
-    `${buildOutput}/${SW_FILE_NAME}`,
-    'application/javascript',
-  )
+  const workerPath = `${buildOutput}/${SW_FILE_NAME}`
+  warnIfBuiltWorkerLacksPush(config, workerPath)
+  registerFileRoute(SW_ROUTE, workerPath, 'application/javascript')
 }

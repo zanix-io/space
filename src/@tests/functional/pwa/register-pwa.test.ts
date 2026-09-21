@@ -1,6 +1,7 @@
 import { assert, assertEquals, assertFalse, assertStringIncludes } from '@std/assert'
 import { bootstrapServers, webServerManager } from '@zanix/server'
 import { getTemporaryFolder } from '@zanix/helpers'
+import logger from '@zanix/logger'
 import { registerPwa } from 'modules/pwa/register-pwa.ts'
 import { setPwaBuildOutput } from 'modules/pwa/pwa-registry.ts'
 import { iconRoute, MANIFEST_ROUTE, SW_ROUTE } from 'modules/pwa/web-manifest.ts'
@@ -284,3 +285,66 @@ Deno.test(
     }
   },
 )
+
+/**
+ * A worker built before `pwa.push` was configured has no push handler, and serving it changes
+ * nothing a browser would report: the only sign is a warning when the routes are registered.
+ */
+async function withBuiltWorker(
+  workerSource: string | null,
+  pwa: { push?: Record<string, never> },
+  port: number,
+): Promise<string[]> {
+  const root = await Deno.makeTempDir({ dir: TMP_ROOT })
+  const warnings: string[] = []
+  const original = logger.warn
+  logger.warn = ((message: string) => {
+    warnings.push(message)
+  }) as typeof logger.warn
+  try {
+    if (workerSource !== null) await Deno.writeTextFile(`${root}/sw.js`, workerSource)
+    setPwaBuildOutput(root)
+    registerPwa({ name: 'Storefront', icon: './icon-source.png', iconSizes: [192], ...pwa })
+    // The warning is emitted through a dynamic import: let it settle before reading what was logged.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    // Booting and stopping a server is what clears the route registry for the next case.
+    await webServerManager.stop(await bootstrapServers({ ssr: { port } }))
+    return warnings
+  } finally {
+    logger.warn = original
+    setPwaBuildOutput(undefined)
+    await Deno.remove(root, { recursive: true })
+  }
+}
+
+Deno.test('registerPwa: warns when the built worker has no push handler although push is configured', async () => {
+  const warnings = await withBuiltWorker("self.addEventListener('install', () => {})\n", {
+    push: {},
+  }, 20912)
+  assertEquals(warnings.length, 1)
+  assertStringIncludes(warnings[0], 'pwa.push')
+  assertStringIncludes(warnings[0], 'client build')
+})
+
+Deno.test('registerPwa: does not warn when the built worker has its push handler', async () => {
+  const warnings = await withBuiltWorker(
+    "self.addEventListener('push', () => {})\n",
+    { push: {} },
+    20913,
+  )
+  assertEquals(warnings, [])
+})
+
+Deno.test('registerPwa: does not warn about a push handler nobody asked for', async () => {
+  const warnings = await withBuiltWorker(
+    "self.addEventListener('install', () => {})\n",
+    {},
+    20914,
+  )
+  assertEquals(warnings, [])
+})
+
+Deno.test('registerPwa: a missing built worker is not a push warning, its route answers 404', async () => {
+  const warnings = await withBuiltWorker(null, { push: {} }, 20915)
+  assertEquals(warnings, [])
+})

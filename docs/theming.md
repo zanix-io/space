@@ -158,14 +158,15 @@ identically under both renderers. A production server never reads the sources; t
 is already in the manifest. Add `.space/` to the project's `.gitignore`.
 
 **The app's rules override the package's.** Sources come **before** `globalCss`, in declaration
-order, so a later, equal-specificity rule of the app wins by normal cascade. A package makes that
-hold whatever the app's selectors by writing its own with `:where()` (zero specificity) and by
-reading `--space-*` semantic tokens with fallbacks, so an app usually changes a package's look by
-redeclaring a few tokens:
+order, so a later, equal-specificity rule of the app wins by normal cascade. A package writes plain
+hook selectors and reads `--space-*` semantic tokens with fallbacks, so an app usually changes a
+package's look by redeclaring a few tokens. It does not write its selectors with `:where()`: a
+zero-specificity default would lose to the app's own generic rules (`input`, `select`, a design
+system's `[data-space-ui='input']`), which the package's rules for its own controls must beat.
 
 ```css
 /* the package's source */
-:where([data-space='otp-code-field-box']) {
+[data-space='otp-code-field-box'] {
   border: 1px solid var(--space-color-border, #d4d4d8);
 }
 

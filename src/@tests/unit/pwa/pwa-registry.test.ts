@@ -75,3 +75,17 @@ Deno.test('getPwaBuildOutput: undefined before any build output was ever registe
   setPwaBuildOutput(undefined)
   assertEquals(getPwaBuildOutput(), undefined)
 })
+
+Deno.test(
+  'resolvePwaHead: references the service worker without a build output when `push` or a script is configured',
+  () => {
+    try {
+      for (const extra of [{ push: {} }, { serviceWorkerScript: './sw-extra.js' }]) {
+        setPwaConfig({ name: 'Storefront', icon: '/tmp/icon.png', ...extra })
+        assertEquals(resolvePwaHead()?.serviceWorkerHref, SW_ROUTE)
+      }
+    } finally {
+      setPwaConfig(undefined)
+    }
+  },
+)

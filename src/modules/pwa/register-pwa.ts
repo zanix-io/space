@@ -1,9 +1,12 @@
 import type { HandlerContext } from '@zanix/server'
 import { Get, SsrController, ZanixSsrController } from '@zanix/server'
 import { InternalError } from '@zanix/errors'
+import { resolve } from '@std/path'
 import type { PwaConfig } from 'typings/pwa.ts'
+import { buildServiceWorkerSource } from '../bundler/service-worker-source.ts'
 import { buildWebManifest, iconRoute, MANIFEST_ROUTE, SW_ROUTE } from './web-manifest.ts'
 import { DEFAULT_ICON_SIZES, iconFileName, SW_FILE_NAME } from './icon-naming.ts'
+import { requestsServiceWorkerLogic, resolvePwaPush } from './push-config.ts'
 import { getPwaBuildOutput } from './pwa-registry.ts'
 
 /**
@@ -29,6 +32,25 @@ function registerFixedRoute(
   SsrController()(FixedRoute)
 }
 
+/** The response for a PWA file that could not be read: a missing file degrades to a `404`, never
+ * a crash. Any other failure is thrown wrapped. */
+function readFailureResponse(path: string, filePath: string, error: unknown): Response {
+  if (error instanceof Deno.errors.NotFound) {
+    return new Response('Not Found', { status: 404 })
+  }
+  // A native `Deno.errors.*` besides `NotFound` (permission denied, disk failure, ...) must
+  // never cross this live route handler unwrapped: its raw `.message` routinely embeds the
+  // real, absolute `filePath` on disk — `@zanix/server`'s own `getPublicErrorResponse`
+  // allowlists `message` by default, so an unwrapped native error reaching this route would
+  // hand that path straight to the client. The real error detail still reaches the log via
+  // `cause`.
+  throw new InternalError(`Failed to read a PWA file for route "${path}" from disk.`, {
+    code: 'SPACE_PWA_FILE_READ_FAILED',
+    meta: { source: 'zanix', path, filePath },
+    cause: error,
+  })
+}
+
 /** Serves `filePath`'s bytes with `contentType`, once per request (no in-memory cache — see
  * `registerPwa`'s own doc for why). A missing file degrades to a `404`, never a crash. */
 function registerFileRoute(
@@ -41,20 +63,38 @@ function registerFileRoute(
       const bytes = await Deno.readFile(filePath)
       return new Response(bytes, { headers: { 'content-type': contentType } })
     } catch (error) {
-      if (error instanceof Deno.errors.NotFound) {
-        return new Response('Not Found', { status: 404 })
-      }
-      // A native `Deno.errors.*` besides `NotFound` (permission denied, disk failure, ...) must
-      // never cross this live route handler unwrapped: its raw `.message` routinely embeds the
-      // real, absolute `filePath` on disk — `@zanix/server`'s own `getPublicErrorResponse`
-      // allowlists `message` by default, so an unwrapped native error reaching this route would
-      // hand that path straight to the client. The real error detail still reaches the log via
-      // `cause`.
-      throw new InternalError(`Failed to read a PWA file for route "${path}" from disk.`, {
-        code: 'SPACE_PWA_FILE_READ_FAILED',
-        meta: { source: 'zanix', path, filePath },
-        cause: error,
+      return readFailureResponse(path, filePath, error)
+    }
+  })
+}
+
+/**
+ * Serves a service worker generated on each request, for an app that has no client build output but
+ * asks for Web Push or a script of its own. It has no precache and no `fetch` handler
+ * (`caching: false`), and carries `cache-control: no-cache`: a worker that cached would hide an
+ * edit from the developer who just made it. `serviceWorkerScript` is read on each request, so an
+ * edit to it reaches the next page load, resolved against the process's working directory like
+ * every other runtime path in the app's configuration. No generated icons exist without a build,
+ * so a notification uses the browser's default icon.
+ */
+function registerRuntimeServiceWorkerRoute(config: PwaConfig): void {
+  registerFixedRoute(SW_ROUTE, async () => {
+    const scriptPath = config.serviceWorkerScript
+      ? resolve(Deno.cwd(), config.serviceWorkerScript)
+      : undefined
+    try {
+      const source = buildServiceWorkerSource({
+        precacheUrls: [],
+        offlineFallback: null,
+        caching: false,
+        push: resolvePwaPush(config),
+        extraScript: scriptPath ? await Deno.readTextFile(scriptPath) : undefined,
       })
+      return new Response(source, {
+        headers: { 'content-type': 'application/javascript', 'cache-control': 'no-cache' },
+      })
+    } catch (error) {
+      return readFailureResponse(SW_ROUTE, scriptPath ?? SW_ROUTE, error)
     }
   })
 }
@@ -74,8 +114,11 @@ function registerFileRoute(
  * why a lazy per-request path lookup isn't needed once that ordering holds).
  *
  * No build output registered at all (dev, or prod before the first real `zanix space build`) is
- * not an error — icon/service-worker routes are simply never registered; `/manifest.webmanifest`
- * alone still works, since it needs no built file.
+ * not an error — icon routes are never registered and `/manifest.webmanifest` alone still works,
+ * since it needs no built file. The service-worker route is registered only when `config` asks for
+ * `push` or a `serviceWorkerScript`: it then serves a worker generated on each request, with the
+ * same handlers the built one has and no caching, so those features behave the same with or
+ * without a build.
  *
  * @throws Nothing of its own — a missing file at request time (a real build/deploy skew) degrades
  * to a `404` `Response` for that one route, never crashes the process.
@@ -91,7 +134,10 @@ export function registerPwa(config: PwaConfig): void {
   )
 
   const buildOutput = getPwaBuildOutput()
-  if (!buildOutput) return
+  if (!buildOutput) {
+    if (requestsServiceWorkerLogic(config)) registerRuntimeServiceWorkerRoute(config)
+    return
+  }
 
   const sizes = config.iconSizes ?? DEFAULT_ICON_SIZES
   for (const size of sizes) {

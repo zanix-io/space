@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.16.1] - 2026-09-21
+
+### Added
+
+- **`defineSpaceApp({ pwa: { push } })`**: Web Push handlers in the generated service worker. A
+  `push` event shows a notification from a JSON payload
+  `{ title, body?, url?, tag?, icon?, badge? }`. A push with no payload, or one that is not that
+  JSON, still shows a notification titled `push.fallbackTitle` (default: the app `name`), because
+  browsers require every push to be visible. A click focuses a window already on the notification's
+  `url`, or opens one, and only ever opens a same-origin URL: any other value opens
+  `push.defaultUrl` (default `/`). The worker receives and displays pushes; subscribing and sending
+  stay in the app. `PwaPushConfig` is exported as a type.
+
+- **`defineSpaceApp({ pwa: { serviceWorkerScript } })`**: a classic script, as a path relative to
+  the project root, appended to the generated service worker at build time. It runs inside its own
+  function scope, so its declarations never collide with the generated worker's. An app that handles
+  `push` in this script leaves `pwa.push` unset, since both would show a notification for the same
+  push.
+
+- **The same worker with or without a client build.** When no build output is registered
+  (`zanix space dev`, or production before the first build) and the config sets `push` or
+  `serviceWorkerScript`, `registerPwa` serves `/sw.js` generated on each request, and every
+  full-document response registers it, under React and Preact alike. That worker has the same push
+  handlers and script but no precache and no `fetch` handler, so it never hides an edit; it is
+  served with `cache-control: no-cache` and re-reads `serviceWorkerScript` on each request. Without
+  a build there are no generated icons, so a notification shows the browser's default icon. An app
+  that sets neither option is unchanged: no worker is served or registered without a build.
+
+- **`pwaPlugin({ push, serviceWorkerScript })`**: the same two options for a custom build pipeline
+  that composes `pwaPlugin` itself. `zanix space build` derives them from `pwa`.
+
 ## [1.16.0] - 2026-09-20
 
 ### Added

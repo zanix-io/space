@@ -34,7 +34,7 @@ export type {
   RuntimeContext,
   SpaceAppConfig,
 } from 'typings/manifest.ts'
-export type { PwaConfig, PwaShortcut } from 'typings/pwa.ts'
+export type { PwaConfig, PwaPushConfig, PwaShortcut } from 'typings/pwa.ts'
 // Re-exported (type-only — zero runtime cost, confirmed via `deno info --json --min-dep-age=0`:
 // this entry point resolves no npm package through this) because `SpaceAppConfig.assetsApi`
 // references `AssetsControllerOptions`, and `AssetsControllerOptions.service` references

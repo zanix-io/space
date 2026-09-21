@@ -1,5 +1,6 @@
 import { resolve } from '@std/path'
 import type { PwaConfig } from 'typings/pwa.ts'
+import { resolvePwaPush } from '../pwa/push-config.ts'
 import type { PwaPluginOptions } from './pwa-plugin.ts'
 
 /**
@@ -10,11 +11,13 @@ import type { PwaPluginOptions } from './pwa-plugin.ts'
  * `@zanix/server`'s `compileRuntime`). `buildSpaceClient` is the only caller: an author never
  * configures `pwaPlugin` separately from `PwaConfig` — see `PwaConfig`'s own doc for why.
  *
- * Resolves `config.icon` against `root` before handing it to `pwaPlugin` — `PwaConfig.icon` is
- * documented as relative to the project root, but `pwaPlugin` itself reads its own `source` via a
- * plain `Deno.readFile(source)`, resolved against the PROCESS's own cwd, never against Vite's own
- * `root` option (confirmed empirically: a root-relative path passed straight through threw a real
- * `NotFound` the moment `buildSpaceClient`'s own caller's cwd didn't happen to match `root`).
+ * Resolves `config.icon` and `config.serviceWorkerScript` against `root` before handing them to
+ * `pwaPlugin`: both are documented as relative to the project root, but `pwaPlugin` reads them via
+ * a plain `Deno.readFile`, resolved against the PROCESS's own cwd, never against Vite's own `root`
+ * option (confirmed empirically: a root-relative path passed straight through threw a real
+ * `NotFound` the moment `buildSpaceClient`'s own caller's cwd didn't happen to match `root`). The
+ * `push` defaults come from {@linkcode resolvePwaPush}, the same function the runtime worker route
+ * uses.
  *
  * @param config - See {@linkcode PwaConfig}.
  * @param root - The same project root `buildSpaceClient` itself was given.
@@ -26,5 +29,7 @@ export function resolvePwaPluginOptions(
   return {
     icons: { source: resolve(root, config.icon), sizes: config.iconSizes },
     offlineFallback: config.offlineFallback,
+    push: resolvePwaPush(config),
+    serviceWorkerScript: config.serviceWorkerScript && resolve(root, config.serviceWorkerScript),
   }
 }

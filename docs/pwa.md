@@ -49,7 +49,8 @@ documented path.
 actually wrote to (whatever `zanix space build`'s `--out-dir` used) — build-time (Vite/Node) and
 request-time (the deployed Deno server) have no shared memory to enforce this automatically.
 `registerPwa` reads it once, at route-registration time, to resolve the real icon/service-worker
-file paths the build wrote; a missing or wrong call just skips those two routes,
+file paths the build wrote; a missing or wrong call skips the icon routes and the built worker (see
+[Web Push](#web-push-and-a-worker-script-of-your-own) for the worker served instead),
 `/manifest.webmanifest` alone still works either way, since it needs no built file at all.
 
 ### Icons and the service worker
@@ -69,7 +70,51 @@ into the same cache the first time it's actually fetched, so this app's own hydr
 survives a later fully offline visit instead of only ever living in the browser's separate,
 unreliable disk cache.
 
-**Not implemented yet**: `protocolHandlers`/`fileHandlers`/`shareTarget`/`push` (Tier-2, mostly
+### Web Push and a worker script of your own
+
+`pwa.push` adds `push` and `notificationclick` handlers to the generated worker. The worker only
+receives and displays pushes: subscribing (`PushManager.subscribe`), storing subscriptions and
+sending stay in the app.
+
+```ts
+pwa: {
+  name: 'Storefront',
+  icon: './public/icon-source.png',
+  push: { fallbackTitle: 'Storefront', defaultUrl: '/' }, // both optional
+}
+```
+
+A push payload is a JSON object `{ title, body?, url?, tag?, icon?, badge? }`; a field that is not a
+string is ignored. A click closes the notification and focuses a window already on `url`, or opens
+one. `url` must be same-origin: any other value, or one that does not parse, opens `defaultUrl`
+(`'/'` by default), so a payload can never send the user to another site. A push with no payload, or
+one that is not that JSON, still shows a notification titled `fallbackTitle` (default: the app
+`name`), because browsers require every push to be visible. Without `icon` in the payload, the
+notification uses the smallest generated icon of at least 192px.
+
+`pwa.serviceWorkerScript` is a classic script (a path relative to the project root) appended to the
+worker, for logic the generated handlers do not cover, such as fetching a notification's text from
+the app before showing it. It runs inside its own function scope, so its declarations cannot collide
+with the generated worker's. An app that handles `push` in its own script leaves `push` unset: both
+would show a notification for the same push.
+
+**The same in dev and in production.** The worker has the same handlers whichever renderer the app
+uses and whether or not a client build exists:
+
+- With a build output, `zanix space build` writes the worker (cached shell included) and
+  `registerPwa` serves that file.
+- Without one (`zanix space dev`, or production before the first build), an app that configures
+  `push` or `serviceWorkerScript` gets a worker generated on each request. It has the same push
+  handlers and script but no precache and no `fetch` handler, so it never hides an edit, and
+  `serviceWorkerScript` is read on each request. It is served with `cache-control: no-cache` and
+  resolves the script path against the process's working directory. No generated icons exist without
+  a build, so a notification shows the browser's default icon.
+- Both renderers register the worker from the same `resolvePwaHead()` contribution.
+
+Push needs a secure context (`https`, or `localhost` in dev). On iOS it works only in an installed
+web app.
+
+**Not implemented yet**: `protocolHandlers`/`fileHandlers`/`shareTarget` (Tier-2, mostly
 Chromium-only manifest fields) and maskable icons — deferred, not silently dropped, since none of
 them are blocking and each deserves its own real verification before shipping.
 

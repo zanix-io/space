@@ -52,9 +52,9 @@ export type DocumentPwa = {
   manifestHref: string
   /** Rendered as `<meta name="theme-color">`. Omitted when `PwaConfig.themeColor` was not set. */
   themeColor?: string
-  /** Where the generated service worker is served. `undefined` until `loadPwaBuildOutput()` has been
-   * called with a real build output directory — in that case no registration script is rendered at
-   * all, rather than one pointing at a file that was never built. */
+  /** Where the service worker is served. `undefined` when there is neither a build output
+   * (`loadPwaBuildOutput()`) nor a `push`/`serviceWorkerScript` in the config — then no
+   * registration script is rendered at all, rather than one pointing at a worker nothing serves. */
   serviceWorkerHref?: string
 }
 

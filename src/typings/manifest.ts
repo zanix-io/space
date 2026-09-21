@@ -294,9 +294,10 @@ export interface SpaceAppConfig {
    * Each source becomes `.space/css-sources/{name}.css` in the project when `zanix space build`
    * or `zanix space dev` starts, and is then an ordinary global stylesheet: bundled and listed in
    * `css-manifest.json` in production, served like any other in dev. Sources come **before** the
-   * app's own `globalCss`, in declaration order, so the app's rules override a package's by normal
-   * cascade; the package writes its selectors with `:where()` and `--space-*` token fallbacks to
-   * make that hold whatever the app's specificity. Every `defineSpaceApp({ cssSources })` call adds
+   * app's own `globalCss`, in declaration order, so an app rule of the same specificity overrides a
+   * package's by normal cascade. A package writes plain hook selectors and reads `--space-*` tokens
+   * with fallbacks: zero-specificity selectors such as `:where()` would lose to the app's own
+   * generic element rules (`input`, `select`), which a package's defaults must beat. Every `defineSpaceApp({ cssSources })` call adds
    * to the same list, like `globalCss`, so a host composes with what a base app declared. Add
    * `.space/` to the project's `.gitignore`: the directory is generated.
    *

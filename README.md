@@ -84,7 +84,8 @@ nothing else is stubbed ahead of time:
   vanilla-extract opt-in, plus `defineSpaceApp({ theme: { resolve } })` for runtime, per-request
   token personalization. See [`docs/css.md`](./docs/css.md)/[`docs/theming.md`](./docs/theming.md).
 - ✅ **PWA** (`defineSpaceApp({ pwa })`) — real icon resizing, a computed Web App Manifest, a small
-  custom service worker. See [`docs/pwa.md`](./docs/pwa.md) for what's deferred.
+  custom service worker, and opt-in Web Push handlers (`pwa.push`) or a worker script of your own
+  (`pwa.serviceWorkerScript`). See [`docs/pwa.md`](./docs/pwa.md) for what's deferred.
 - ✅ **Assets** (`defineSpaceApp({ assetsDir })`) — static files at `/assets/<relative-path>`,
   composable across a host/base-app pair, plus opt-in content-hashing and real image/video/
   thumbnail/voice-audio transformation. See [`docs/assets.md`](./docs/assets.md) for the full
@@ -505,8 +506,10 @@ export default defineSpaceApp({
 })
 ```
 
-See [`docs/pwa.md`](./docs/pwa.md) for the full contract: wiring `pwaPlugin`/`loadPwaBuildOutput`,
-icon-size defaults, the service worker's precache/fetch strategy, and what's deferred.
+Add `push: {}` to show Web Push notifications from the worker — the same in dev and production, and
+under either renderer. See [`docs/pwa.md`](./docs/pwa.md) for the full contract: wiring
+`pwaPlugin`/`loadPwaBuildOutput`, icon-size defaults, the service worker's precache/fetch strategy,
+the push payload, and what's deferred.
 
 ### Logging
 

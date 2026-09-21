@@ -26,6 +26,16 @@ export interface PwaPluginOptions {
    * precached at `install` time and available even on a visitor's first offline visit. Omit if no
    * offline fallback is configured. */
   offlineFallback?: string
+  /** Must match `PwaConfig.push`, with its defaults already applied — adds the `push` and
+   * `notificationclick` handlers to the generated service worker. Omit for a worker that shows no
+   * notification. */
+  push?: {
+    fallbackTitle: string
+    defaultUrl: string
+  }
+  /** Absolute path to the app's own classic script (`PwaConfig.serviceWorkerScript`), read once
+   * per build and appended to the generated service worker. */
+  serviceWorkerScript?: string
 }
 
 /**
@@ -61,7 +71,10 @@ export interface PwaPluginOptions {
  */
 export function pwaPlugin(options: PwaPluginOptions): Plugin {
   const { source, sizes = DEFAULT_ICON_SIZES } = options.icons
-  const { offlineFallback } = options
+  const { offlineFallback, push, serviceWorkerScript } = options
+  // The smallest generated size that still covers a 192px notification icon, else the largest.
+  const notificationIconSize = [...sizes].sort((a, b) => a - b).find((size) => size >= 192) ??
+    Math.max(...sizes)
 
   return {
     name: 'zanix-space-pwa',
@@ -100,6 +113,13 @@ export function pwaPlugin(options: PwaPluginOptions): Plugin {
         source: buildServiceWorkerSource({
           precacheUrls,
           offlineFallback: offlineFallback ?? null,
+          push: push && {
+            ...push,
+            iconUrl: `/icons/${iconFileName(notificationIconSize)}`,
+          },
+          extraScript: serviceWorkerScript
+            ? await Deno.readTextFile(serviceWorkerScript)
+            : undefined,
         }),
       })
     },

@@ -176,3 +176,52 @@ Deno.test('pwaPlugin: with no offlineFallback given, sw.js embeds a literal null
     await Deno.remove(root, { recursive: true })
   }
 })
+
+/**
+ * The default notification icon is the smallest generated size that covers 192px, else the largest
+ * one, and it names a route `registerPwa` serves for a generated icon.
+ */
+Deno.test('pwaPlugin: the default notification icon is chosen from the generated sizes', async () => {
+  const iconFor = async (sizes: number[]): Promise<string> => {
+    const root = await Deno.makeTempDir({ dir: TMP_ROOT })
+    try {
+      const sourcePath = `${root}/icon-source.png`
+      await Deno.writeFile(
+        sourcePath,
+        await sharp({
+          create: {
+            width: 512,
+            height: 512,
+            channels: 4,
+            background: { r: 1, g: 2, b: 3, alpha: 1 },
+          },
+        }).png().toBuffer(),
+      )
+      await Deno.writeTextFile(`${root}/main.ts`, "console.log('entry')\n")
+
+      const result = await build({
+        root,
+        logLevel: 'silent',
+        build: { write: false, rollupOptions: { input: `${root}/main.ts` } },
+        plugins: [
+          pwaPlugin({
+            icons: { source: sourcePath, sizes },
+            push: { fallbackTitle: 'Storefront', defaultUrl: '/' },
+          }),
+        ],
+      })
+      const { output } = (Array.isArray(result) ? result[0] : result) as Rollup.RollupOutput
+      const worker = output.find((entry) =>
+        entry.type === 'asset' && entry.fileName === SW_FILE_NAME
+      )
+      assert(worker && worker.type === 'asset', 'expected an emitted service worker')
+      return String(worker.source).match(/"iconUrl":"([^"]+)"/)?.[1] ?? ''
+    } finally {
+      await Deno.remove(root, { recursive: true })
+    }
+  }
+
+  assertEquals(await iconFor([512, 32, 256]), `/icons/${iconFileName(256)}`)
+  assertEquals(await iconFor([192, 512]), `/icons/${iconFileName(192)}`)
+  assertEquals(await iconFor([32, 64]), `/icons/${iconFileName(64)}`)
+})

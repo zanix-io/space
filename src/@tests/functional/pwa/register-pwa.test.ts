@@ -1,4 +1,4 @@
-import { assert, assertEquals } from '@std/assert'
+import { assert, assertEquals, assertFalse, assertStringIncludes } from '@std/assert'
 import { bootstrapServers, webServerManager } from '@zanix/server'
 import { getTemporaryFolder } from '@zanix/helpers'
 import { registerPwa } from 'modules/pwa/register-pwa.ts'
@@ -180,6 +180,107 @@ Deno.test(
       assertEquals(manifestRes.status, 200)
     } finally {
       await webServerManager.stop(servers)
+    }
+  },
+)
+
+/**
+ * An app that asks for `push` or a `serviceWorkerScript` has a worker whether or not a client
+ * build exists, so Web Push behaves the same under `zanix space dev` as in a built deployment. The
+ * worker served without a build is generated on each request and never caches.
+ */
+Deno.test(
+  'registerPwa: with no build output, `push` serves a generated worker that shows notifications and never caches',
+  async () => {
+    setPwaBuildOutput(undefined)
+    registerPwa({
+      name: 'Storefront',
+      icon: './icon-source.png',
+      push: { defaultUrl: '/home' },
+    })
+
+    const servers = await bootstrapServers({ ssr: { port: 20905 } })
+    try {
+      const res = await fetch(`http://localhost:20905${SW_ROUTE}`)
+      assertEquals(res.status, 200)
+      assertEquals(res.headers.get('content-type'), 'application/javascript')
+      assertEquals(res.headers.get('cache-control'), 'no-cache')
+
+      const source = await res.text()
+      assertStringIncludes(source, "self.addEventListener('push'")
+      assertStringIncludes(source, "self.addEventListener('notificationclick'")
+      assertStringIncludes(
+        source,
+        JSON.stringify({ fallbackTitle: 'Storefront', defaultUrl: '/home' }),
+      )
+      // A worker that cached would hide an edit from the developer who just made it.
+      assertFalse(source.includes("addEventListener('fetch'"))
+      assertFalse(source.includes('caches.'))
+      new Function(source)
+    } finally {
+      await webServerManager.stop(servers)
+    }
+  },
+)
+
+Deno.test(
+  'registerPwa: with no build output, `serviceWorkerScript` is read on each request',
+  async () => {
+    const root = await Deno.makeTempDir({ dir: TMP_ROOT })
+    try {
+      const script = `${root}/app-sw.js`
+      await Deno.writeTextFile(script, "const VERSION = 'one'\n")
+      setPwaBuildOutput(undefined)
+      registerPwa({ name: 'Storefront', icon: './icon-source.png', serviceWorkerScript: script })
+
+      const servers = await bootstrapServers({ ssr: { port: 20906 } })
+      try {
+        const first = await (await fetch(`http://localhost:20906${SW_ROUTE}`)).text()
+        assertStringIncludes(first, "const VERSION = 'one'")
+
+        await Deno.writeTextFile(script, "const VERSION = 'two'\n")
+        const second = await (await fetch(`http://localhost:20906${SW_ROUTE}`)).text()
+        assertStringIncludes(second, "const VERSION = 'two'")
+        assertFalse(second.includes("'one'"))
+
+        await Deno.remove(script)
+        const missing = await fetch(`http://localhost:20906${SW_ROUTE}`)
+        assertEquals(missing.status, 404)
+        await missing.body?.cancel()
+      } finally {
+        await webServerManager.stop(servers)
+      }
+    } finally {
+      await Deno.remove(root, { recursive: true })
+    }
+  },
+)
+
+Deno.test(
+  'registerPwa: with a build output, the built sw.js is served even when `push` is configured',
+  async () => {
+    const root = await Deno.makeTempDir({ dir: TMP_ROOT })
+    try {
+      await Deno.writeTextFile(`${root}/sw.js`, '// the built worker\n')
+      setPwaBuildOutput(root)
+      registerPwa({
+        name: 'Storefront',
+        icon: './icon-source.png',
+        iconSizes: [192],
+        push: {},
+      })
+
+      const servers = await bootstrapServers({ ssr: { port: 20907 } })
+      try {
+        const res = await fetch(`http://localhost:20907${SW_ROUTE}`)
+        assertEquals(res.status, 200)
+        assertEquals(await res.text(), '// the built worker\n')
+      } finally {
+        await webServerManager.stop(servers)
+      }
+    } finally {
+      setPwaBuildOutput(undefined)
+      await Deno.remove(root, { recursive: true })
     }
   },
 )

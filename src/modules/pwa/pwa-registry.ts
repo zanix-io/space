@@ -1,6 +1,7 @@
 import type { PwaConfig } from 'typings/pwa.ts'
 import type { DocumentPwa } from '../render/document-model.ts'
 import { MANIFEST_ROUTE, SW_ROUTE } from './web-manifest.ts'
+import { requestsServiceWorkerLogic } from './push-config.ts'
 
 let pwaConfig: PwaConfig | undefined
 let pwaBuildOutputDir: string | undefined
@@ -31,9 +32,10 @@ export function getPwaConfig(): PwaConfig | undefined {
  * itself called synchronously during app activation) reads {@linkcode getPwaBuildOutput} ONCE, at
  * route-registration time, to resolve real, static file paths — not per-request — so this must
  * already be set by the time activation runs. A missing call (dev, or prod before the first real
- * build) is not an error: `registerPwa` simply skips icon/service-worker route registration, and
- * `resolvePwaHead` below omits the service-worker `<link>` — `/manifest.webmanifest` alone still
- * works either way, since it needs no built file at all.
+ * build) is not an error: `registerPwa` skips the icon routes and the built service worker, and
+ * `resolvePwaHead` below omits the service-worker registration unless the config asks for `push` or
+ * a `serviceWorkerScript`, which `registerPwa` then serves without a build.
+ * `/manifest.webmanifest` alone still works either way, since it needs no built file at all.
  *
  * @param dir - The client build's own output directory (e.g. `'./.dist/client'`).
  */
@@ -61,12 +63,15 @@ export function setPwaBuildOutput(dir: string | undefined): void {
  * Typed against `render/document-model.ts`'s own renderer-agnostic shape, deliberately, rather than
  * against either renderer's serializer options: PWA is an orthogonal capability of the document, not
  * a feature of React's or Preact's rendering, so neither render path needs to depend on a type
- * owned by the other renderer. */
+ * owned by the other renderer. The service worker is referenced when a build output is registered,
+ * and also when the config asks for `push` or a `serviceWorkerScript`, since `registerPwa` serves a
+ * worker for those without a build. */
 export function resolvePwaHead(): DocumentPwa | undefined {
   if (!pwaConfig) return undefined
+  const hasServiceWorker = Boolean(pwaBuildOutputDir) || requestsServiceWorkerLogic(pwaConfig)
   return {
     manifestHref: MANIFEST_ROUTE,
     themeColor: pwaConfig.themeColor,
-    serviceWorkerHref: pwaBuildOutputDir ? SW_ROUTE : undefined,
+    serviceWorkerHref: hasServiceWorker ? SW_ROUTE : undefined,
   }
 }

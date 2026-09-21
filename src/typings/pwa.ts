@@ -20,6 +20,25 @@ export interface PwaShortcut {
 }
 
 /**
+ * Web Push handling built into the generated service worker — the `push` field of
+ * {@linkcode PwaConfig}. The worker only receives and displays pushes; subscribing
+ * (`PushManager.subscribe`), storing subscriptions and sending are the app's own concern.
+ *
+ * A push payload is a JSON object `{ title, body?, url?, tag?, icon?, badge? }`. `url` is where a
+ * click opens and must be same-origin, otherwise {@linkcode PwaPushConfig.defaultUrl} is used. A
+ * push with no payload, or one that is not that JSON, still shows a notification titled
+ * {@linkcode PwaPushConfig.fallbackTitle}: browsers require every push to be visible.
+ */
+export interface PwaPushConfig {
+  /** Title of the notification shown for a push without a usable payload.
+   * @default the app's `PwaConfig.name` */
+  fallbackTitle?: string
+  /** Where a click opens when the payload carries no same-origin `url`.
+   * @default '/' */
+  defaultUrl?: string
+}
+
+/**
  * Author-facing PWA configuration — the parameter to `defineSpaceApp({ pwa })`. Contains only
  * what an author actually wants to express — this app's own identity/icon/behavior — never a
  * build OUTPUT path. Where `pwaPlugin` actually wrote the generated icons/service worker is a
@@ -45,6 +64,20 @@ export interface PwaConfig {
    * request and the network is genuinely unreachable. Omit for no offline fallback (a plain
    * browser connection-error page instead). */
   offlineFallback?: string
+  /**
+   * Adds Web Push `push` and `notificationclick` handlers to the generated service worker. Omit for
+   * a worker that never shows a notification. An app that needs its own push logic leaves this
+   * unset and registers those listeners from {@linkcode PwaConfig.serviceWorkerScript} instead:
+   * both would show a notification for the same push.
+   */
+  push?: PwaPushConfig
+  /**
+   * Path to a classic script, relative to the project root, appended to the generated service
+   * worker at build time. It runs in the worker's global scope inside its own function scope, so
+   * its declarations never collide with the generated worker's. Use it for logic the generated
+   * worker does not cover, such as custom `push`/`notificationclick` handling.
+   */
+  serviceWorkerScript?: string
   /**
    * Path to a single source icon image (ideally ≥512×512, square), relative to the project root
    * — resized at build time into every size in `iconSizes`. Required whenever `pwa` is configured

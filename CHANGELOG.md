@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.16.0] - 2026-09-20
+
+### Added
+
+- **`defineSpaceApp({ messageSources })`**: catalogs that are not a directory on disk. A
+  `MessagesSource` is a function from `(lang, population?)` to a flat catalog, the way a package
+  ships default messages for the screens it owns, since a package has no directory an app could list
+  in `messagesDir`. Sources fill in below the app's own catalogs, so an app changes any message a
+  package ships by defining that key in its own `messagesDir`, in any file name. A source that
+  throws or returns a non-flat value is logged and skipped. `MessagesSource` is exported as a type.
+
+- **`defineSpaceApp({ cssSources })`**: stylesheets supplied as text, the way a package ships
+  default styles for the screens it owns. `zanix space build` and `zanix space dev` write each
+  source to `.space/css-sources/{name}.css` in the project before they read the stylesheet list,
+  where it is an ordinary global stylesheet placed **ahead of** the app's own `globalCss`, so the
+  app's rules override it by cascade. Renderer-agnostic, and served in dev and bundled in production
+  alike. `CssSource` is exported as a type. Add `.space/` to the project's `.gitignore`.
+
+### Changed
+
+- **A file present in several `messagesDir` roots is merged key by key**, the earlier root winning a
+  shared key. It was resolved first-match-wins per file, so a host's copy of a file hid every key of
+  the base copy it did not repeat. A key only a later root defines now resolves. The same applies to
+  the population-override files. An app with a single root, or with roots whose files do not share a
+  name, resolves as before.
+
 ## [1.15.4] - 2026-09-19
 
 ### Fixed

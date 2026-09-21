@@ -335,8 +335,10 @@ alone is the conventional default, but a large catalog can split into feature-se
 instead (`iam.json`, `profile.json`, `chat.json`, ...), all merged together — and, when `population`
 is given, an override file, shallow-merging them on top — cached for the process lifetime, bypassed
 under `znx space dev`. `loadMessages()` stays opaque to ICU/FormatJS on purpose —
-`@zanix/space-ui`'s `IntlProvider`/`useIntl` is what actually formats a message. See
-[`docs/i18n.md`](./docs/i18n.md) for the full contract.
+`@zanix/space-ui`'s `IntlProvider`/`useIntl` is what actually formats a message. See With several
+`messagesDir` roots, a file present in more than one merges key by key (the earlier root wins a
+shared key), and `messageSources` lets a package contribute default messages that the app's own
+catalogs override. See [`docs/i18n.md`](./docs/i18n.md) for the full contract.
 
 ### Head management
 
@@ -448,10 +450,12 @@ export default defineSpaceApp({
 
 Global CSS accepts a `media` per entry (`{ href, media }`), a page controller can declare its own
 `static styles`, and a Comet's own `*.module.css` ships only on a page that actually renders that
-Comet — never globally. See [`docs/css.md`](./docs/css.md) for the build plugin's full contract,
-including that responsive-delivery/scoping story, and [`docs/theming.md`](./docs/theming.md) for the
-design-token convention, including the `theme.resolve` contract above in full (sanitization, CSP
-`style-src`, `ETag` folding per population).
+Comet — never globally. A package ships default styles for its own screens through `cssSources`,
+placed ahead of `globalCss` so the app overrides them. See [`docs/css.md`](./docs/css.md) for the
+build plugin's full contract, including that responsive-delivery/scoping story, and
+[`docs/theming.md`](./docs/theming.md) for the design-token convention, including the
+`theme.resolve` contract above in full (sanitization, CSP `style-src`, `ETag` folding per
+population).
 
 ### Assets
 

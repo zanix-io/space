@@ -1,6 +1,7 @@
 import { InternalError } from '@zanix/errors'
 import { isDevClientEnabled } from '../dev/dev-client-registry.ts'
 import { resolveDevCssHrefs, resolveDevPageCssHrefs } from '../dev/dev-css-hrefs.ts'
+import { getCssSourcePaths } from './css-sources.ts'
 import { normalizeSourceKey } from '../comets/comet-manifest.ts'
 
 /** A single stylesheet reference — the one shape every CSS delivery scope (global, page, comet)
@@ -117,9 +118,15 @@ export function addGlobalCssPaths(paths: StylesheetRef[]): void {
   globalCssPaths = [...(globalCssPaths ?? []), ...paths]
 }
 
-/** Test-only escape hatch, same reasoning as {@linkcode setCssManifest}. */
+/**
+ * The declared global stylesheet paths, with the materialized `cssSources` in front — a package's
+ * default styles come before the app's own, so the app's rules override them by ordinary cascade.
+ * `undefined` when nothing was declared at all.
+ */
 export function getGlobalCssPaths(): StylesheetRef[] | undefined {
-  return globalCssPaths
+  const sourcePaths = getCssSourcePaths()
+  if (sourcePaths.length === 0) return globalCssPaths
+  return [...sourcePaths, ...(globalCssPaths ?? [])]
 }
 
 /**
@@ -136,7 +143,7 @@ export function getGlobalCssPaths(): StylesheetRef[] | undefined {
  * genuinely different mechanisms).
  */
 export function resolveCssHrefs(): StylesheetRef[] | undefined {
-  if (isDevClientEnabled()) return resolveDevCssHrefs(globalCssPaths ?? [])
+  if (isDevClientEnabled()) return resolveDevCssHrefs(getGlobalCssPaths() ?? [])
   return manifest?.global
 }
 

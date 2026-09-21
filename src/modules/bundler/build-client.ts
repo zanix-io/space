@@ -21,6 +21,7 @@ import {
   DEFAULT_ERROR_VIEW_REACT_URL,
 } from 'modules/router/default-view-specifiers.ts'
 import { getGlobalCssPaths, type StylesheetRef } from 'modules/render/css-manifest.ts'
+import { materializeCssSources } from 'modules/render/css-sources.ts'
 import {
   CLIENT_ENTRY_VIRTUAL_ID,
   getClientEntry,
@@ -271,6 +272,9 @@ function toEntryName(root: string, filePath: string): string {
 export async function buildSpaceClient(
   options: BuildSpaceClientOptions,
 ): Promise<BuildSpaceClientResult> {
+  // The declared `cssSources` join the default `globalCss` list only once they are files; a caller
+  // that passes its own `globalCss` owns the whole list.
+  if (options.globalCss === undefined) await materializeCssSources(options.root)
   const {
     root,
     outDir = '.dist/client',

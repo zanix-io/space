@@ -7,6 +7,7 @@ import { setThemeResolver } from 'modules/theme/mod.ts'
 import { setExtendedSerialization } from 'modules/render/serialization-registry.ts'
 import { loadPwaBuildOutput, registerPwa, setPwaConfig } from 'modules/pwa/mod.ts'
 import { addGlobalCssPaths, getCssManifest, loadCssManifest } from 'modules/render/css-manifest.ts'
+import { addCssSources } from 'modules/render/css-sources.ts'
 import {
   getClientEntryManifest,
   loadClientEntryManifest,
@@ -24,7 +25,11 @@ import {
 import { registerAssets } from 'modules/assets/register-assets.ts'
 import { loadAssetsBuildOutput, loadAssetsManifest } from 'modules/assets/assets-manifest.ts'
 import { createAssetsController } from 'modules/assets-api/controllers/assets.controller.ts'
-import { setMessagesBuildDir, setMessagesDir } from 'modules/i18n/messages-registry.ts'
+import {
+  setMessagesBuildDir,
+  setMessagesDir,
+  setMessageSources,
+} from 'modules/i18n/messages-registry.ts'
 import { registerSitemap, setSitemapDeclaration } from 'modules/seo/sitemap.ts'
 import { getSitemapManifest, loadSitemapManifest } from 'modules/seo/sitemap-manifest.ts'
 import { registerRobots } from 'modules/seo/robots.ts'
@@ -149,7 +154,9 @@ export function defineSpaceApp(config: SpaceAppConfig): ZanixAppDefinition {
     assetsDir,
     clientBuildDir,
     messagesDir,
+    messageSources,
     globalCss,
+    cssSources,
     clientEntry,
     headers,
     theme,
@@ -184,6 +191,9 @@ export function defineSpaceApp(config: SpaceAppConfig): ZanixAppDefinition {
   // `zanix space build`-needs-this-early concern the way `renderer`/`routesDir` below have.
   setErrorResponseFormat(errorResponse)
   if (globalCss !== undefined) addGlobalCssPaths(globalCss)
+  // Only registered here: `buildSpaceClient`/`createSpaceDevEngine` write the files, since only
+  // they know the project root and a production server has no use for them.
+  if (cssSources !== undefined) addCssSources(cssSources)
   if (clientEntry !== undefined) setClientEntry(clientEntry)
   // Eager, same point as `headers`/`pwa`/`globalCss` above — unlike those, this doesn't drive any
   // side effect of its own here (the actual page-renderer swap still only happens inside `setup()`
@@ -233,6 +243,8 @@ export function defineSpaceApp(config: SpaceAppConfig): ZanixAppDefinition {
   // actual resolution stays exactly as lazy as before — per `(lang, population)` key, on first
   // access — nothing here changes when or how a catalog file is actually read.
   if (messagesDir !== undefined) setMessagesDir(messagesDir)
+  // Eager, same timing as `messagesDir`, so the registry is complete as soon as this call returns.
+  if (messageSources !== undefined) setMessageSources(messageSources)
   // Eager, same reasoning/precedent as `validation`/`messagesDir` above — `zanix space build`/
   // `zanix space dev` both need to know whether `sitemap` resolves to `'auto'` or a literal array
   // BEFORE `setup()` ever runs, to derive `StaticAppInput.sitemapLocations` for the SEO004/SEO006

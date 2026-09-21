@@ -2,27 +2,10 @@ import { join } from '@std/path'
 import logger from '@zanix/logger'
 import { InternalError } from '@zanix/errors'
 import { isDevClientEnabled } from 'modules/dev/dev-client-registry.ts'
-import { getMessagesBuildDir, getMessagesDir } from './messages-registry.ts'
+import { getMessagesBuildDir, getMessagesDir, getMessageSources } from './messages-registry.ts'
+import type { Messages, MessagesSource } from './messages-types.ts'
 
-/** Structurally mirrors `@formatjs/icu-messageformat-parser`'s own `MessageFormatElement` node
- * shape — redeclared, not imported: `@zanix/space` must never reach FormatJS/ICU, even as a type
- * (enforced by `dependency-boundary.test.ts`, whose own graph check covers types, not just runtime
- * code) — see {@linkcode Messages}'s own doc for why a catalog value can be this shape at all. */
-export type CompiledMessageNode = { type: number; value?: string; [key: string]: unknown }
-
-/** A flat message catalog — namespaced string keys mapping to either a raw ICU string (the
- * uncompiled/dev-mode shape, e.g. `{ 'products/title': 'Our products' }`) or, once `zanix space
- * build` has compiled a catalog to AST (written to `{clientBuildDir}/messages/...`, NEVER back
- * into `messagesDir` itself — see this function's own doc), an already-parsed
- * {@linkcode CompiledMessageNode} array for that same key. `loadMessages()` never inspects or
- * distinguishes the two — it reads whatever is on disk and returns it as-is — so a caller that
- * renders `messages[key]` directly (e.g. as a JSX child) must handle both, which in practice means
- * routing through `@zanix/space-ui`'s `IntlProvider`/`useIntl().formatMessage()` rather than
- * interpolating a catalog value directly: that formatter accepts either shape and always returns a
- * plain string. Deliberately NOT nested objects, for either shape: a shallow merge (base catalog,
- * then population override) is only correct for a flat shape — see {@linkcode loadMessages}'s own
- * doc for why this is a real constraint, not an arbitrary choice. */
-export type Messages = Record<string, string | CompiledMessageNode[]>
+export type { CompiledMessageNode, Messages } from './messages-types.ts'
 
 /** Options for {@linkcode loadMessages}. */
 export type LoadMessagesOptions = {
@@ -82,23 +65,50 @@ async function readJsonObject(path: string): Promise<Messages | undefined> {
   }
 }
 
-/** First directory (in array order) whose `{dir}/{relativePath}` exists and parses — mirrors
- * `scanAssets`'s own first-match-wins precedent, but resolved lazily for one known path instead of
- * an eager whole-directory walk (a message catalog has a small, bounded key space — `lang` ×
- * `population` — unlike an asset's arbitrary request path). */
-async function resolveFirstMatch(
-  dirs: string[],
-  relativePath: string,
+/** Merges catalog layers key by key, the earlier layer winning a key both define. `undefined`
+ * layers are skipped, and no layer at all resolves to `undefined`. */
+function mergeLayers(layers: (Messages | undefined)[]): Messages | undefined {
+  const present = layers.filter((layer): layer is Messages => layer !== undefined)
+  if (present.length === 0) return undefined
+  return present.reduceRight((merged, layer) => ({ ...merged, ...layer }), {})
+}
+
+/** Every directory's `{dir}/{relativePath}` that exists and parses, merged key by key with the
+ * earlier directory winning a shared key — so a host directory overrides single messages of a base
+ * directory without copying the file. Every directory is read: a key only a later one defines
+ * still resolves. */
+async function readLayered(dirs: string[], relativePath: string): Promise<Messages | undefined> {
+  const layers = await Promise.all(dirs.map((dir) => readJsonObject(join(dir, relativePath))))
+  return mergeLayers(layers)
+}
+
+/** What every declared source returns for one request, merged with the earlier source winning a
+ * shared key. A source that throws, or returns something that is not a flat object, is logged and
+ * skipped — the same per-file isolation a malformed catalog file gets. */
+async function readSources(
+  sources: MessagesSource[],
+  lang: string,
+  population: string | undefined,
 ): Promise<Messages | undefined> {
-  // Genuinely sequential: first-match-wins means a LATER directory must never even be read once
-  // an earlier one already answered, same contract `scanAssets`'s own doc states — a `Promise.all`
-  // here would read every directory regardless.
-  for (const dir of dirs) {
-    // deno-lint-ignore no-await-in-loop -- see the comment above the loop
-    const found = await readJsonObject(join(dir, relativePath))
-    if (found) return found
-  }
-  return undefined
+  const layers = await Promise.all(sources.map(async (source) => {
+    try {
+      const result = await source(lang, population)
+      if (result === undefined) return undefined
+      if (typeof result !== 'object' || result === null || Array.isArray(result)) {
+        throw new TypeError('expected a flat object')
+      }
+      return result
+    } catch (error) {
+      logger.error(
+        `A message source failed for lang '${lang}'${
+          population ? ` and population '${population}'` : ''
+        }, skipped`,
+        error,
+      )
+      return undefined
+    }
+  }))
+  return mergeLayers(layers)
 }
 
 /** Every `.json` file directly under `dir` — non-recursive, so a `populations/` subdirectory entry
@@ -127,8 +137,7 @@ async function listSegmentFiles(dir: string): Promise<string[]> {
 }
 
 /** Every distinct base-segment filename across every root, for one `lang` — the UNION, not just
- * the first root's own listing, so a segment that exists only in a later root (host composition,
- * same as `resolveFirstMatch`'s own per-file precedent) still gets discovered and merged. Sorted so
+ * the first root's own listing, so a segment that exists only in a later root (host composition) still gets discovered and merged. Sorted so
  * merge order is deterministic across roots/platforms/directory-read ordering, not just
  * per-root-insertion-order — segments are expected to be namespaced/disjoint (see `loadMessages`'s
  * own doc), so this order only matters for the rare, non-recommended case of an actual key
@@ -142,14 +151,19 @@ async function listBaseSegmentNames(dirs: string[], lang: string): Promise<strin
 
 async function resolve(lang: string, population: string | undefined): Promise<Messages> {
   const configured = getMessagesDir()
-  if (configured === undefined) {
+  const sources = getMessageSources()
+  if (configured === undefined && sources.length === 0) {
     logger.warn(
-      "loadMessages() called but this app never declared 'messagesDir' in defineSpaceApp() " +
-        '— returning an empty catalog',
+      "loadMessages() called but this app never declared 'messagesDir' or 'messageSources' in " +
+        'defineSpaceApp() — returning an empty catalog',
     )
     return {}
   }
-  const roots = Array.isArray(configured) ? configured : [configured]
+  const roots = configured === undefined
+    ? []
+    : Array.isArray(configured)
+    ? configured
+    : [configured]
 
   // `zanix space build` compiles this app's catalogs to `{clientBuildDir}/messages/{index}/...`
   // — mirroring `roots`' own array order/index, NEVER `messagesDir` itself (see
@@ -163,24 +177,31 @@ async function resolve(lang: string, population: string | undefined): Promise<Me
     : roots
 
   const segmentNames = await listBaseSegmentNames(dirs, lang)
-  const [segments, override] = await Promise.all([
-    Promise.all(segmentNames.map((name) => resolveFirstMatch(dirs, `${lang}/${name}`))),
-    population ? resolveFirstMatch(dirs, `${lang}/populations/${population}.json`) : undefined,
+  const [segments, dirOverride, sourceBase, sourceOverride] = await Promise.all([
+    Promise.all(segmentNames.map((name) => readLayered(dirs, `${lang}/${name}`))),
+    population ? readLayered(dirs, `${lang}/populations/${population}.json`) : undefined,
+    readSources(sources, lang, undefined),
+    population ? readSources(sources, lang, population) : undefined,
   ])
 
-  // A name resolves to `undefined` when every root's copy was malformed (already logged by
+  // A segment resolves to `undefined` when every root's copy was malformed (already logged by
   // `readJsonObject` itself) — filtered out here rather than failing the whole catalog, same
   // per-file isolation `compileMessagesTree`'s own doc in `@zanix/cli` establishes for the
-  // build-time compiler. Zero valid segments (no files found at all, or every one malformed)
-  // collapses to the same "no message file" signal a single missing/malformed `index.json` always
-  // gave before segmentation existed — this is what keeps that case's warning behavior unchanged.
+  // build-time compiler. No valid segment and no source content collapses to the same "no message
+  // file" signal a single missing/malformed `index.json` always gave before segmentation existed.
   const validSegments = segments.filter((segment): segment is Messages => segment !== undefined)
-  if (validSegments.length === 0) {
-    logger.warn(`No message file for lang '${lang}' in any configured messagesDir`)
+  const override = mergeLayers([dirOverride, sourceOverride])
+  if (validSegments.length === 0 && sourceBase === undefined) {
+    logger.warn(
+      `No message file for lang '${lang}' in any configured messagesDir or message source`,
+    )
     return override ?? {}
   }
 
-  const base = validSegments.reduce((merged, segment) => ({ ...merged, ...segment }), {})
+  // The app's own directories win over the sources: a source is a package's default, the
+  // directories are the app's own words.
+  const dirBase = validSegments.reduce((merged, segment) => ({ ...merged, ...segment }), {})
+  const base = { ...sourceBase, ...dirBase }
   return override ? { ...base, ...override } : base
 }
 
@@ -198,7 +219,11 @@ async function resolve(lang: string, population: string | undefined): Promise<Me
  * alongside (or instead of) `index.json`. Every segment file found is shallow-merged together, in
  * filename-sorted order, into one base catalog — segments are expected to be namespaced/disjoint
  * (`'profile/name'`, `'chat/heading'`, ...), so merge order only matters for the unrecommended case
- * of two segment files actually sharing a key. When `population` is given,
+ * of two segment files actually sharing a key. With several `messagesDir` roots, a file present in
+ * more than one is merged key by key, the earlier root winning a shared key and a key only a later
+ * root defines still resolving, so a host overrides single messages without copying a file. Sources
+ * declared through `defineSpaceApp({ messageSources })` fill in below the directories: a key the
+ * app's own catalogs define always wins over a source's. When `population` is given,
  * `{messagesDir}/{lang}/populations/{population}.json` (an override — only the keys that differ
  * from the base need to be present) is shallow-merged on top of that merged base: `{ ...base,
  * ...override }`. This is only correct because catalogs are flat, namespaced-string-key objects,

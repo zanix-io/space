@@ -5,11 +5,14 @@ import { getTemporaryFolder } from '@zanix/helpers'
 import { InternalError } from '@zanix/errors'
 import { setDevClientEnabled } from 'modules/dev/dev-client-registry.ts'
 import { loadMessages, resetMessagesCache } from 'modules/i18n/load-messages.ts'
+import type { Messages } from 'modules/i18n/messages-types.ts'
 import {
   resetMessagesBuildDir,
   resetMessagesDir,
+  resetMessageSources,
   setMessagesBuildDir,
   setMessagesDir,
+  setMessageSources,
 } from 'modules/i18n/messages-registry.ts'
 
 const TMP_ROOT = getTemporaryFolder(import.meta.url)
@@ -33,6 +36,7 @@ async function cleanup(...dirs: string[]): Promise<void> {
 
 function reset() {
   resetMessagesDir()
+  resetMessageSources()
   resetMessagesBuildDir()
   resetMessagesCache()
 }
@@ -215,17 +219,51 @@ Deno.test(
 )
 
 Deno.test(
-  "loadMessages(messagesDir[]): an earlier directory's base catalog shadows a later one entirely",
+  'loadMessages(messagesDir[]): a file in several directories merges key by key, the earlier ' +
+    'directory winning a shared key and a key only the later one defines still resolving',
   async () => {
     reset()
     const overrideDir = await Deno.makeTempDir({ dir: TMP_ROOT })
     const baseDir = await Deno.makeTempDir({ dir: TMP_ROOT })
     try {
       await writeJson(join(overrideDir, 'en', 'index.json'), { 'home/title': 'From override dir' })
-      await writeJson(join(baseDir, 'en', 'index.json'), { 'home/title': 'From base dir' })
+      await writeJson(join(baseDir, 'en', 'index.json'), {
+        'home/title': 'From base dir',
+        'home/subtitle': 'Only in base dir',
+      })
       setMessagesDir([overrideDir, baseDir])
       const messages = await loadMessages({ lang: 'en' })
-      assertEquals(messages, { 'home/title': 'From override dir' })
+      assertEquals(messages, {
+        'home/title': 'From override dir',
+        'home/subtitle': 'Only in base dir',
+      })
+    } finally {
+      await cleanup(overrideDir, baseDir)
+    }
+  },
+)
+
+Deno.test(
+  'loadMessages(messagesDir[]): a population override present in several directories merges ' +
+    'key by key too, the earlier directory winning',
+  async () => {
+    reset()
+    const overrideDir = await Deno.makeTempDir({ dir: TMP_ROOT })
+    const baseDir = await Deno.makeTempDir({ dir: TMP_ROOT })
+    try {
+      await writeJson(join(baseDir, 'en', 'index.json'), {
+        'a': 'base a',
+        'b': 'base b',
+        'c': 'base c',
+      })
+      await writeJson(join(overrideDir, 'en', 'populations', 'zanix.json'), { 'a': 'host a' })
+      await writeJson(join(baseDir, 'en', 'populations', 'zanix.json'), {
+        'a': 'base zanix a',
+        'b': 'base zanix b',
+      })
+      setMessagesDir([overrideDir, baseDir])
+      const messages = await loadMessages({ lang: 'en', population: 'zanix' })
+      assertEquals(messages, { 'a': 'host a', 'b': 'base zanix b', 'c': 'base c' })
     } finally {
       await cleanup(overrideDir, baseDir)
     }
@@ -736,6 +774,179 @@ Deno.test(
       })
     } finally {
       await cleanup(overrideDir, baseDir, buildDir)
+    }
+  },
+)
+
+Deno.test('loadMessages(messageSources): a source alone resolves the base and the population', async () => {
+  reset()
+  const base: Messages = { 'login/heading': 'Sign in', 'login/submit': 'Continue' }
+  const override: Messages = { 'login/heading': 'Sign in to Zanix' }
+  setMessageSources([
+    (lang, population) => {
+      if (lang !== 'en') return undefined
+      return population === 'zanix' ? override : base
+    },
+  ])
+  assertEquals(await loadMessages({ lang: 'en' }), {
+    'login/heading': 'Sign in',
+    'login/submit': 'Continue',
+  })
+  assertEquals(await loadMessages({ lang: 'en', population: 'zanix' }), {
+    'login/heading': 'Sign in to Zanix',
+    'login/submit': 'Continue',
+  })
+})
+
+Deno.test(
+  "loadMessages(messageSources): a key in the app's own messagesDir wins over a source's, the " +
+    'source fills in every key the app does not define',
+  async () => {
+    reset()
+    const dir = await Deno.makeTempDir({ dir: TMP_ROOT })
+    try {
+      await writeJson(join(dir, 'en', 'index.json'), { 'login/heading': 'Welcome back' })
+      setMessagesDir(dir)
+      setMessageSources([() => ({ 'login/heading': 'Sign in', 'login/submit': 'Continue' })])
+      assertEquals(await loadMessages({ lang: 'en' }), {
+        'login/heading': 'Welcome back',
+        'login/submit': 'Continue',
+      })
+    } finally {
+      await cleanup(dir)
+    }
+  },
+)
+
+Deno.test(
+  "loadMessages(messageSources): a population override in the app's directory wins over the " +
+    "source's base and the source's own override",
+  async () => {
+    reset()
+    const dir = await Deno.makeTempDir({ dir: TMP_ROOT })
+    try {
+      await writeJson(join(dir, 'en', 'populations', 'zanix.json'), {
+        'login/heading': 'Zanix app',
+      })
+      setMessagesDir(dir)
+      const base: Messages = {
+        'login/heading': 'Source base',
+        'login/submit': 'Source base submit',
+        'x': 'x',
+      }
+      const override: Messages = {
+        'login/heading': 'Source population',
+        'login/submit': 'Source population submit',
+      }
+      setMessageSources([(_lang, population) => population ? override : base])
+      assertEquals(await loadMessages({ lang: 'en', population: 'zanix' }), {
+        'login/heading': 'Zanix app',
+        'login/submit': 'Source population submit',
+        'x': 'x',
+      })
+    } finally {
+      await cleanup(dir)
+    }
+  },
+)
+
+Deno.test('loadMessages(messageSources): between sources the earlier one wins a shared key', async () => {
+  reset()
+  setMessageSources([
+    () => ({ 'a': 'first a' }),
+    () => ({ 'a': 'second a', 'b': 'second b' }),
+  ])
+  assertEquals(await loadMessages({ lang: 'en' }), { 'a': 'first a', 'b': 'second b' })
+})
+
+Deno.test(
+  'loadMessages(messageSources): a source that throws or returns a non-object is logged and ' +
+    'skipped, every other source and the directory survive',
+  async () => {
+    reset()
+    const dir = await Deno.makeTempDir({ dir: TMP_ROOT })
+    const error = countCalls('error')
+    try {
+      await writeJson(join(dir, 'en', 'index.json'), { 'home/title': 'Welcome' })
+      setMessagesDir(dir)
+      setMessageSources([
+        () => {
+          throw new Error('boom')
+        },
+        () => ['not', 'flat'] as never,
+        () => Promise.reject(new Error('async boom')),
+        () => ({ 'login/submit': 'Continue' }),
+      ])
+      assertEquals(await loadMessages({ lang: 'en' }), {
+        'home/title': 'Welcome',
+        'login/submit': 'Continue',
+      })
+      assertEquals(error.count(), 3)
+    } finally {
+      error.restore()
+      await cleanup(dir)
+    }
+  },
+)
+
+Deno.test(
+  'loadMessages(messageSources): sources that have nothing for the language, and no directory ' +
+    'catalog, still warn and resolve to an empty catalog',
+  async () => {
+    reset()
+    const warn = countCalls('warn')
+    try {
+      setMessageSources([() => undefined])
+      assertEquals(await loadMessages({ lang: 'en' }), {})
+      assertEquals(warn.count(), 1)
+    } finally {
+      warn.restore()
+    }
+  },
+)
+
+Deno.test(
+  'loadMessages(messageSources): sources contribute alongside compiled output outside dev mode',
+  async () => {
+    reset()
+    const dir = await Deno.makeTempDir({ dir: TMP_ROOT })
+    const buildDir = await withTempDir(async (build) => {
+      await writeJson(join(build, 'messages', '0', 'en', 'index.json'), {
+        'home/title': 'Compiled title',
+      })
+    })
+    try {
+      setMessagesDir(dir)
+      setMessagesBuildDir(buildDir)
+      setMessageSources([() => ({ 'home/title': 'Source title', 'login/submit': 'Continue' })])
+      assertEquals(await loadMessages({ lang: 'en' }), {
+        'home/title': 'Compiled title',
+        'login/submit': 'Continue',
+      })
+    } finally {
+      await cleanup(dir, buildDir)
+    }
+  },
+)
+
+Deno.test(
+  'loadMessages(messageSources): a source is called once per key outside dev mode, on every ' +
+    'request under dev mode',
+  async () => {
+    for (const dev of [false, true]) {
+      reset()
+      setDevClientEnabled(dev)
+      let calls = 0
+      setMessageSources([() => (calls++, { 'a': 'a' })])
+      try {
+        // deno-lint-ignore no-await-in-loop -- the second call must follow the first
+        await loadMessages({ lang: 'en' })
+        // deno-lint-ignore no-await-in-loop -- see above
+        await loadMessages({ lang: 'en' })
+        assertEquals(calls, dev ? 2 : 1, `dev=${dev}`)
+      } finally {
+        setDevClientEnabled(false)
+      }
     }
   },
 )

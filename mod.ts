@@ -275,6 +275,8 @@ export type {
   LoadMessagesOptions,
   Messages,
 } from 'modules/i18n/load-messages.ts'
+export type { MessagesSource } from 'modules/i18n/messages-types.ts'
+export type { CssSource } from 'modules/render/css-sources.ts'
 // Read-back of `defineSpaceApp({ messagesDir })`'s own eager `setup()` write — same
 // `getGlobalCssPaths`/`getPwaConfig` precedent, so `zanix space build`/`dev` can locate the
 // configured directory without this package knowing anything about what a build step does with

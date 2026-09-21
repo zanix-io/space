@@ -20,6 +20,8 @@ import type { AppSetupContext, ConfigAccessor, RuntimeContext } from '@zanix/app
 import type { BehaviorDeclaration } from '@zanix/app'
 import type { PageHeaderOptions } from 'modules/router/space-page-controller.ts'
 import type { SitemapSource } from 'modules/seo/sitemap.ts'
+import type { MessagesSource } from 'modules/i18n/messages-types.ts'
+import type { CssSource } from 'modules/render/css-sources.ts'
 import type { SpaceRobotsConfig } from 'modules/seo/robots.ts'
 import type { ThemeResolver } from 'modules/theme/theme-registry.ts'
 import type { StylesheetRef } from 'modules/render/css-manifest.ts'
@@ -201,10 +203,11 @@ export interface SpaceAppConfig {
    * `assetsDir`: not every app needs i18n content.
    *
    * An array (mirroring `routesDir`/`assetsDir`'s own precedent) lets a HOST compose a base app's
-   * own catalogs with its own override directory without forking either tree — first-match-wins,
-   * resolved independently for the base file and the population-override file (so a base catalog
-   * resolved from one directory and an override resolved from a different one is fine, same
-   * independent-per-relative-path philosophy `assetsDir` already establishes).
+   * own catalogs with its own override directory without forking either tree. A file present in
+   * several directories is merged key by key, the earlier directory winning a shared key, so the
+   * host's file only needs the messages it changes. The base file and the population-override file
+   * resolve independently (a base catalog from one directory and an override from a different one
+   * is fine, same independent-per-relative-path philosophy `assetsDir` already establishes).
    *
    * Convention: `{messagesDir}/{lang}/index.json` for the base catalog, and
    * `{messagesDir}/{lang}/populations/{population}.json` for a population override (only the keys
@@ -217,6 +220,20 @@ export interface SpaceAppConfig {
    * project's own working copy. See `loadMessages()`'s own doc for the exact production read path.
    */
   messagesDir?: string | string[]
+  /**
+   * Message catalogs that do not live in a directory — the way a package ships default messages for
+   * the screens it owns, since a package has no directory an app could list in `messagesDir`. See
+   * {@linkcode MessagesSource} for the contract of one source.
+   *
+   * Sources fill in below the app's own catalogs: a key defined in `messagesDir` always wins over a
+   * source's, so an app changes any message a package ships by defining that key in its own
+   * catalog. Between sources, the earlier one wins a shared key. Works with or without
+   * `messagesDir`.
+   *
+   * **Omitted by default — no source, at zero cost.** `zanix space build` compiles `messagesDir`
+   * only: a source's values reach `loadMessages()` as the source returns them.
+   */
+  messageSources?: MessagesSource[]
   /**
    * This app's own global stylesheet source path(s) — e.g.
    * `['./styles/reset.css', './styles/app.css']`, resolved automatically, eagerly, as part of THIS
@@ -269,6 +286,24 @@ export interface SpaceAppConfig {
    * specifically for CSS a page's *initial* HTML needs before any component-level code runs.
    */
   globalCss?: StylesheetRef[]
+  /**
+   * Stylesheets supplied as text rather than as a file — the way a package ships default styles for
+   * the screens it owns, since a package has no file an app could list in `globalCss`. See
+   * {@linkcode CssSource} for the shape of one source.
+   *
+   * Each source becomes `.space/css-sources/{name}.css` in the project when `zanix space build`
+   * or `zanix space dev` starts, and is then an ordinary global stylesheet: bundled and listed in
+   * `css-manifest.json` in production, served like any other in dev. Sources come **before** the
+   * app's own `globalCss`, in declaration order, so the app's rules override a package's by normal
+   * cascade; the package writes its selectors with `:where()` and `--space-*` token fallbacks to
+   * make that hold whatever the app's specificity. Every `defineSpaceApp({ cssSources })` call adds
+   * to the same list, like `globalCss`, so a host composes with what a base app declared. Add
+   * `.space/` to the project's `.gitignore`: the directory is generated.
+   *
+   * **Omitted by default — no source, at zero cost.** Not read at runtime in production: the
+   * built stylesheet is already in the manifest.
+   */
+  cssSources?: CssSource[]
   /**
    * Overrides this app's default, auto-generated client entry with a real source file of your
    * own — e.g. `'./src/main.client.ts'`. **Omitting this is the normal, recommended case**: every

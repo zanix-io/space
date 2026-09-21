@@ -20,7 +20,11 @@
  *
  * @module
  */
+import type { MessagesSource } from './messages-types.ts'
+
 let messagesDir: string | string[] | undefined
+
+let messageSources: MessagesSource[] = []
 
 /** Set once, eagerly, by `defineSpaceApp()` itself — never called directly by application code. */
 export function setMessagesDir(dirs: string | string[]): void {
@@ -82,4 +86,21 @@ export function resetMessagesBuildDir(): void {
  * `clientBuildDir`'s own dev-skip condition. */
 export function getMessagesBuildDir(): string | undefined {
   return messagesBuildDir
+}
+
+/** Set once, eagerly, by `defineSpaceApp()` itself — never called directly by application code. */
+export function setMessageSources(sources: MessagesSource[]): void {
+  messageSources = sources
+}
+
+/** Test-only escape hatch — mirrors `resetMessagesDir`'s own reasoning. Not exported from this
+ * package's public entry points. */
+export function resetMessageSources(): void {
+  messageSources = []
+}
+
+/** The sources declared through `defineSpaceApp({ messageSources })`, in declaration order — empty
+ * when the app declared none. */
+export function getMessageSources(): MessagesSource[] {
+  return messageSources
 }

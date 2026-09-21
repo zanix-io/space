@@ -136,6 +136,56 @@ touch still resolves from the base app's own value. The host never needs to read
 base app's own stylesheet path, and never needs to know the base app's own primitive scale — only
 the semantic token names it wants to change.
 
+### Default styles from a package: `cssSources`
+
+A package that owns screens has no file an app could list in `globalCss`, so it ships its default
+styles as text and the app declares them:
+
+```ts
+import { screensCss } from '@example/screens'
+
+defineSpaceApp({
+  name: 'storefront',
+  cssSources: [{ name: 'screens', css: screensCss }],
+  globalCss: ['./theme/app.css'],
+})
+```
+
+`zanix space build` and `zanix space dev` write each source to `.space/css-sources/{name}.css` in
+the project before they read the stylesheet list, and from there it is an ordinary global
+stylesheet: bundled and listed in `css-manifest.json` in production, served with `?direct` in dev,
+identically under both renderers. A production server never reads the sources; the built stylesheet
+is already in the manifest. Add `.space/` to the project's `.gitignore`.
+
+**The app's rules override the package's.** Sources come **before** `globalCss`, in declaration
+order, so a later, equal-specificity rule of the app wins by normal cascade. A package makes that
+hold whatever the app's selectors by writing its own with `:where()` (zero specificity) and by
+reading `--space-*` semantic tokens with fallbacks, so an app usually changes a package's look by
+redeclaring a few tokens:
+
+```css
+/* the package's source */
+:where([data-space='otp-code-field-box']) {
+  border: 1px solid var(--space-color-border, #d4d4d8);
+}
+
+/* the app's own globalCss */
+:root {
+  --space-color-border: #a1a1aa;
+}
+```
+
+A source is `{ name, css, media? }`. `css` is the text or a function returning it (called once per
+build and once per dev start); `media` becomes the `media` attribute of the `<link>` like a
+`{ href, media }` `globalCss` entry. `name` becomes a file name, so it is limited to lowercase
+letters, digits and `-`. Every `defineSpaceApp({ cssSources })` call adds to one list, so a host
+composes with what a base app declared, and declaring a name again replaces the earlier definition
+in place. A source that throws or does not return a string fails the build or the dev start.
+
+Between `cssSources` entries the later one wins, as between `globalCss` entries. `messageSources`
+(see [`i18n.md`](./i18n.md)) resolves the other way, the earlier source winning a key, because it
+mirrors `messagesDir`'s host-first order.
+
 ### What a component should do
 
 - Reference semantic tokens via `var(--space-color-primary)` — from Tailwind

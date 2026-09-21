@@ -46,6 +46,7 @@ const AGNOSTIC_ENTRY_POINTS = [
   'modules/render/document-semantics.ts',
   'modules/render/head-markup.ts',
   'modules/render/css-manifest.ts',
+  'modules/render/css-sources.ts',
   'modules/render/initial-state-global.ts',
   'modules/render/read-initial-state.ts',
   // Head resolution and the registries that deliberately hold components as `unknown`.
@@ -63,6 +64,8 @@ const AGNOSTIC_ENTRY_POINTS = [
   'modules/validation/validate-document.ts',
   'modules/validation/validate-html.ts',
   'modules/i18n/load-messages.ts',
+  'modules/i18n/messages-registry.ts',
+  'modules/i18n/messages-types.ts',
   'modules/middleware/mod.ts',
   'modules/assets/assets-manifest.ts',
   // Client-side runtime shared by both barrels (`mod.ts` and `mod-preact.ts` re-export all of it).

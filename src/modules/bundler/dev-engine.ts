@@ -26,6 +26,7 @@ import { formatServerOnlyViolation, SERVER_ONLY_DIRECTIVE } from './server-only-
 // file's own real value imports (`vite`, `@deno/vite-plugin`) just to reference it. See
 // `dev-engine-types.ts`'s own doc for the full reasoning.
 import type { SsrModuleChangedEvent } from './dev-engine-types.ts'
+import { materializeCssSources } from 'modules/render/css-sources.ts'
 export type { SsrModuleChangedEvent }
 
 /** Options for {@linkcode createSpaceDevEngine}. */
@@ -448,6 +449,8 @@ function ssrHotUpdatePlugin(options: SpaceDevEngineOptions): Plugin {
 export async function createSpaceDevEngine(
   options: SpaceDevEngineOptions,
 ): Promise<SpaceDevEngine> {
+  // The declared `cssSources` must be files before the first response links the global stylesheets.
+  await materializeCssSources(options.root)
   const server: ViteDevServer = await createServer({
     root: options.root,
     configFile: false,

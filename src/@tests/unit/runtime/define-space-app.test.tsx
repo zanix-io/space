@@ -23,7 +23,13 @@ import {
   resetAssetsDirConfig,
   resetResolvedAssets,
 } from 'modules/assets/asset-registry.ts'
-import { getMessagesDir, resetMessagesDir } from 'modules/i18n/messages-registry.ts'
+import {
+  getMessagesDir,
+  getMessageSources,
+  resetMessagesDir,
+  resetMessageSources,
+} from 'modules/i18n/messages-registry.ts'
+import { getCssSources, resetCssSources } from 'modules/render/css-sources.ts'
 import {
   getDevRoutesReloader,
   setDevImportModule,
@@ -425,6 +431,47 @@ Deno.test(
     }
   },
 )
+
+Deno.test('defineSpaceApp: forwards messageSources into the registry, eagerly, in order', () => {
+  resetMessageSources()
+  try {
+    const first = () => ({ 'a': 'a' })
+    const second = () => undefined
+    defineSpaceApp({ name: 'storefront-message-sources-unit', messageSources: [first, second] })
+    assertEquals(getMessageSources(), [first, second])
+  } finally {
+    resetMessageSources()
+  }
+})
+
+Deno.test('defineSpaceApp: omitting messageSources leaves the registry empty', () => {
+  resetMessageSources()
+  defineSpaceApp({ name: 'storefront-no-message-sources' })
+  assertEquals(getMessageSources(), [])
+})
+
+Deno.test('defineSpaceApp: forwards cssSources into the registry, adding to what is declared', () => {
+  resetCssSources()
+  try {
+    defineSpaceApp({
+      name: 'storefront-css-sources-unit',
+      cssSources: [{ name: 'iam', css: '.a {}' }],
+    })
+    defineSpaceApp({
+      name: 'storefront-css-sources-host-unit',
+      cssSources: [{ name: 'host', css: '.h {}' }],
+    })
+    assertEquals(getCssSources().map((source) => source.name), ['iam', 'host'])
+  } finally {
+    resetCssSources()
+  }
+})
+
+Deno.test('defineSpaceApp: omitting cssSources leaves the registry empty', () => {
+  resetCssSources()
+  defineSpaceApp({ name: 'storefront-no-css-sources' })
+  assertEquals(getCssSources(), [])
+})
 
 Deno.test(
   'defineSpaceApp: messagesDir is still readable after setup() runs too — eager storage does not ' +

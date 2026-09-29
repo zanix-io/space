@@ -11,6 +11,7 @@ import {
 } from './dynamic-import-interop.ts'
 import { canonicalBareSpecifierResolvePlugin } from './bare-specifier-resolve.ts'
 import { nativeRuntimeModulesPlugin } from './native-runtime-modules.ts'
+import { danglingSourcemapPlugin } from './dangling-sourcemap-plugin.ts'
 import { USE_COMET_DIRECTIVE } from './comet-directive.ts'
 import { formatServerOnlyViolation, SERVER_ONLY_DIRECTIVE } from './server-only-directive.ts'
 
@@ -591,6 +592,9 @@ export async function createSpaceDevEngine(
     // `import(specifier)` (a variable, never a string literal) that Vite's own transform leaves
     // untouched, bypassing `noExternal`/CJS interop/every other fix here entirely.
     //
+    // `danglingSourcemapPlugin()` only silences Vite's own `Failed to load source map` warning for a
+    // dependency that ships a `sourceMappingURL` comment without its map file.
+    //
     // All five fix real, confirmed `zanix space dev` blockers — see `native-runtime-modules.ts`'s,
     // `ssr-module-evaluator.ts`'s, `bare-specifier-resolve.ts`'s, `cjs-interop.ts`'s, and
     // `dynamic-import-interop.ts`'s own docs. `nativeRuntimeModulesPlugin()`/
@@ -601,6 +605,7 @@ export async function createSpaceDevEngine(
     plugins: [
       nativeRuntimeModulesPlugin(),
       canonicalBareSpecifierResolvePlugin(),
+      danglingSourcemapPlugin(),
       cjsInteropFallbackPlugin(),
       dynamicImportInteropFallbackPlugin(),
       deno({

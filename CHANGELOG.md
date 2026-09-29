@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.16.3] - 2026-09-28
+
+### Fixed
+
+- **`zanix space dev` logged `Failed to load source map` for a dependency that ships a
+  `sourceMappingURL` comment without its map file.** Vite follows that comment when it reads a
+  module from disk, and a missing map file made the read throw `ENOENT`, which Vite logged as a
+  warning on every cold load of the module (`@mediapipe/tasks-vision` is one such package). The
+  module always loaded correctly. The dev engine now removes a `sourceMappingURL` comment from a
+  script under `node_modules` when it points to a relative file that does not exist. A map that
+  exists, an inline `data:` map and a project file with a broken map are unchanged, so the last one
+  still warns.
+
 ## [1.16.2] - 2026-09-21
 
 ### Fixed

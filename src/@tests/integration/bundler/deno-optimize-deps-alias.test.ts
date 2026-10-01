@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertFalse } from '@std/assert'
-import { join } from '@std/path'
+import { fromFileUrl, join } from '@std/path'
 import { createServer } from 'vite'
 import deno from '@deno/vite-plugin'
 import { getTemporaryFolder } from '@zanix/helpers'
@@ -640,6 +640,67 @@ Deno.test(
           result?.code.includes('/.vite/deps/ms.js'),
           `expected ms to resolve via this project's own local deno.json, got: ${result?.code}`,
         )
+      })
+    } finally {
+      await removeTempDirWithRetry(root)
+    }
+  },
+)
+
+Deno.test(
+  "denoOptimizeDepsAliasPlugin: an include entry the project does not declare is aliased to @zanix/space's own npm package, as an ESM file",
+  async () => {
+    const root = await Deno.makeTempDir({ dir: TMP_ROOT })
+    try {
+      await Deno.writeTextFile(join(root, 'deno.json'), JSON.stringify({ imports: {} }))
+      await withDevServer(root, (server) => {
+        const aliases = server.config.resolve.alias as Array<{ find: unknown; replacement: string }>
+        for (
+          const [specifier, npm] of [
+            ['@prefresh/core', 'npm:@prefresh/core@^1.5.10'],
+            ['@prefresh/utils', 'npm:@prefresh/utils@^1.2.1'],
+          ]
+        ) {
+          const entry = aliases.find((alias) =>
+            String(alias.find) === `/^${specifier.replace('/', '\\/')}$/`
+          )
+          assert(entry, `expected an alias for ${specifier}`)
+          assertEquals(entry.replacement, fromFileUrl(import.meta.resolve(npm)))
+          assert(entry.replacement.endsWith('/src/index.js'), entry.replacement)
+        }
+        return Promise.resolve()
+      }, { optimizeDepsInclude: ['@prefresh/core', '@prefresh/utils'] })
+    } finally {
+      await removeTempDirWithRetry(root)
+    }
+  },
+)
+
+Deno.test(
+  'denoOptimizeDepsAliasPlugin: aliases for Comet-discovered specifiers come out sorted, whatever order the Comets are read in',
+  async () => {
+    const root = await Deno.makeTempDir({ dir: TMP_ROOT })
+    try {
+      await Deno.writeTextFile(
+        join(root, 'deno.json'),
+        JSON.stringify({ imports: { 'zeta-pkg': './zeta.ts', 'alpha-pkg': './alpha.ts' } }),
+      )
+      await Deno.writeTextFile(join(root, 'zeta.ts'), 'export const zeta = 1\n')
+      await Deno.writeTextFile(join(root, 'alpha.ts'), 'export const alpha = 1\n')
+      await Deno.writeTextFile(
+        join(root, 'a.tsx'),
+        `'use comet'\nimport { zeta } from 'zeta-pkg'\nexport default function A() { return zeta }\n`,
+      )
+      await Deno.writeTextFile(
+        join(root, 'b.tsx'),
+        `'use comet'\nimport { alpha } from 'alpha-pkg'\nexport default function B() { return alpha }\n`,
+      )
+      await withDevServer(root, (server) => {
+        const finds = (server.config.resolve.alias as Array<{ find: unknown }>)
+          .map((alias) => String(alias.find))
+          .filter((find) => find.includes('-pkg'))
+        assertEquals([...new Set(finds)], ['/^alpha-pkg$/', '/^zeta-pkg$/'])
+        return Promise.resolve()
       })
     } finally {
       await removeTempDirWithRetry(root)

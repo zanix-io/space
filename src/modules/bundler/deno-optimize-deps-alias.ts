@@ -5,6 +5,7 @@ import type { Loader } from '@deno/loader'
 import { resolveDeno } from '@deno/vite-plugin/resolver'
 import { discoverComets } from './discover-comets.ts'
 import { getBrowserLoader, resolveDenoAt } from './deno-specifier-resolver.ts'
+import { resolveSpaceOwnNpmFile } from './deno-loader.ts'
 import { getClientEntry, resolveClientEntryFilePath } from '../render/client-entry.ts'
 
 // `Plugin`/`ResolvedConfig` are intentionally NOT re-exported — same accepted, structural
@@ -162,7 +163,10 @@ async function discoverBareSpecifiersFromEntryFiles(
   await Promise.all(
     entryFiles.map((file) => collectBareSpecifiersFromFile(file, visited, bareSpecifiers)),
   )
-  return [...bareSpecifiers]
+  // Sorted: insertion order follows whichever concurrent read finishes first, and the alias list
+  // built from it is part of Vite's `optimizeDeps` config hash, so an unstable order re-optimizes
+  // every dependency on every start.
+  return [...bareSpecifiers].sort()
 }
 
 /** An exact-match-only regex for `specifier` — never a plain string. Rollup's own alias matching
@@ -358,8 +362,19 @@ export function denoOptimizeDepsAliasPlugin(): Plugin {
           // (`https://...` is not a filesystem path). Left alone, same as an unresolvable
           // specifier — it already works through `@deno/vite-plugin`'s own transform path, which is
           // the only thing this plugin exists to route AROUND for genuinely local npm packages.
-          return result?.kind === 'esm' && !/^https?:\/\//.test(result.id)
-            ? { specifier, find: exactSpecifierRegex(specifier), replacement: result.id }
+          if (result?.kind === 'esm' && !/^https?:\/\//.test(result.id)) {
+            return { specifier, find: exactSpecifierRegex(specifier), replacement: result.id }
+          }
+          // An `include` entry the project does not declare (`@prefresh/core`/`@prefresh/utils`,
+          // added by `space-plugin.ts` for the preact renderer) resolves to the file the process
+          // loads it from, when `@zanix/space`'s own manifest declares it. Without an alias, Vite's
+          // `include` resolver looks for it in the project's top-level `node_modules`, where Deno
+          // never hoists a transitive dependency (`Failed to resolve dependency`).
+          const ownFile = alreadyIncluded.has(specifier)
+            ? await resolveSpaceOwnNpmFile(specifier)
+            : null
+          return ownFile
+            ? { specifier, find: exactSpecifierRegex(specifier), replacement: ownFile }
             : null
         }),
       )
@@ -408,7 +423,10 @@ export function denoOptimizeDepsAliasPlugin(): Plugin {
 
       const aliasEntries = [
         ...locallyResolvedEntries.map(({ find, replacement }) => ({ find, replacement })),
-        ...[...nestedAliases].map(([specifier, id]) => ({
+        // Sorted for the same config-hash stability as `discoverBareSpecifiersFromEntryFiles`.
+        ...[...nestedAliases].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map((
+          [specifier, id],
+        ) => ({
           find: exactSpecifierRegex(specifier),
           replacement: id,
         })),

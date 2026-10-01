@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.16.4] - 2026-09-30
+
+### Fixed
+
+- **`zanix space dev` re-optimized every dependency on most starts.** `denoOptimizeDepsAliasPlugin`
+  collects the bare specifiers of Comets with concurrent reads, so the order of the `resolve.alias`
+  entries it adds followed whichever read finished first. Vite hashes that list into its
+  `optimizeDeps` config hash, so an unchanged project logged
+  `Re-optimizing dependencies because
+  vite config has changed` and rebuilt `.vite/deps` whenever
+  the order flipped. The discovered specifiers and the nested aliases are now sorted.
+
+- **`zanix space dev` warned `Failed to resolve dependency: @prefresh/core` (and `@prefresh/utils`),
+  present in client `optimizeDeps.include`, for a `renderer: 'preact'` app.** `spacePlugin()` adds
+  both to the client `include`, but a project never declares them, and Deno never hoists them to the
+  project's top-level `node_modules`, where Vite's `include` resolver looks. Both were left out of
+  pre-bundling. An `include` entry the project cannot resolve now gets an alias to the file the
+  process loads for the `npm:` package `@zanix/space`'s own manifest maps it to, the same file
+  `@prefresh/vite` imports.
+
 ## [1.16.3] - 2026-09-28
 
 ### Fixed

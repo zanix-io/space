@@ -1,7 +1,8 @@
 import { assert, assertEquals } from '@std/assert'
 import { ResolutionMode } from '@deno/loader'
 import { fileURLToPath } from 'node:url'
-import { getSpaceOwnLoader } from 'modules/bundler/deno-loader.ts'
+import { fromFileUrl } from '@std/path'
+import { getSpaceOwnLoader, resolveSpaceOwnNpmFile } from 'modules/bundler/deno-loader.ts'
 
 Deno.test(
   "getSpaceOwnLoader: resolves preact — a real npm-only dependency @zanix/space's own deno.jsonc " +
@@ -64,5 +65,23 @@ Deno.test(
       threw = true
     }
     assert(threw, 'expected an unrelated, undeclared specifier to still fail to resolve')
+  },
+)
+
+Deno.test(
+  "resolveSpaceOwnNpmFile: resolves an npm package @zanix/space's own manifest declares to the process's ESM file",
+  async () => {
+    assertEquals(
+      await resolveSpaceOwnNpmFile('@prefresh/utils'),
+      fromFileUrl(import.meta.resolve('npm:@prefresh/utils@^1.2.1')),
+    )
+  },
+)
+
+Deno.test(
+  'resolveSpaceOwnNpmFile: null for a specifier the manifest does not declare, or maps to no npm package',
+  async () => {
+    assertEquals(await resolveSpaceOwnNpmFile('definitely-not-a-real-package-xyz-123'), null)
+    assertEquals(await resolveSpaceOwnNpmFile('@std/path'), null)
   },
 )

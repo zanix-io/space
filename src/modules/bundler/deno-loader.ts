@@ -1,4 +1,4 @@
-import { dirname, join, resolve as resolvePath } from '@std/path'
+import { dirname, fromFileUrl, join, resolve as resolvePath } from '@std/path'
 import { type Loader, Workspace } from '@deno/loader'
 import { parse as parseJsonc } from '@std/jsonc'
 
@@ -135,4 +135,34 @@ export function getSpaceOwnLoader(): Promise<Loader> {
     })()
   }
   return spaceOwnLoaderPromise
+}
+
+/**
+ * The file the running process loads for `specifier` when `@zanix/space`'s own `deno.jsonc` maps it
+ * to an `npm:` package (`@prefresh/core` → `npm:@prefresh/core@^1.5.10`), or `null` when it maps
+ * no such entry, or the package resolves to no file on disk.
+ *
+ * {@linkcode getSpaceOwnLoader} resolves the same specifiers, but into a `node_modules` next to its
+ * own temporary config: a different physical copy than the process's `node_modules`, which is where
+ * Vite plugins such as `@prefresh/vite` load the package from. `import.meta.resolve` of the `npm:`
+ * specifier answers from the process's own resolution instead, with ESM conditions, so the result
+ * is the exact file those plugins import (`@prefresh/utils` → `src/index.js`, never its CommonJS
+ * `dist/` entry).
+ */
+let spaceOwnImportsPromise: Promise<Record<string, string>> | undefined
+export async function resolveSpaceOwnNpmFile(specifier: string): Promise<string | null> {
+  spaceOwnImportsPromise ??= (async () => {
+    const content = await (await fetch(new URL('../../../deno.jsonc', import.meta.url))).text()
+    return (parseJsonc(content) as { imports?: Record<string, string> }).imports ?? {}
+  })().catch(() => ({}))
+  const target = (await spaceOwnImportsPromise)[specifier]
+  if (!target?.startsWith('npm:')) return null
+  try {
+    const resolved = import.meta.resolve(target)
+    if (!resolved.startsWith('file://')) return null
+    const path = fromFileUrl(resolved)
+    return (await Deno.stat(path)).isFile ? path : null
+  } catch {
+    return null
+  }
 }

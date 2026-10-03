@@ -18,7 +18,7 @@ on:
 jobs:
   renderer:
     name: Renderer benchmarks (React vs Preact SSR)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: read
@@ -99,7 +99,7 @@ jobs:
     # exactly that, and a future trigger added above is included by default rather than silently
     # skipped (which is what an `== 'workflow_dispatch'` check did to this very schedule).
     if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: read

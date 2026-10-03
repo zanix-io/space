@@ -3,20 +3,18 @@
 name: CI
 
 on:
-  # Run on push or PRs to main branch
+  # Run on push or PRs to main branch. `publish.yml` starts from this workflow's own completed run
+  # on `master` (`workflow_run`), so a push runs these checks once and publish waits for them.
   pull_request:
     branches:
       - master
   push:
     branches:
       - master
-  # Also invocable as a reusable workflow (`uses: ./.github/workflows/ci.yml`) — `publish.yml`'s
-  # own `ci` job calls into this exact workflow instead of duplicating its steps.
-  workflow_call:
 
 jobs:
   ci:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read # Allows reading of the repository's contents.
 
@@ -56,7 +54,7 @@ jobs:
 
       # Required by the audio/video functional suite (`voice-upload-s3.test.ts`,
       # `video-upload-s3.test.ts`, `system-ffmpeg-transcoder.calibration.test.ts`, and every other
-      # `probeFfmpegAvailability`-gated test) — confirmed NOT part of the `ubuntu-latest` runner's
+      # `probeFfmpegAvailability`-gated test) — confirmed NOT part of the `ubuntu-24.04` runner's
       # own default image, so without this step those tests stay permanently `ignore`d here too,
       # same as the S3 gap above.
       #

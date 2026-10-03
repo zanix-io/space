@@ -1,6 +1,5 @@
 import { CSRF_FORM_FIELD } from '../middleware/csrf-form-field.ts'
 import {
-  clearFromStorage,
   DEFAULT_DRAFT_DEBOUNCE_MS,
   type DraftStorageKind,
   namespacedStorageKey,
@@ -8,6 +7,8 @@ import {
   resolveStorageBackend,
   writeToStorage,
 } from './draft-storage.ts'
+import { recoverSubmittedDraft, settleDraftOnSubmit } from './draft-lifecycle.ts'
+import { reportDraftValueRestored } from './draft-restoring.ts'
 
 export { DEFAULT_DRAFT_DEBOUNCE_MS }
 export type { DraftStorageKind }
@@ -51,8 +52,18 @@ export type FormDraftPersistenceOptions = {
    * Once set, `submit` stores a snapshot of the form beside the draft instead of dropping it.
    * The next attach restores that snapshot only when this is `true`, and always discards it
    * afterwards, so a later fresh visit never resurrects an already-sent form. `hasServerValues`
-   * wins when both are set. */
+   * wins when both are set.
+   *
+   * While a render that is `true` here and has no `hasServerValues` restores, the form's Comet
+   * renders a hidden `<span data-draft-restoring="{formId}">` marker, server-side, and removes it
+   * once the draft is back, for a stylesheet to show a skeleton until then. */
   returnedFromFailure?: boolean
+  /** The `storageKey` of every controlled value (a `restoreDraftValue` call given this form's
+   * `formId`) that belongs to this form. While a render that follows a failed submit restores, the
+   * `data-draft-restoring` marker (see {@linkcode FormDraftPersistenceOptions.returnedFromFailure})
+   * stays until each of these has restored, or until a short timeout passes, so a controlled value
+   * that never hydrates cannot hold the form back. Omit when the form has no controlled value. */
+  awaitValues?: string[]
   /** Field `name`s this primitive must never read or write at all — for a field owned by a
    * DIFFERENT persistence unit entirely (typically a `persistDraftValue`-backed controlled field
    * elsewhere on the same form). Omit when there is no such field. */
@@ -109,12 +120,11 @@ function eachPersistableField(
   }
 }
 
-function saveForm(
+/** Every persistable field of `form` and its current value, by `name`. */
+function snapshotForm(
   form: HTMLFormElement,
-  backend: Storage,
-  key: string,
   excludeFields: readonly string[],
-): void {
+): Record<string, string> {
   const draft: Record<string, string> = {}
   const excludedNames = new Set<string>()
   for (const el of Array.from(form.elements)) {
@@ -126,10 +136,8 @@ function saveForm(
     if (typeof value !== 'string' || excludedNames.has(name)) continue
     draft[name] = value
   }
-  writeToStorage(backend, key, draft)
+  return draft
 }
-
-const PENDING_SUFFIX = ':submitted'
 
 /** The real, bubbling DOM event a React/Preact-controlled field's own `onChange`/`onInput` handler
  * actually listens for — `checkbox`/`radio`/`<select>` map to `change` in both renderers; every
@@ -180,9 +188,9 @@ function restoreForm(
  * (React/Preact, see `@zanix/space/comet/react` and `@zanix/space/comet/preact`) calls into.
  * Restores a saved draft on attach (unless `hasServerValues`), saves on every `input`/`change`
  * (debounced), clears on `submit` (see {@linkcode FormDraftPersistenceOptions.returnedFromFailure}
- * to keep a submitted form recoverable after a failed submit). Reads/writes the whole form generically via `form.elements` —
- * covering a new field added later with zero per-field wiring — rather than a hand-maintained
- * field list.
+ * to keep a submitted form recoverable after a failed submit). Reads/writes the whole form
+ * generically via `form.elements` — covering a new field added later with zero per-field wiring —
+ * rather than a hand-maintained field list.
  *
  * Always excludes `_csrf`, `type="password"`, and `type="file"` fields, plus any field marked
  * `data-no-persist` on its own markup — none of these are configurable. See
@@ -208,25 +216,20 @@ export function attachFormDraftPersistence(options: FormDraftPersistenceOptions)
   if (!(form instanceof HTMLFormElement) || !backend) return () => {}
 
   const key = namespacedStorageKey(storageKey)
-  const submittedKey = key + PENDING_SUFFIX
-  const submittedSnapshot = readFromStorage(backend, submittedKey)
-  clearFromStorage(backend, submittedKey)
-  if (!hasServerValues) {
-    if (returnedFromFailure && submittedSnapshot) {
-      writeToStorage(backend, key, submittedSnapshot)
-    }
-    restoreForm(form, backend, key, excludeFields)
-  }
+  recoverSubmittedDraft(backend, key, { hasServerValues, returnedFromFailure })
+  if (!hasServerValues) restoreForm(form, backend, key, excludeFields)
 
   let timer: ReturnType<typeof setTimeout> | undefined
   const handleChange = () => {
     if (timer !== undefined) clearTimeout(timer)
-    timer = setTimeout(() => saveForm(form, backend, key, excludeFields), debounceMs)
+    timer = setTimeout(
+      () => writeToStorage(backend, key, snapshotForm(form, excludeFields)),
+      debounceMs,
+    )
   }
   const handleSubmit = () => {
     if (timer !== undefined) clearTimeout(timer)
-    if (returnedFromFailure !== undefined) saveForm(form, backend, submittedKey, excludeFields)
-    clearFromStorage(backend, key)
+    settleDraftOnSubmit(backend, key, returnedFromFailure, () => snapshotForm(form, excludeFields))
   }
 
   form.addEventListener('input', handleChange)
@@ -248,6 +251,20 @@ export type DraftValueOptions = {
   storageKey: string
   /** `'session'` (default) or `'local'`. See {@linkcode DraftStorageKind}. */
   storage?: DraftStorageKind
+  /** The real `id` of the `<form>` this value belongs to. Giving it gives the value the same
+   * lifecycle a form's own fields have under {@linkcode attachFormDraftPersistence}: submitting
+   * the form clears the saved value, and {@linkcode DraftValueOptions.returnedFromFailure} keeps it
+   * recoverable after a failed submit. It also reports the value as restored to the form's own
+   * comet (see {@linkcode FormDraftPersistenceOptions.awaitValues}). Omit it for a value that
+   * should outlive a submit, which is what a value without a form does. */
+  formId?: string
+  /** With `formId`: opts the value into recovering from a failed submit, exactly as
+   * {@linkcode FormDraftPersistenceOptions.returnedFromFailure} does for a form's fields. Pass the
+   * same value to every call of the form: `true` when the render follows a failed submit, `false`
+   * on every other render. Submitting keeps a snapshot of the value, which the next
+   * {@linkcode restoreDraftValue} restores only when this is `true`, and always discards after.
+   * Ignored without `formId`. */
+  returnedFromFailure?: boolean
 }
 
 /**
@@ -260,17 +277,26 @@ export type DraftValueOptions = {
  * keystroke: `useEffect(() => restoreDraftValue(setValue, { storageKey, hasServerValues }), [storageKey, hasServerValues])`.
  * See {@linkcode persistDraftValue} for the paired write side, kept as a separate primitive on
  * purpose — see that function's own doc for why.
+ *
+ * With {@linkcode DraftValueOptions.formId} it also takes the snapshot a failed submit of that form
+ * left behind: restored when `returnedFromFailure` is `true`, discarded either way. A value saved
+ * without having been submitted (the visitor left the page and came back) restores as usual.
  */
 export function restoreDraftValue<T>(
   onRestore: (restored: T) => void,
   options: DraftValueOptions & { hasServerValues: boolean },
 ): void {
-  if (options.hasServerValues) return
+  const { hasServerValues, formId, returnedFromFailure, storageKey } = options
   const backend = resolveStorageBackend(options.storage)
-  if (!backend) return
-  const raw = readFromStorage(backend, namespacedStorageKey(options.storageKey))
-  if (raw === undefined) return
-  onRestore(raw as T)
+  if (backend) {
+    const key = namespacedStorageKey(storageKey)
+    if (formId !== undefined) {
+      recoverSubmittedDraft(backend, key, { hasServerValues, returnedFromFailure })
+    }
+    const raw = readFromStorage(backend, key)
+    if (!hasServerValues && raw !== undefined) onRestore(raw as T)
+  }
+  if (formId !== undefined) reportDraftValueRestored(formId, storageKey)
 }
 
 /**
@@ -286,8 +312,12 @@ export function restoreDraftValue<T>(
  * at all, which would restore on every keystroke too, racing a stale saved value back over
  * whatever was just typed.
  *
- * @returns A cleanup function — clears the pending debounced write. Same contract as
- * {@linkcode attachFormDraftPersistence}: `useEffect(() => persistDraftValue(value, { storageKey }), [value, storageKey])`.
+ * With {@linkcode DraftValueOptions.formId} the value follows the form's own lifecycle: submitting
+ * the form cancels any pending write, clears the saved value, and (when `returnedFromFailure` is
+ * set) keeps the value as it stood at the submit for {@linkcode restoreDraftValue} to recover.
+ *
+ * @returns A cleanup function — clears the pending debounced write and detaches the form listener.
+ * Same contract as {@linkcode attachFormDraftPersistence}: `useEffect(() => persistDraftValue(value, { storageKey }), [value, storageKey])`.
  */
 export function persistDraftValue<T>(
   value: T,
@@ -299,5 +329,18 @@ export function persistDraftValue<T>(
   const key = namespacedStorageKey(options.storageKey)
   const debounceMs = options.debounceMs ?? DEFAULT_DRAFT_DEBOUNCE_MS
   const timer = setTimeout(() => writeToStorage(backend, key, value), debounceMs)
-  return () => clearTimeout(timer)
+
+  const form = options.formId === undefined
+    ? undefined
+    : globalThis.document?.getElementById(options.formId)
+  const handleSubmit = () => {
+    clearTimeout(timer)
+    settleDraftOnSubmit(backend, key, options.returnedFromFailure, () => value)
+  }
+  form?.addEventListener('submit', handleSubmit)
+
+  return () => {
+    clearTimeout(timer)
+    form?.removeEventListener('submit', handleSubmit)
+  }
 }

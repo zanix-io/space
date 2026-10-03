@@ -1,7 +1,9 @@
 'use comet'
-import { useEffect } from 'react'
+import { createElement, useEffect, useState } from 'react'
+import type { ReactElement } from 'react'
 import { defineComet } from './define-comet.ts'
 import { attachFormDraftPersistence } from './form-draft-persistence.ts'
+import { startsRestoring, watchDraftRestoring } from './draft-restoring.ts'
 import type { FormDraftPersistenceOptions } from './form-draft-persistence.ts'
 import type { CometBoundaryComponent, CometProps } from 'typings/comet.ts'
 
@@ -9,8 +11,11 @@ import type { CometBoundaryComponent, CometProps } from 'typings/comet.ts'
  * Ready-made Comet wiring {@linkcode attachFormDraftPersistence} into React's own `useEffect` —
  * the default a consumer app reaches for unless it needs to compose the hook-free primitive
  * itself (e.g. alongside a React-controlled sub-widget, see `restoreDraftValue`/
- * `persistDraftValue`). Renders nothing; every `FormDraftPersistenceOptions` field is a plain
- * JSON-serializable value, so it crosses the Comet boundary as ordinary props like any other.
+ * `persistDraftValue`). Renders nothing, except a hidden `<span data-draft-restoring="{formId}">`
+ * marker while a render that follows a failed submit (`returnedFromFailure`) restores, so a
+ * stylesheet can hold the form back (a skeleton, say) until its draft is back, and only then. Every
+ * `FormDraftPersistenceOptions` field is a plain JSON-serializable value, so it crosses the Comet
+ * boundary as ordinary props like any other.
  *
  * ```tsx
  * import { FormDraftPersistence } from '@zanix/space/comet/react'
@@ -21,18 +26,40 @@ import type { CometBoundaryComponent, CometProps } from 'typings/comet.ts'
  *   hasServerValues={ctx.submitted !== undefined}
  * />
  * ```
+ *
+ * The marker is server-rendered, so it is in the first paint, and it goes away once the draft is
+ * restored (and, with `awaitValues`, once each controlled value has restored too):
+ *
+ * ```css
+ * :root:has([data-draft-restoring='new-trigger']) #new-trigger {
+ *   opacity: 0.4;
+ *   pointer-events: none;
+ * }
+ * ```
  */
-export function FormDraftPersistence(props: FormDraftPersistenceOptions): null {
-  useEffect(() => attachFormDraftPersistence(props), [
+export function FormDraftPersistence(props: FormDraftPersistenceOptions): ReactElement | null {
+  const [restoring, setRestoring] = useState(startsRestoring(props))
+  useEffect(() => {
+    const detach = attachFormDraftPersistence(props)
+    setRestoring(startsRestoring(props))
+    const unwatch = watchDraftRestoring(props.formId, props, () => setRestoring(false))
+    return () => {
+      unwatch()
+      detach()
+    }
+  }, [
     props.formId,
     props.storageKey,
     props.hasServerValues,
     props.returnedFromFailure,
+    props.awaitValues,
     props.excludeFields,
     props.storage,
     props.debounceMs,
   ])
-  return null
+  return restoring
+    ? createElement('span', { hidden: true, 'data-draft-restoring': props.formId })
+    : null
 }
 
 /**

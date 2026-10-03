@@ -35,6 +35,9 @@ export type {
   DraftValueOptions,
   FormDraftPersistenceOptions,
 } from './form-draft-persistence.ts'
+export { DraftProbe } from './draft-probe-element.ts'
+export type { DraftProbeProps } from './draft-probe-element.ts'
+export type { SpaceChildren, SpaceComponent, SpaceElement } from 'typings/renderable.ts'
 export { attachSubmitGuard } from './submit-guard.ts'
 export type { SubmitGuardOptions } from './submit-guard.ts'
 export { attachSubmitIntercept } from './submit-intercept.ts'

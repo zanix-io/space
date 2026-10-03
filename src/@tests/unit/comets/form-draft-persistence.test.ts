@@ -625,3 +625,305 @@ Deno.test(
     timers.restore()
   },
 )
+
+// -- A controlled value that belongs to a form (`formId`) follows the form's own lifecycle ----------
+
+const VALUE_KEY = 'zn-space:picked'
+const SUBMITTED_VALUE_KEY = `${VALUE_KEY}:submitted`
+
+function readValue(key: string): unknown {
+  const raw = globals.sessionStorage.getItem(key)
+  return raw === null ? undefined : JSON.parse(raw)
+}
+
+Deno.test(
+  'persistDraftValue: without a formId a submit never touches the saved value',
+  () => {
+    setUp()
+    const timers = installTimerMock()
+    const form = buildForm('cv-none', [{ name: 'title', value: '' }])
+    const stop = persistDraftValue('kept', { storageKey: 'picked' })
+    timers.advance(DEFAULT_DRAFT_DEBOUNCE_MS)
+
+    fireSubmit(form)
+
+    assertEquals(readValue(VALUE_KEY), 'kept')
+    assertEquals(readValue(SUBMITTED_VALUE_KEY), undefined)
+    stop()
+    timers.restore()
+  },
+)
+
+Deno.test(
+  'persistDraftValue: with a formId a submit clears the saved value and cancels the pending write',
+  () => {
+    setUp()
+    const timers = installTimerMock()
+    const form = buildForm('cv-clear', [{ name: 'title', value: '' }])
+    const stop = persistDraftValue('typed', { storageKey: 'picked', formId: 'cv-clear' })
+    timers.advance(DEFAULT_DRAFT_DEBOUNCE_MS)
+    assertEquals(readValue(VALUE_KEY), 'typed')
+
+    fireSubmit(form)
+    timers.advance(DEFAULT_DRAFT_DEBOUNCE_MS)
+
+    assertEquals(readValue(VALUE_KEY), undefined)
+    assertEquals(readValue(SUBMITTED_VALUE_KEY), undefined)
+    stop()
+    timers.restore()
+  },
+)
+
+Deno.test(
+  'persistDraftValue: with returnedFromFailure set, a submit keeps the value as it stood, even one not yet written',
+  () => {
+    setUp()
+    const timers = installTimerMock()
+    const form = buildForm('cv-keep', [{ name: 'title', value: '' }])
+    const stop = persistDraftValue('latest', {
+      storageKey: 'picked',
+      formId: 'cv-keep',
+      returnedFromFailure: false,
+    })
+
+    // The debounce has not fired: the submit itself carries the value.
+    fireSubmit(form)
+
+    assertEquals(readValue(VALUE_KEY), undefined)
+    assertEquals(readValue(SUBMITTED_VALUE_KEY), 'latest')
+    stop()
+    timers.restore()
+  },
+)
+
+Deno.test(
+  'restoreDraftValue: returnedFromFailure=true restores the value submitted just before, once',
+  () => {
+    setUp()
+    const timers = installTimerMock()
+    const form = buildForm('cv-failed', [{ name: 'title', value: '' }])
+    persistDraftValue({ id: 'p1' }, {
+      storageKey: 'picked',
+      formId: 'cv-failed',
+      returnedFromFailure: false,
+    })
+    fireSubmit(form)
+    const restored: unknown[] = []
+    const options = { storageKey: 'picked', formId: 'cv-failed', hasServerValues: false }
+
+    restoreDraftValue((value) => restored.push(value), { ...options, returnedFromFailure: true })
+    // What was restored is the live draft now, like any other: dropping it leaves nothing for a
+    // second failure render to restore, because the snapshot itself is gone.
+    globals.sessionStorage.removeItem(VALUE_KEY)
+    restoreDraftValue((value) => restored.push(value), { ...options, returnedFromFailure: true })
+
+    assertEquals(restored, [{ id: 'p1' }])
+    timers.restore()
+  },
+)
+
+Deno.test(
+  'restoreDraftValue: returnedFromFailure=false discards the submitted value, a later visit stays empty',
+  () => {
+    setUp()
+    const timers = installTimerMock()
+    const form = buildForm('cv-clean', [{ name: 'title', value: '' }])
+    persistDraftValue('sent', {
+      storageKey: 'picked',
+      formId: 'cv-clean',
+      returnedFromFailure: false,
+    })
+    fireSubmit(form)
+    const restored: unknown[] = []
+    const options = { storageKey: 'picked', formId: 'cv-clean', hasServerValues: false }
+
+    restoreDraftValue((value) => restored.push(value), { ...options, returnedFromFailure: false })
+    restoreDraftValue((value) => restored.push(value), { ...options, returnedFromFailure: true })
+
+    assertEquals(restored, [])
+    assertEquals(readValue(SUBMITTED_VALUE_KEY), undefined)
+    timers.restore()
+  },
+)
+
+Deno.test(
+  'restoreDraftValue: a value saved but never submitted restores when the visitor comes back',
+  () => {
+    setUp()
+    const timers = installTimerMock()
+    buildForm('cv-back', [{ name: 'title', value: '' }])
+    persistDraftValue('half-done', { storageKey: 'picked', formId: 'cv-back' })
+    timers.advance(DEFAULT_DRAFT_DEBOUNCE_MS)
+    const restored: unknown[] = []
+
+    restoreDraftValue((value) => restored.push(value), {
+      storageKey: 'picked',
+      formId: 'cv-back',
+      hasServerValues: false,
+      returnedFromFailure: false,
+    })
+
+    assertEquals(restored, ['half-done'])
+    timers.restore()
+  },
+)
+
+Deno.test(
+  'restoreDraftValue: hasServerValues wins over returnedFromFailure and still discards the snapshot',
+  () => {
+    setUp()
+    const timers = installTimerMock()
+    const form = buildForm('cv-server', [{ name: 'title', value: '' }])
+    persistDraftValue('sent', {
+      storageKey: 'picked',
+      formId: 'cv-server',
+      returnedFromFailure: false,
+    })
+    fireSubmit(form)
+    const restored: unknown[] = []
+
+    restoreDraftValue((value) => restored.push(value), {
+      storageKey: 'picked',
+      formId: 'cv-server',
+      hasServerValues: true,
+      returnedFromFailure: true,
+    })
+
+    assertEquals(restored, [])
+    assertEquals(readValue(SUBMITTED_VALUE_KEY), undefined)
+    timers.restore()
+  },
+)
+
+Deno.test(
+  'restoreDraftValue: without returnedFromFailure at the submit, nothing is kept for the next render',
+  () => {
+    setUp()
+    const timers = installTimerMock()
+    const form = buildForm('cv-optout', [{ name: 'title', value: '' }])
+    persistDraftValue('sent', { storageKey: 'picked', formId: 'cv-optout' })
+    fireSubmit(form)
+    const restored: unknown[] = []
+
+    restoreDraftValue((value) => restored.push(value), {
+      storageKey: 'picked',
+      formId: 'cv-optout',
+      hasServerValues: false,
+      returnedFromFailure: true,
+    })
+
+    assertEquals(restored, [])
+    timers.restore()
+  },
+)
+
+Deno.test(
+  'restoreDraftValue: a value that is falsy is still a value to recover',
+  () => {
+    setUp()
+    const timers = installTimerMock()
+    const form = buildForm('cv-falsy', [{ name: 'title', value: '' }])
+    persistDraftValue(0, {
+      storageKey: 'picked',
+      formId: 'cv-falsy',
+      returnedFromFailure: false,
+    })
+    fireSubmit(form)
+    const restored: unknown[] = []
+
+    restoreDraftValue((value) => restored.push(value), {
+      storageKey: 'picked',
+      formId: 'cv-falsy',
+      hasServerValues: false,
+      returnedFromFailure: true,
+    })
+
+    assertEquals(restored, [0])
+    timers.restore()
+  },
+)
+
+Deno.test(
+  'persistDraftValue/restoreDraftValue: storage="local" keeps the submitted value in localStorage only',
+  () => {
+    setUp()
+    const timers = installTimerMock()
+    const form = buildForm('cv-local', [{ name: 'title', value: '' }])
+    persistDraftValue('sent', {
+      storageKey: 'picked',
+      formId: 'cv-local',
+      returnedFromFailure: false,
+      storage: 'local',
+    })
+    fireSubmit(form)
+
+    assertEquals(globals.sessionStorage.getItem(SUBMITTED_VALUE_KEY), null)
+    assertEquals(JSON.parse(globals.localStorage.getItem(SUBMITTED_VALUE_KEY)), 'sent')
+    const restored: unknown[] = []
+    restoreDraftValue((value) => restored.push(value), {
+      storageKey: 'picked',
+      formId: 'cv-local',
+      hasServerValues: false,
+      returnedFromFailure: true,
+      storage: 'local',
+    })
+    assertEquals(restored, ['sent'])
+    timers.restore()
+  },
+)
+
+Deno.test(
+  'persistDraftValue: the returned cleanup detaches the form listener',
+  () => {
+    setUp()
+    const timers = installTimerMock()
+    const form = buildForm('cv-detach', [{ name: 'title', value: '' }])
+    const stop = persistDraftValue('typed', { storageKey: 'picked', formId: 'cv-detach' })
+    timers.advance(DEFAULT_DRAFT_DEBOUNCE_MS)
+    stop()
+
+    fireSubmit(form)
+
+    // Detached: the submit no longer clears what was already saved.
+    assertEquals(readValue(VALUE_KEY), 'typed')
+    timers.restore()
+  },
+)
+
+Deno.test(
+  'persistDraftValue: a formId matching nothing on the page is a safe no-op for the form lifecycle',
+  () => {
+    setUp()
+    const timers = installTimerMock()
+    const stop = persistDraftValue('typed', { storageKey: 'picked', formId: 'no-such-form' })
+    timers.advance(DEFAULT_DRAFT_DEBOUNCE_MS)
+
+    assertEquals(readValue(VALUE_KEY), 'typed')
+    stop()
+    timers.restore()
+  },
+)
+
+Deno.test(
+  'restoreDraftValue: reports the value as restored to the form, with or without something to restore',
+  async () => {
+    setUp()
+    const { awaitDraftValues, forgetDraftValues } = await import(
+      'modules/comets/draft-restoring.ts'
+    )
+    let settled = 0
+    const stop = awaitDraftValues('cv-report', ['picked', 'other'], () => settled++)
+
+    restoreDraftValue(() => {}, {
+      storageKey: 'picked',
+      formId: 'cv-report',
+      hasServerValues: false,
+    })
+    assertEquals(settled, 0)
+    restoreDraftValue(() => {}, { storageKey: 'other', formId: 'cv-report', hasServerValues: true })
+
+    assertEquals(settled, 1)
+    stop()
+    forgetDraftValues('cv-report')
+  },
+)

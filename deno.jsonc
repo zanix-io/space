@@ -1,6 +1,6 @@
 {
   "name": "@zanix/space",
-  "version": "1.16.5",
+  "version": "1.16.6",
   "zanix": {
     "project": "library"
   },
@@ -362,7 +362,10 @@
     // two things `deno test` cannot reach today (`reuseRetainedComets`, and a real Orbit A→B→A
     // navigation on both renderers), and nothing else in the repository references it. Being a task
     // does not put it in CI or in `deno test` — see the script's own header.
-    "spike:persistence": "deno run --allow-all src/@tests/benchmarks/space/persistence/run.ts"
+    "spike:persistence": "deno run --allow-all src/@tests/benchmarks/space/persistence/run.ts",
+    // A manual real-browser check of the draft probe (`modules/comets/draft-probe.ts`), not a test and
+    // not in CI: `deno task spike:draft-probe` runs it in Google Chrome, `-- --serve` serves it.
+    "spike:draft-probe": "deno run --allow-all src/@tests/benchmarks/space/draft-probe/run.ts"
   },
   "nodeModulesDir": "auto",
   "publish": {

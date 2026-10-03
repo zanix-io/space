@@ -1,7 +1,10 @@
 'use comet'
-import { useEffect } from 'preact/hooks'
+import { createElement } from 'preact'
+import type { VNode } from 'preact'
+import { useEffect, useState } from 'preact/hooks'
 import { defineComet } from './define-comet.ts'
 import { attachFormDraftPersistence } from './form-draft-persistence.ts'
+import { startsRestoring, watchDraftRestoring } from './draft-restoring.ts'
 import type { FormDraftPersistenceOptions } from './form-draft-persistence.ts'
 import type { CometBoundaryComponent, CometProps } from 'typings/comet.ts'
 
@@ -10,17 +13,32 @@ import type { CometBoundaryComponent, CometProps } from 'typings/comet.ts'
  * {@linkcode attachFormDraftPersistence} into `preact/hooks`' own `useEffect` instead — see that
  * module's own doc for the full contract.
  */
-export function FormDraftPersistence(props: FormDraftPersistenceOptions): null {
-  useEffect(() => attachFormDraftPersistence(props), [
+export function FormDraftPersistence(props: FormDraftPersistenceOptions): VNode | null {
+  const [restoring, setRestoring] = useState(startsRestoring(props))
+  useEffect(() => {
+    const detach = attachFormDraftPersistence(props)
+    setRestoring(startsRestoring(props))
+    const unwatch = watchDraftRestoring(props.formId, props, () => setRestoring(false))
+    return () => {
+      unwatch()
+      detach()
+    }
+  }, [
     props.formId,
     props.storageKey,
     props.hasServerValues,
     props.returnedFromFailure,
+    props.awaitValues,
     props.excludeFields,
     props.storage,
     props.debounceMs,
   ])
-  return null
+  return restoring
+    ? createElement(
+      'span',
+      { hidden: true, 'data-draft-restoring': props.formId } as Record<string, unknown>,
+    )
+    : null
 }
 
 /**

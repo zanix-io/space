@@ -1,7 +1,10 @@
 'use comet'
-import { useEffect } from 'preact/hooks'
+import { createElement } from 'preact'
+import type { VNode } from 'preact'
+import { useEffect, useState } from 'preact/hooks'
 import { defineComet } from './define-comet.ts'
 import { attachManagedForm } from './managed-form.ts'
+import { startsRestoring, watchDraftRestoring } from './draft-restoring.ts'
 import type { ManagedFormOptions } from './managed-form.ts'
 import type { CometBoundaryComponent, CometProps } from 'typings/comet.ts'
 
@@ -15,14 +18,29 @@ export type ManagedFormComponentProps = Omit<ManagedFormOptions, 'intercept'>
  * {@linkcode attachManagedForm} into `preact/hooks`' own `useEffect` instead — see that module's
  * own doc for the full contract, including why `intercept` is excluded from this component's props.
  */
-export function ManagedForm(props: ManagedFormComponentProps): null {
-  useEffect(() => attachManagedForm(props), [
+export function ManagedForm(props: ManagedFormComponentProps): VNode | null {
+  const { draft } = props
+  const [restoring, setRestoring] = useState(draft !== undefined && startsRestoring(draft))
+  useEffect(() => {
+    const detach = attachManagedForm(props)
+    setRestoring(draft !== undefined && startsRestoring(draft))
+    const unwatch = draft && watchDraftRestoring(props.formId, draft, () => setRestoring(false))
+    return () => {
+      unwatch?.()
+      detach()
+    }
+  }, [
     props.formId,
     props.draft,
     props.submitGuard,
     props.unsavedChanges,
   ])
-  return null
+  return restoring
+    ? createElement(
+      'span',
+      { hidden: true, 'data-draft-restoring': props.formId } as Record<string, unknown>,
+    )
+    : null
 }
 
 /**

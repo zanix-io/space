@@ -2,7 +2,7 @@
 // that renders must import the entry point it is testing against.
 import '../../../../mod-react.ts'
 import '../../../../mod-preact.ts'
-import { assert } from '@std/assert'
+import { assert, assertFalse } from '@std/assert'
 import { createElement } from 'preact'
 import ManagedFormReact from 'modules/comets/managed-form-react.tsx'
 import ManagedFormPreact from 'modules/comets/managed-form-preact.tsx'
@@ -98,6 +98,81 @@ Deno.test(
 
       assert(html.includes('data-comet-export="ManagedForm"'), html)
       assert(html.includes('data-comet-strategy="idle"'), html)
+    } finally {
+      reset()
+    }
+  },
+)
+
+const MARKER = '<span hidden="" data-draft-restoring="new-trigger"></span>'
+// Preact serializes a boolean attribute bare, React as `hidden=""`.
+const MARKER_PREACT = '<span hidden data-draft-restoring="new-trigger"></span>'
+
+Deno.test(
+  'ManagedForm (react): the restoring marker is server-rendered only when its draft follows a failed submit',
+  async () => {
+    try {
+      const render = async (draft?: Record<string, unknown>) =>
+        stripHydrationComments(
+          await (
+            await renderToResponseReact(
+              <ManagedFormReact
+                formId='new-trigger'
+                draft={draft as never}
+                submitGuard
+              />,
+            )
+          ).text(),
+        )
+
+      assert(
+        (await render({
+          storageKey: 'triggers/new',
+          hasServerValues: false,
+          returnedFromFailure: true,
+        })).includes(MARKER),
+      )
+      assertFalse(
+        (await render({ storageKey: 'triggers/new', hasServerValues: false })).includes(
+          'data-draft-restoring',
+        ),
+      )
+      assertFalse((await render()).includes('data-draft-restoring'))
+    } finally {
+      reset()
+    }
+  },
+)
+
+Deno.test(
+  'ManagedForm (preact): server-renders the same restoring marker, and only in the same cases',
+  async () => {
+    try {
+      setActiveRenderer('preact')
+      const render = async (draft?: Record<string, unknown>) =>
+        stripHydrationComments(
+          await (
+            await renderToResponsePreact(
+              createElement(ManagedFormPreact as never, { formId: 'new-trigger', draft }),
+            )
+          ).text(),
+        )
+
+      assert(
+        (await render({
+          storageKey: 'triggers/new',
+          hasServerValues: false,
+          returnedFromFailure: true,
+        })).includes(MARKER_PREACT),
+      )
+      assertFalse(
+        (await render({
+          storageKey: 'triggers/new',
+          hasServerValues: true,
+          returnedFromFailure: true,
+        })).includes('data-draft-restoring'),
+      )
+      assertFalse((await render()).includes('data-draft-restoring'))
     } finally {
       reset()
     }

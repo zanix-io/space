@@ -1,7 +1,9 @@
 'use comet'
-import { useEffect } from 'react'
+import { createElement, useEffect, useState } from 'react'
+import type { ReactElement } from 'react'
 import { defineComet } from './define-comet.ts'
 import { attachManagedForm } from './managed-form.ts'
+import { startsRestoring, watchDraftRestoring } from './draft-restoring.ts'
 import type { ManagedFormOptions } from './managed-form.ts'
 import type { CometBoundaryComponent, CometProps } from 'typings/comet.ts'
 
@@ -11,7 +13,9 @@ export type ManagedFormComponentProps = Omit<ManagedFormOptions, 'intercept'>
 /**
  * Ready-made Comet wiring {@linkcode attachManagedForm} into React's own `useEffect` — the default
  * a consumer app reaches for to enable more than one form behavior without a separate
- * `<XyzGuard formId={id} />` per one. Renders nothing; every `ManagedFormOptions` field is a plain
+ * `<XyzGuard formId={id} />` per one. Renders nothing, except the same hidden
+ * `<span data-draft-restoring="{formId}">` marker `FormDraftPersistence` renders while a render that
+ * follows a failed submit restores its `draft`. Every `ManagedFormOptions` field is a plain
  * JSON-serializable value, so it crosses the Comet boundary as ordinary props like any other. The
  * `<form>` itself stays ordinary, server-rendered markup — see `managed-form.ts`'s own doc for why
  * this can't render it.
@@ -34,14 +38,26 @@ export type ManagedFormComponentProps = Omit<ManagedFormOptions, 'intercept'>
  * prop. Compose `attachManagedForm({ ..., intercept })` directly inside your own `'use comet'` file
  * instead when you need it — see `managed-form.ts`'s own `intercept` doc.
  */
-export function ManagedForm(props: ManagedFormComponentProps): null {
-  useEffect(() => attachManagedForm(props), [
+export function ManagedForm(props: ManagedFormComponentProps): ReactElement | null {
+  const { draft } = props
+  const [restoring, setRestoring] = useState(draft !== undefined && startsRestoring(draft))
+  useEffect(() => {
+    const detach = attachManagedForm(props)
+    setRestoring(draft !== undefined && startsRestoring(draft))
+    const unwatch = draft && watchDraftRestoring(props.formId, draft, () => setRestoring(false))
+    return () => {
+      unwatch?.()
+      detach()
+    }
+  }, [
     props.formId,
     props.draft,
     props.submitGuard,
     props.unsavedChanges,
   ])
-  return null
+  return restoring
+    ? createElement('span', { hidden: true, 'data-draft-restoring': props.formId })
+    : null
 }
 
 /**

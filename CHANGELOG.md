@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.16.6] - 2026-10-03
+
+### Added
+
+- **`DraftProbe` server component.** Renders one inline `<script>` that reads the form's draft from
+  the browser's own storage while the page is parsed, before the first paint, and sets
+  `data-draft-restoring="{formId}"` on itself when a draft with content is saved. A visit that comes
+  back to an unsent form is marked exactly as one that follows a failed submit is, and a clean form
+  never is. Takes the form's `draft` object (`storageKey`, `storage`, `awaitValues`,
+  `hasServerValues`, `returnedFromFailure`) and the request's CSP `nonce` as props; it is not a
+  Comet, so the nonce never reaches the page as a Comet prop. Renders nothing when the page already
+  carries the submitted values or follows a failed submit. The script also runs on an Orbit
+  navigation, and removes its own mark after 2 seconds when no Comet does.
+- **`deno task spike:draft-probe`.** A manual real-browser harness, outside `deno test` and CI, that
+  checks the probe in Google Chrome under the default CSP, on a full load and on an Orbit
+  navigation, with `-- --serve` to serve the pages for a manual check.
+
+- **`persistDraftValue`/`restoreDraftValue` options `formId` and `returnedFromFailure`.** A
+  controlled value now follows the same lifecycle a form's own fields have under
+  `FormDraftPersistence`. With `formId`, submitting the form clears the saved value; with
+  `returnedFromFailure` set, `submit` keeps the value as a snapshot, restored by the next
+  `restoreDraftValue` only when the render follows a failed submit and discarded either way. A value
+  saved without being submitted restores on the next visit. Without `formId` both functions behave
+  as before.
+- **`data-draft-restoring` marker.** While a render that follows a failed submit restores
+  (`returnedFromFailure` is `true` and `hasServerValues` is `false`), `FormDraftPersistence` and
+  `ManagedForm` render a hidden `<span data-draft-restoring="{formId}">` on the server and remove it
+  once the draft is back, so a stylesheet can show a skeleton until then. There is no marker when
+  the page already carries the submitted values.
+- **`FormDraftPersistence`/`ManagedForm` `draft` option `awaitValues`.** The `storageKey`s of the
+  controlled values (`restoreDraftValue` with the form's `formId`) the marker waits for, in addition
+  to the form's own fields. The marker is removed after 2 seconds at most, so a Comet that never
+  hydrates cannot hold a form back.
+
 ## [1.16.5] - 2026-10-03
 
 ### Added

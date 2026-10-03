@@ -203,10 +203,35 @@ import { FormDraftPersistence } from '@zanix/space/comet/react' // or '@zanix/sp
 
 Restores a saved draft on attach (unless `hasServerValues`), saves the whole form — generically, via
 `form.elements`, covering a field added later with zero per-field wiring — debounced on every
-`input`/`change`, and clears the draft on `submit`. `storageKey` is required, never derived from
-`location.pathname`: this framework's own `[lang]`-segment routing renders the SAME logical form at
-different pathnames per language, so a pathname-derived key would fragment one operator's own draft
-across a language switch mid-form.
+`input`/`change`, and clears the draft on `submit`. A failed submit that redirects back to the form
+therefore comes back empty by default; see "Recovering after a failed submit" below. `storageKey` is
+required, never derived from `location.pathname`: this framework's own `[lang]`-segment routing
+renders the SAME logical form at different pathnames per language, so a pathname-derived key would
+fragment one operator's own draft across a language switch mid-form.
+
+**Recovering after a failed submit.** `ctx.submitted` only exists on a `422` re-render, so a page
+whose action fails for any other reason and redirects back to the form (a declined payment, a
+downstream service refusing the request) has no server values to show, and the draft was already
+cleared on `submit`. Pass `returnedFromFailure`, derived from the page's own signal, to keep the
+submitted form recoverable:
+
+```tsx
+<FormDraftPersistence
+  formId='new-trigger'
+  storageKey='triggers/new'
+  hasServerValues={ctx.submitted !== undefined}
+  returnedFromFailure={ctx.url.searchParams.has('error')}
+/>
+```
+
+Setting the option, to `true` or `false`, opts the form in: `submit` stores a snapshot of the form
+instead of dropping it. The next attach restores that snapshot when `returnedFromFailure` is `true`
+and always discards it afterwards, so a later fresh visit never resurrects an already-sent form.
+`hasServerValues` wins when both are set. The snapshot follows the same exclusions and `storage`
+choice as the draft. A network or server failure that never reaches a redirect is covered when the
+page is reloaded with the same signal. Omit the option to keep the default of discarding on
+`submit`. `restoreDraftValue`/`persistDraftValue` never clear on `submit`, so a controlled field
+they back already survives a failed submit.
 
 **Always excluded, not configurable**: the `_csrf` field (this framework's own CSRF form field —
 restoring a stale token here produces nothing worse than a confusing 403), any `type="password"`

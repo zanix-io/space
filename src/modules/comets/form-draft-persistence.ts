@@ -43,6 +43,16 @@ export type FormDraftPersistenceOptions = {
    * present only on a `422` validation re-render — exactly the signal that should win over a
    * possibly-stale local draft). Still persists normally once the operator keeps typing. */
   hasServerValues: boolean
+  /** Opts this form into recovering from a failed submit that redirects back to it. Pass `true`
+   * when this render follows a failed submit, derived from the page's own signal (for example
+   * `ctx.url.searchParams.has('error')`), and `false` on every other render. Omit to keep the
+   * default: the draft is discarded on `submit`.
+   *
+   * Once set, `submit` stores a snapshot of the form beside the draft instead of dropping it.
+   * The next attach restores that snapshot only when this is `true`, and always discards it
+   * afterwards, so a later fresh visit never resurrects an already-sent form. `hasServerValues`
+   * wins when both are set. */
+  returnedFromFailure?: boolean
   /** Field `name`s this primitive must never read or write at all — for a field owned by a
    * DIFFERENT persistence unit entirely (typically a `persistDraftValue`-backed controlled field
    * elsewhere on the same form). Omit when there is no such field. */
@@ -119,6 +129,8 @@ function saveForm(
   writeToStorage(backend, key, draft)
 }
 
+const PENDING_SUFFIX = ':submitted'
+
 /** The real, bubbling DOM event a React/Preact-controlled field's own `onChange`/`onInput` handler
  * actually listens for — `checkbox`/`radio`/`<select>` map to `change` in both renderers; every
  * other `<input>` type and `<textarea>` map to `input` (React remaps its own `onChange` prop to
@@ -167,7 +179,8 @@ function restoreForm(
  * Attaches session/local-scoped draft persistence to one `<form>` — the primitive a `useEffect`
  * (React/Preact, see `@zanix/space/comet/react` and `@zanix/space/comet/preact`) calls into.
  * Restores a saved draft on attach (unless `hasServerValues`), saves on every `input`/`change`
- * (debounced), clears on `submit`. Reads/writes the whole form generically via `form.elements` —
+ * (debounced), clears on `submit` (see {@linkcode FormDraftPersistenceOptions.returnedFromFailure}
+ * to keep a submitted form recoverable after a failed submit). Reads/writes the whole form generically via `form.elements` —
  * covering a new field added later with zero per-field wiring — rather than a hand-maintained
  * field list.
  *
@@ -184,6 +197,7 @@ export function attachFormDraftPersistence(options: FormDraftPersistenceOptions)
     formId,
     storageKey,
     hasServerValues,
+    returnedFromFailure,
     excludeFields = [],
     storage,
     debounceMs = DEFAULT_DRAFT_DEBOUNCE_MS,
@@ -194,7 +208,15 @@ export function attachFormDraftPersistence(options: FormDraftPersistenceOptions)
   if (!(form instanceof HTMLFormElement) || !backend) return () => {}
 
   const key = namespacedStorageKey(storageKey)
-  if (!hasServerValues) restoreForm(form, backend, key, excludeFields)
+  const submittedKey = key + PENDING_SUFFIX
+  const submittedSnapshot = readFromStorage(backend, submittedKey)
+  clearFromStorage(backend, submittedKey)
+  if (!hasServerValues) {
+    if (returnedFromFailure && submittedSnapshot) {
+      writeToStorage(backend, key, submittedSnapshot)
+    }
+    restoreForm(form, backend, key, excludeFields)
+  }
 
   let timer: ReturnType<typeof setTimeout> | undefined
   const handleChange = () => {
@@ -203,6 +225,7 @@ export function attachFormDraftPersistence(options: FormDraftPersistenceOptions)
   }
   const handleSubmit = () => {
     if (timer !== undefined) clearTimeout(timer)
+    if (returnedFromFailure !== undefined) saveForm(form, backend, submittedKey, excludeFields)
     clearFromStorage(backend, key)
   }
 

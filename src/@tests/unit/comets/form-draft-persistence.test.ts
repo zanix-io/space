@@ -162,6 +162,124 @@ Deno.test(
   },
 )
 
+/** Submits a form carrying `typed` under `id`, then re-attaches to a fresh copy of the same form. */
+function submitThenReattach(
+  id: string,
+  typed: string,
+  next: { hasServerValues: boolean; returnedFromFailure?: boolean },
+  attachOptions: { returnedFromFailure?: boolean } = { returnedFromFailure: false },
+): HTMLInputElement {
+  const form = buildForm(id, [{ name: 'title', value: typed }])
+  const detach = attachFormDraftPersistence({
+    formId: id,
+    storageKey: id,
+    hasServerValues: false,
+    ...attachOptions,
+  })
+  fireSubmit(form)
+  detach()
+  resetDomKeepingStorage()
+
+  const fresh = buildForm(id, [{ name: 'title', value: '' }])
+  attachFormDraftPersistence({ formId: id, storageKey: id, ...next })
+  return fresh.elements.namedItem('title') as HTMLInputElement
+}
+
+function resetDomKeepingStorage(): void {
+  const saved = new Map<string, string>()
+  for (let i = 0; i < globals.sessionStorage.length; i++) {
+    const k = globals.sessionStorage.key(i)
+    saved.set(k, globals.sessionStorage.getItem(k))
+  }
+  setUp()
+  for (const [k, v] of saved) globals.sessionStorage.setItem(k, v)
+}
+
+Deno.test(
+  'attachFormDraftPersistence: returnedFromFailure=true restores the form submitted just before',
+  () => {
+    setUp()
+    const field = submitThenReattach('rf1', 'typed text', {
+      hasServerValues: false,
+      returnedFromFailure: true,
+    })
+
+    assertEquals(field.value, 'typed text')
+    assertEquals(
+      JSON.parse(globals.sessionStorage.getItem('zn-space:rf1')),
+      { title: 'typed text' },
+    )
+    assertEquals(globals.sessionStorage.getItem('zn-space:rf1:submitted'), null)
+  },
+)
+
+Deno.test(
+  'attachFormDraftPersistence: returnedFromFailure=false discards the submitted form, a later visit stays empty',
+  () => {
+    setUp()
+    const field = submitThenReattach('rf2', 'already sent', {
+      hasServerValues: false,
+      returnedFromFailure: false,
+    })
+
+    assertEquals(field.value, '')
+    assertEquals(globals.sessionStorage.getItem('zn-space:rf2'), null)
+    assertEquals(globals.sessionStorage.getItem('zn-space:rf2:submitted'), null)
+  },
+)
+
+Deno.test(
+  'attachFormDraftPersistence: a snapshot restored once is not restored by a second failure render without a new submit',
+  () => {
+    setUp()
+    submitThenReattach('rf3', 'once', { hasServerValues: false, returnedFromFailure: true })
+    globals.sessionStorage.removeItem('zn-space:rf3')
+    resetDomKeepingStorage()
+
+    const form = buildForm('rf3', [{ name: 'title', value: '' }])
+    attachFormDraftPersistence({
+      formId: 'rf3',
+      storageKey: 'rf3',
+      hasServerValues: false,
+      returnedFromFailure: true,
+    })
+
+    assertEquals((form.elements.namedItem('title') as HTMLInputElement).value, '')
+  },
+)
+
+Deno.test(
+  'attachFormDraftPersistence: hasServerValues wins over returnedFromFailure',
+  () => {
+    setUp()
+    const field = submitThenReattach('rf4', 'client text', {
+      hasServerValues: true,
+      returnedFromFailure: true,
+    })
+
+    assertEquals(field.value, '')
+    assertEquals(globals.sessionStorage.getItem('zn-space:rf4:submitted'), null)
+  },
+)
+
+Deno.test(
+  'attachFormDraftPersistence: without returnedFromFailure nothing is kept after submit',
+  () => {
+    setUp()
+    const form = buildForm('rf5', [{ name: 'title', value: 'secret-ish' }])
+    const detach = attachFormDraftPersistence({
+      formId: 'rf5',
+      storageKey: 'rf5',
+      hasServerValues: false,
+    })
+    fireSubmit(form)
+
+    assertEquals(globals.sessionStorage.getItem('zn-space:rf5'), null)
+    assertEquals(globals.sessionStorage.getItem('zn-space:rf5:submitted'), null)
+    detach()
+  },
+)
+
 Deno.test(
   'attachFormDraftPersistence: never reads or writes _csrf — hardcoded, not configurable',
   () => {

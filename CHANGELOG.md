@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.16.5] - 2026-10-03
+
+### Added
+
+- **`FormDraftPersistence`/`ManagedForm` `draft` option `returnedFromFailure`.** A form's draft is
+  cleared on `submit`, so a submit that fails for a reason other than `422` validation (a downstream
+  service refusing it, a declined payment) and redirects back to the form came back empty. Setting
+  `returnedFromFailure` stores a snapshot of the form on `submit` and restores it on the next attach
+  when the page reports a return from a failure, otherwise discarding it. Omitting the option keeps
+  the existing clear-on-submit behavior.
+
 ## [1.16.4] - 2026-09-30
 
 ### Fixed

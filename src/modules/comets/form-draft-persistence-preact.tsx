@@ -15,6 +15,7 @@ export function FormDraftPersistence(props: FormDraftPersistenceOptions): null {
     props.formId,
     props.storageKey,
     props.hasServerValues,
+    props.returnedFromFailure,
     props.excludeFields,
     props.storage,
     props.debounceMs,

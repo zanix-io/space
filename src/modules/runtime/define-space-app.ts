@@ -4,7 +4,11 @@ import type { ZanixAppDefinition } from '@zanix/app'
 import type { SpaceAppConfig } from 'typings/manifest.ts'
 import { loadRoutes, setDefaultPageHeaders } from 'modules/router/mod.ts'
 import { setThemeResolver } from 'modules/theme/mod.ts'
-import { setExtendedSerialization } from 'modules/render/serialization-registry.ts'
+import {
+  setExtendedSerialization,
+  setInitialStatePolicy,
+} from 'modules/render/serialization-registry.ts'
+import { parseStateOption } from 'modules/render/initial-state-policy.ts'
 import { loadPwaBuildOutput, registerPwa, setPwaConfig } from 'modules/pwa/mod.ts'
 import { addGlobalCssPaths, getCssManifest, loadCssManifest } from 'modules/render/css-manifest.ts'
 import { addCssSources } from 'modules/render/css-sources.ts'
@@ -184,6 +188,8 @@ export function defineSpaceApp(config: SpaceAppConfig): ZanixAppDefinition {
   // Same eager timing and same registry shape as `theme` above. Off is the default and costs
   // nothing — see `SpaceAppConfig.serialization`'s own doc for what enabling it changes.
   setExtendedSerialization(serialization?.extendedTypes)
+  // Validated here, at startup, so a mistyped option fails before the first request does.
+  setInitialStatePolicy(parseStateOption(serialization?.state))
   if (pwa !== undefined) setPwaConfig(pwa === false ? undefined : pwa)
   // Same eager timing as `theme`/`headers` above — `setErrorResponseFormat` just sets a
   // module-level registry value, read at request time by `loader-error-handler.ts`/

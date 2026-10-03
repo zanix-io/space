@@ -1,5 +1,6 @@
 /**
- * Whether this app opted into the extended-types serialization codec.
+ * What this app opted into for the serialized initial state: the extended-types codec and the
+ * policy that decides which of a page's data crosses to the client.
  *
  * Its own module, with zero imports, for the same reason `initial-state-global.ts` has one: both
  * the server-only render path and the client-safe hydration path read this, and neither should
@@ -39,4 +40,46 @@ export function isExtendedSerializationEnabled(): boolean {
 /** Test-only — restores the default (off) between cases. Not exported from this package. */
 export function resetExtendedSerialization(): void {
   extendedTypes = false
+}
+
+/**
+ * What crosses to the client in `self.__ZANIX_SPACE_STATE__`, as the registry stores it:
+ * nothing at all (`none`, the default), everything the page's `loader` returned (`all`), every top-level key but
+ * the listed ones (`omit`), or only the listed ones (`pick`). Built from `serialization.state` by
+ * `parseStateOption`, which also validates it.
+ */
+export type InitialStatePolicy =
+  | { readonly mode: 'all' }
+  | { readonly mode: 'none' }
+  | { readonly mode: 'omit'; readonly keys: readonly string[] }
+  | { readonly mode: 'pick'; readonly keys: readonly string[] }
+
+const DEFAULT_POLICY: InitialStatePolicy = { mode: 'none' }
+
+let initialStatePolicy: InitialStatePolicy = DEFAULT_POLICY
+
+/**
+ * Sets what the page renderers serialize into the initial state. Called once by
+ * `defineSpaceApp({ serialization: { state } })` — never by app code directly, and never per page:
+ * the state a page hands to its own client has to follow one rule across the app.
+ *
+ * @param policy - The parsed policy. `undefined` restores the default (`none`).
+ */
+export function setInitialStatePolicy(policy: InitialStatePolicy | undefined): void {
+  initialStatePolicy = policy ?? DEFAULT_POLICY
+}
+
+/**
+ * The app's initial-state policy. Read at render time, not at module load: an app configures it
+ * during startup, after this module is first imported.
+ *
+ * @returns The policy; `{ mode: 'none' }` when the app did not set one.
+ */
+export function getInitialStatePolicy(): InitialStatePolicy {
+  return initialStatePolicy
+}
+
+/** Test-only — restores the default (`none`) between cases. Not exported from this package. */
+export function resetInitialStatePolicy(): void {
+  initialStatePolicy = DEFAULT_POLICY
 }

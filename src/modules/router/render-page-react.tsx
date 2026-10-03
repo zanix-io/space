@@ -34,6 +34,7 @@ import type { DocumentModel } from '../render/document-model.ts'
 import type { HeadDescriptor, ResolvedHead } from './head-descriptor.ts'
 import type { StylesheetRef } from '../render/css-manifest.ts'
 import { withCspSignatureMeta } from './csp-signature.ts'
+import { resolveInitialState } from '../render/initial-state-policy.ts'
 
 /**
  * React's own page-composition + render implementation — the `PageRenderer` registered by default
@@ -422,7 +423,9 @@ export async function renderPageResponse<Params>(
     themeStyle,
     pwa: resolvePwaHead(),
     nonce,
-    initialState: data,
+    // What crosses to the client: `data` under the app's `serialization.state` policy. The
+    // component still renders with all of `data`.
+    initialState: resolveInitialState(data),
     bootstrapModules: clientEntryUrl ? [clientEntryUrl] : undefined,
     // Resolved to an ABSOLUTE path here, not passed through as `getPageTree(Target)?.filePath`
     // reports it (relative to whatever `routesDir` an app declared, e.g. `'./src/routes'`) —

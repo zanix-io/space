@@ -29,8 +29,12 @@ export type ManagedFormComponentProps = Omit<ManagedFormOptions, 'intercept'>
  *   draft={{ storageKey: 'triggers/new', hasServerValues: ctx.submitted !== undefined }}
  *   submitGuard
  *   unsavedChanges
+ *   focusFirstInvalid
  * />
  * ```
+ *
+ * `focusFirstInvalid` moves the focus to the first control the server rendered as
+ * `aria-invalid="true"` (see {@linkcode ManagedFormOptions.focusFirstInvalid}).
  *
  * **Never accepts `intercept`** — `ManagedFormOptions.intercept` is a real function, and this
  * component's own props cross the server/client boundary as plain JSON (`defineComet`'s own
@@ -54,6 +58,7 @@ export function ManagedForm(props: ManagedFormComponentProps): ReactElement | nu
     props.draft,
     props.submitGuard,
     props.unsavedChanges,
+    props.focusFirstInvalid,
   ])
   return restoring
     ? createElement('span', { hidden: true, 'data-draft-restoring': props.formId })

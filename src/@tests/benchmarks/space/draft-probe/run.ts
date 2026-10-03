@@ -4,7 +4,10 @@
 // comet manifest are process-global state, and each browser run needs the machine to itself.
 /**
  * Browser spike: does the draft probe mark a form as restoring BEFORE the first paint, under the
- * default CSP, on a full load and on an Orbit navigation?
+ * default CSP, on a full load and on an Orbit navigation? And does `ManagedForm`'s
+ * `focusFirstInvalid` put the focus on the first control the server rendered as invalid, bring it
+ * into view, and stay out of the way of a restored draft, a visitor already typing, reduced motion
+ * and `ScrollRestoration`?
  *
  * A manual harness, not a test and not a benchmark: nothing in `deno test` or CI runs it. Pages are
  * real `SpacePageController`s through the real page renderer, the real shipped `ManagedForm` comet,
@@ -41,11 +44,28 @@ import { mockPageContext } from 'modules/testing/mod.ts'
 import { ORBIT_FRAGMENT_HEADER } from 'modules/router/orbit-protocol.ts'
 import { normalizeCspSignature } from 'modules/router/csp-signature.ts'
 import { DraftProbe } from 'modules/comets/draft-probe-element.ts'
+import {
+  resetInitialStatePolicy,
+  setInitialStatePolicy,
+} from 'modules/render/serialization-registry.ts'
+import { parseStateOption } from 'modules/render/initial-state-policy.ts'
 
 const REPO_ROOT = Deno.cwd()
 const PERSISTENCE_DIR = 'src/@tests/benchmarks/space/persistence'
 const FORM_ID = 'draft-form'
 const STORAGE_KEY = 'fixture/draft'
+const ERRORS_FORM_ID = 'errors-form'
+const ERRORS_STORAGE_KEY = 'fixture/errors'
+const STATE_FORM_ID = 'state-form'
+const STATE_STORAGE_KEY = 'fixture/state'
+/** A message catalog of the size a real page carries: only the server renders with it. */
+const CATALOG: Record<string, string> = Object.fromEntries(
+  Array.from(
+    { length: 400 },
+    (_, index) => [`catalog/key-${index}`, `Catalog message number ${index}`],
+  ),
+)
+const GREETING = 'Hola desde el catalogo'
 /** How long the client bundle takes to arrive. The marked form has to be painted in the meantime,
  * which is what a visitor on a real connection sees: with the bundle served instantly the form is
  * restored before the first paint and no skeleton would ever show. */
@@ -76,6 +96,13 @@ const OBSERVER_SOURCE = `
   document.addEventListener('securitypolicyviolation', function (event) {
     stamp('CSP VIOLATION ' + event.violatedDirective + ' ' + event.blockedURI)
   })
+  document.addEventListener('focusin', function (event) {
+    var target = event.target
+    var label = target.name || target.id || target.tagName
+    stamp('FOCUS ' + label + ' value=' + (target.value === undefined ? '' : target.value))
+    setTimeout(function () { stamp('SCROLL@40ms y=' + Math.round(window.scrollY)) }, 40)
+    setTimeout(function () { stamp('SCROLL@end y=' + Math.round(window.scrollY)) }, 1800)
+  })
   stamp('document load #' + window.__documentLoads)
 })()`
 
@@ -102,11 +129,15 @@ async function main(): Promise<void> {
   for (const renderer of ['react', 'preact'] as const) {
     const { port, stop } = await startFixture(renderer)
     await checkRenderer(browser, renderer, port, results)
+    await checkFocusFirstInvalid(browser, renderer, port, results)
+    await checkState(browser, renderer, port, results)
     await stop()
   }
   await browser.close()
 
-  console.log('\n=== Draft probe in a real browser ===\n')
+  console.log(
+    '\n=== Draft probe, focusFirstInvalid and serialization.state in a real browser ===\n',
+  )
   let failed = false
   for (const [name, ok] of Object.entries(results)) {
     if (ok !== true) failed = true
@@ -203,6 +234,286 @@ async function checkRenderer(
   await page.close()
 }
 
+/** `ManagedForm`'s `focusFirstInvalid` in the real browser: full load, a clean form, a restored
+ * draft, a visitor already typing, reduced motion, `ScrollRestoration` on either side of the comet,
+ * and an Orbit navigation. The invalid control sits 2200px down the page, so reaching it takes a
+ * scroll, and a disabled control marked invalid sits before it. */
+async function checkFocusFirstInvalid(
+  // deno-lint-ignore no-explicit-any
+  browser: any,
+  renderer: Renderer,
+  port: number,
+  results: Record<string, boolean | string>,
+) {
+  const base = `http://localhost:${port}`
+  const name = (what: string) => `${renderer}: focusFirstInvalid ${what}`
+  const open = async (
+    path: string,
+    reducedMotion: 'reduce' | 'no-preference' = 'no-preference',
+  ) => {
+    const context = await browser.newContext({
+      reducedMotion,
+      viewport: { width: 900, height: 700 },
+    })
+    const page = await context.newPage()
+    const errors: string[] = []
+    page.on('pageerror', (error: Error) => errors.push(error.message))
+    await page.goto(`${base}${path}`, { waitUntil: 'load' })
+    return { page, context, errors }
+  }
+  const logOf = (
+    // deno-lint-ignore no-explicit-any
+    page: any,
+  ): Promise<string[]> =>
+    page.evaluate(() => (window as never as { __draftLog: string[] }).__draftLog)
+  const stateOf = (
+    // deno-lint-ignore no-explicit-any
+    page: any,
+  ): Promise<{ active: string; top: number; bottom: number; height: number; y: number }> =>
+    page.evaluate(() => {
+      const active = document.activeElement as HTMLInputElement | null
+      const rect = document.querySelector('[name=bad1]')?.getBoundingClientRect()
+      return {
+        active: active?.name || active?.tagName || '',
+        top: rect?.top ?? -1,
+        bottom: rect?.bottom ?? -1,
+        height: innerHeight,
+        y: Math.round(scrollY),
+      }
+    })
+  const inView = (state: { top: number; bottom: number; height: number }) =>
+    state.top >= 0 && state.bottom <= state.height
+  const focusLines = (log: string[], control: string) =>
+    log.filter((line) => line.includes(`FOCUS ${control} `))
+  const scrollSample = (log: string[], at: '40ms' | 'end') => {
+    const line = log.find((entry) => entry.includes(`SCROLL@${at} y=`))
+    return line ? Number(line.split('y=')[1]) : NaN
+  }
+
+  // 1. A full load: the first invalid control (the disabled one skipped) has the focus and is in
+  // view, once, under the default CSP.
+  {
+    const { page, context, errors } = await open('/errors')
+    await page.waitForTimeout(3500)
+    const state = await stateOf(page)
+    const log = await logOf(page)
+    results[name('full load focuses the first enabled invalid control')] = state.active === 'bad1'
+    results[name('full load brings it into view')] = state.y > 0 && inView(state)
+    results[name('full load focuses it once')] = focusLines(log, 'bad1').length === 1
+    results[name('full load has no CSP violation')] = !log.some((l) => l.includes('CSP VIOLATION'))
+    results[name('full load has no page errors')] = errors.length === 0 || errors.join(' | ')
+    await context.close()
+  }
+
+  // 2. A clean form: nothing is focused and the page does not move.
+  {
+    const { page, context } = await open('/errors?mode=clean')
+    await page.waitForTimeout(3500)
+    const state = await stateOf(page)
+    const log = await logOf(page)
+    results[name('a form with no invalid control focuses nothing')] = state.active === 'BODY' &&
+      !log.some((l) => l.includes('FOCUS ')) && state.y === 0
+    await context.close()
+  }
+
+  // 3. A restored draft: the focus lands after the restore, on the restored value.
+  {
+    const { page, context } = await open('/errors?mode=draft')
+    await page.evaluate(
+      ([key, value]: string[]) => sessionStorage.setItem(key, value),
+      [
+        `zn-space:${ERRORS_STORAGE_KEY}`,
+        JSON.stringify({ first: 'kept', bad1: 'restored text', bad2: '' }),
+      ],
+    )
+    await page.reload({ waitUntil: 'load' })
+    await page.waitForTimeout(3500)
+    const log = await logOf(page)
+    const removedAt = log.findIndex((l) => l.includes('MARK REMOVED'))
+    const focusAt = log.findIndex((l) => l.includes('FOCUS bad1 '))
+    results[name('with a restored draft the form is marked, then restored')] =
+      log.some((l) => l.includes('MARK SET')) && removedAt !== -1
+    results[name('with a restored draft the focus comes after the mark is gone')] =
+      removedAt !== -1 && focusAt > removedAt
+    results[name('with a restored draft the focus lands on the restored value')] = log.some((l) =>
+      l.includes('FOCUS bad1 value=restored text')
+    )
+    results[name('with a restored draft the field keeps the restored text')] =
+      (await page.inputValue('[name=bad1]')) === 'restored text'
+    await context.close()
+  }
+
+  // 4. A visitor already in another field is never moved.
+  {
+    const { page, context } = await open('/errors?mode=steal')
+    await page.waitForTimeout(3500)
+    const state = await stateOf(page)
+    const log = await logOf(page)
+    results[name('never takes the focus from a field the visitor is already in')] =
+      state.active === 'other' && focusLines(log, 'bad1').length === 0
+    await context.close()
+  }
+
+  // 5. Reduced motion scrolls at once; otherwise the scroll is animated.
+  {
+    const { page, context } = await open('/errors', 'reduce')
+    await page.waitForTimeout(3500)
+    const log = await logOf(page)
+    const early = scrollSample(log, '40ms')
+    const final = scrollSample(log, 'end')
+    results[name('under prefers-reduced-motion the scroll is instant')] = final > 0 &&
+      early === final
+    await context.close()
+  }
+  {
+    const { page, context } = await open('/errors')
+    await page.waitForTimeout(3500)
+    const log = await logOf(page)
+    const early = scrollSample(log, '40ms')
+    const final = scrollSample(log, 'end')
+    results[name('with motion allowed the scroll is animated')] = final > 0 && early < final
+    await context.close()
+  }
+
+  // 6. ScrollRestoration on either side of the form's comet: it resets the scroll when it attaches,
+  // so the focused control has to stay in view whichever hydrates last.
+  for (const side of ['before', 'after', 'idle']) {
+    const { page, context } = await open(`/errors?scroll=${side}`)
+    await page.waitForTimeout(3500)
+    const state = await stateOf(page)
+    results[
+      name(
+        side === 'idle'
+          ? `stays in view with a ScrollRestoration that hydrates later (comet="idle")`
+          : `stays in view with ScrollRestoration ${side} the form's comet`,
+      )
+    ] = state.active === 'bad1' && state.y > 0 && inView(state)
+    await context.close()
+  }
+
+  // 7. Orbit: a client-side navigation to the form focuses it, with no document load, and again on a
+  // second visit.
+  {
+    const { page, context } = await open('/')
+    await page.waitForTimeout(1800)
+    const loads = () =>
+      page.evaluate(() => (window as never as { __documentLoads: number }).__documentLoads)
+    const before = await loads()
+    await page.click('[data-testid="to-errors"]')
+    await page.waitForTimeout(3500)
+    let state = await stateOf(page)
+    results[name('Orbit navigation focuses the first invalid control')] = state.active === 'bad1'
+    results[name('Orbit navigation brings it into view')] = state.y > 0 && inView(state)
+    results[name('Orbit navigation is client-side (no document load)')] =
+      (await page.evaluate(() => location.pathname)) === '/errors' && (await loads()) === before
+    await page.click('[data-testid="to-a"]')
+    await page.waitForTimeout(1500)
+    await page.click('[data-testid="to-errors"]')
+    await page.waitForTimeout(3500)
+    state = await stateOf(page)
+    results[name('a second Orbit visit focuses it again, once per mount')] =
+      state.active === 'bad1' && focusLines(await logOf(page), 'bad1').length === 2
+    await context.close()
+  }
+}
+
+/**
+ * `serialization.state`: a page whose loader returns a message catalog, rendered through the real
+ * page renderer. By default (`'none'`) nothing crosses: no state script, no global, and the page
+ * still renders with the catalog on the server, hydrates, saves a draft, and navigates with Orbit
+ * with no console or page error. The other modes are checked as controls: `all` serializes the
+ * whole result, `omit` leaves the catalog out and `pick` lets only the title through.
+ */
+async function checkState(
+  // deno-lint-ignore no-explicit-any
+  browser: any,
+  renderer: Renderer,
+  port: number,
+  results: Record<string, boolean | string>,
+) {
+  const name = (label: string) => `${renderer}: state: ${label}`
+  const base = `http://localhost:${port}`
+  const stateOf = (page: { evaluate: (fn: () => unknown) => Promise<unknown> }) =>
+    page.evaluate(() => {
+      const state = (self as never as { __ZANIX_SPACE_STATE__?: Record<string, unknown> })
+        .__ZANIX_SPACE_STATE__
+      return state === undefined
+        ? null
+        : { keys: Object.keys(state), bytes: JSON.stringify(state).length, title: state.title }
+    }) as Promise<{ keys: string[]; bytes: number; title: unknown } | null>
+
+  const context = await browser.newContext()
+  const page = await context.newPage()
+  const problems: string[] = []
+  page.on('pageerror', (error: Error) => problems.push(`pageerror: ${error.message}`))
+  page.on('console', (message: { type: () => string; text: () => string }) => {
+    if (message.type() === 'error') problems.push(`console: ${message.text()}`)
+  })
+  const log = (): Promise<string[]> =>
+    page.evaluate(() => (window as never as { __draftLog: string[] }).__draftLog)
+
+  // Controls: the other modes on the same page.
+  const control = async (mode: string) => {
+    await page.goto(`${base}/state?state=${mode}`, { waitUntil: 'load' })
+    await page.waitForTimeout(1200)
+    return await stateOf(page)
+  }
+  const all = await control('all')
+  results[name("'all' serializes the whole loader result")] = all !== null &&
+    all.keys.includes('messages') && all.keys.includes('title') && all.bytes > 10_000
+  const omitted = await control('omit')
+  results[name('{ omit } leaves the catalog out and keeps the title')] = omitted !== null &&
+    !omitted.keys.includes('messages') && omitted.title === 'State fixture' &&
+    all !== null && omitted.bytes < all.bytes / 10
+  const picked = await control('pick')
+  results[name('{ pick } lets only the title through')] = picked !== null &&
+    picked.keys.length === 1 && picked.keys[0] === 'title'
+
+  // The default: nothing crosses.
+  await page.goto(`${base}/state`, { waitUntil: 'load' })
+  await page.waitForTimeout(1800)
+  results[name('by default there is no global')] = (await stateOf(page)) === null
+  results[name('by default the document has no state script')] = !(await page.content()).includes(
+    '__ZANIX_SPACE_STATE__',
+  )
+  results[name('the server render still used the catalog')] =
+    (await page.textContent('#greeting')) === GREETING
+  results[name('the document carries no catalog entry')] = !(await page.content()).includes(
+    'catalog/key-399',
+  )
+  console.log(
+    `  ${renderer}: state ${all?.bytes ?? '?'} bytes with 'all', ${
+      omitted?.bytes ?? '?'
+    } with omit, ` +
+      `none by default`,
+  )
+
+  // Hydration: typing into the form saves a draft, which only the hydrated comet does.
+  await page.fill(`#${STATE_FORM_ID} input[name=note]`, 'typed after hydration')
+  await page.waitForTimeout(900)
+  results[name('the comet hydrates and saves a draft')] = (await page.evaluate(
+    (key: string) => sessionStorage.getItem(`zn-space:${key}`),
+    STATE_STORAGE_KEY,
+  )) !== null
+  const loads = (): Promise<number> =>
+    page.evaluate(() => (window as never as { __documentLoads: number }).__documentLoads)
+  const before = await loads()
+
+  // Orbit: away and back without a document load, the page renders with the catalog again.
+  await page.click('[data-testid="to-b"]')
+  await page.waitForTimeout(700)
+  const onB = await page.evaluate(() => document.body.innerText.includes('Page B'))
+  await page.goBack()
+  await page.waitForTimeout(900)
+  results[name('Orbit goes away and back with no document load')] = onB &&
+    (await loads()) === before
+  results[name('the page rendered by Orbit still shows the catalog text')] =
+    (await page.textContent('#greeting')) === GREETING
+  results[name('no CSP violation')] = !(await log()).some((l) => l.includes('CSP VIOLATION'))
+  results[name('no console or page errors')] = problems.length === 0 || problems.join(' | ')
+  await context.close()
+}
+
 async function startFixture(
   renderer: Renderer,
 ): Promise<{ renderer: Renderer; port: number; stop: () => Promise<void> }> {
@@ -212,6 +523,9 @@ async function startFixture(
   })
   const managedFile = renderer === 'react' ? 'managed-form-react.tsx' : 'managed-form-preact.tsx'
   const entryFile = renderer === 'react' ? 'client-entry-react.ts' : 'client-entry-preact.ts'
+  const scrollFile = renderer === 'react'
+    ? 'scroll-restoration-react.tsx'
+    : 'scroll-restoration-preact.tsx'
   await buildCometsClient({
     root: REPO_ROOT,
     outDir,
@@ -219,6 +533,7 @@ async function startFixture(
     compiler: false,
     comets: {
       managed: join(REPO_ROOT, `src/modules/comets/${managedFile}`),
+      scroll: join(REPO_ROOT, `src/modules/comets/${scrollFile}`),
       'client-entry': join(REPO_ROOT, `${PERSISTENCE_DIR}/${entryFile}`),
     },
   })
@@ -228,6 +543,7 @@ async function startFixture(
   setCometManifest(JSON.parse(await Deno.readTextFile(join(outDir, 'comets-manifest.json'))))
   const entryAsset = await findBuiltAsset(join(outDir, 'assets'), 'client-entry')
   const ManagedForm = (await import(`../../../../modules/comets/${managedFile}`)).default
+  const ScrollRestoration = (await import(`../../../../modules/comets/${scrollFile}`)).default
   const { renderPageResponse } = renderer === 'react'
     ? await import('modules/router/render-page-react.tsx')
     : await import('modules/router/render-page-preact.ts')
@@ -246,13 +562,25 @@ async function startFixture(
   }
   setPageTree(PageA, { filePath: '/fake/routes/page.tsx', segments: [] })
   setPageTree(PageB, { filePath: '/fake/routes/b/page.tsx', segments: [] })
+  class PageC extends SpacePageController {
+    // deno-lint-ignore no-explicit-any
+    public override component = (() => null) as any
+  }
+  setPageTree(PageC, { filePath: '/fake/routes/errors/page.tsx', segments: [] })
+  class PageD extends SpacePageController {
+    // deno-lint-ignore no-explicit-any
+    public override component = (() => null) as any
+  }
+  setPageTree(PageD, { filePath: '/fake/routes/state/page.tsx', segments: [] })
 
   async function render(
-    which: 'a' | 'b',
+    which: 'a' | 'b' | 'c' | 'd',
     fragmentOnly: boolean,
     nonce: string,
     csp: string,
     withProbe: boolean,
+    errors: { mode: string; scroll: string } = { mode: 'errors', scroll: 'none' },
+    state = 'none',
   ) {
     const draft = { storageKey: STORAGE_KEY, hasServerValues: false }
     const bodyA = () =>
@@ -265,6 +593,7 @@ async function startFixture(
         withProbe ? el(DraftProbe, { key: 'p', formId: FORM_ID, draft, nonce }) : null,
         el(ManagedForm, { key: 'm', formId: FORM_ID, draft }),
         el('a', { key: 'l', href: '/b', 'data-testid': 'to-b' }, 'go to B'),
+        el('a', { key: 'e', href: '/errors', 'data-testid': 'to-errors' }, 'go to errors'),
         el('pre', { key: 'log', id: 'log' }),
         el('script', {
           key: 'panel',
@@ -272,17 +601,99 @@ async function startFixture(
           dangerouslySetInnerHTML: { __html: PANEL_SOURCE },
         }),
       ])
+    const bodyC = () => {
+      const invalid = errors.mode === 'clean' ? {} : { 'aria-invalid': 'true' }
+      const draft = { storageKey: ERRORS_STORAGE_KEY, hasServerValues: false }
+      const managed = el(ManagedForm, {
+        key: 'm',
+        formId: ERRORS_FORM_ID,
+        focusFirstInvalid: true,
+        ...(errors.mode === 'draft' ? { draft } : {}),
+      })
+      const scroll = el(ScrollRestoration, {
+        key: 'sr',
+        ...(errors.scroll === 'idle' ? { comet: 'idle' } : {}),
+      })
+      return el('div', null, [
+        el('style', { key: 's', nonce }, skeletonCss()),
+        el('h1', { key: 'h' }, 'Errors fixture'),
+        errors.mode === 'steal'
+          ? el('input', { key: 'o', id: 'other', name: 'other', placeholder: 'already typing' })
+          : null,
+        errors.mode === 'steal'
+          ? el('script', {
+            key: 'steal',
+            nonce,
+            dangerouslySetInnerHTML: { __html: `document.getElementById('other').focus()` },
+          })
+          : null,
+        el('form', { key: 'f', id: ERRORS_FORM_ID, method: 'post' }, [
+          el('input', { key: 'first', name: 'first' }),
+          // Marked invalid but disabled: it has to be skipped for the next one.
+          el('input', { key: 'off', name: 'off', disabled: true, ...invalid }),
+          // Marked invalid inside a disabled fieldset: the browser disables it, so it is skipped too.
+          el('fieldset', { key: 'lock', disabled: true }, [
+            el('input', { key: 'locked', name: 'locked', ...invalid }),
+          ]),
+          el('div', { key: 'gap', className: 'gap' }),
+          el('input', { key: 'bad1', name: 'bad1', ...invalid }),
+          el('input', { key: 'bad2', name: 'bad2', ...invalid }),
+        ]),
+        errors.mode === 'draft'
+          ? el(DraftProbe, { key: 'p', formId: ERRORS_FORM_ID, draft, nonce })
+          : null,
+        errors.scroll === 'before' ? scroll : null,
+        managed,
+        errors.scroll === 'after' || errors.scroll === 'idle' ? scroll : null,
+        el('a', { key: 'l', href: '/', 'data-testid': 'to-a' }, 'back to A'),
+        el('pre', { key: 'log', id: 'log' }),
+        el('script', {
+          key: 'panel',
+          nonce,
+          dangerouslySetInnerHTML: { __html: PANEL_SOURCE },
+        }),
+      ])
+    }
+    // The component of the page with a catalog: it receives the whole loader result as props.
+    const bodyD = (props: { title: string; messages: Record<string, string> }) => {
+      const draft = { storageKey: STATE_STORAGE_KEY, hasServerValues: false }
+      return el('div', null, [
+        el('h1', { key: 'h' }, props.title),
+        el('p', { key: 'g', id: 'greeting' }, props.messages['home/greeting']),
+        el('form', { key: 'f', id: STATE_FORM_ID, method: 'post' }, [
+          el('input', { key: 'n', name: 'note' }),
+        ]),
+        el(ManagedForm, { key: 'm', formId: STATE_FORM_ID, draft }),
+        el('a', { key: 'l', href: '/b', 'data-testid': 'to-b' }, 'go to B'),
+      ])
+    }
     const bodyB = () =>
       el('div', null, [
         el('h1', { key: 'h' }, 'Page B'),
         el('a', { key: 'l', href: '/', 'data-testid': 'to-a' }, 'back to A'),
       ])
+    // Only the page with a catalog hands the renderer a loader result; the rest have none.
+    const data = which === 'd'
+      ? { title: 'State fixture', messages: { ...CATALOG, 'home/greeting': GREETING } }
+      : undefined
+    // The app's policy for this request: only the page with a catalog has data to serialize.
+    setInitialStatePolicy(
+      parseStateOption(
+        state === 'all'
+          ? 'all'
+          : state === 'omit'
+          ? { omit: ['messages'] }
+          : state === 'pick'
+          ? { pick: ['title'] }
+          : 'none',
+      ),
+    )
     const response = await renderPageResponse(
       // deno-lint-ignore no-explicit-any
-      (which === 'a' ? PageA : PageB) as any,
-      which === 'a' ? bodyA : bodyB,
+      (which === 'a' ? PageA : which === 'b' ? PageB : which === 'c' ? PageC : PageD) as any,
+      which === 'a' ? bodyA : which === 'b' ? bodyB : which === 'c' ? bodyC : bodyD,
       mockPageContext(),
-      undefined,
+      data,
       fragmentOnly,
       nonce,
       undefined,
@@ -310,7 +721,7 @@ async function startFixture(
         return new Response('not found', { status: 404 })
       }
     }
-    if (url.pathname !== '/' && url.pathname !== '/b') {
+    if (!['/', '/b', '/errors', '/state'].includes(url.pathname)) {
       return new Response('not found', { status: 404 })
     }
     // The framework's zero-config default policy, with a fresh nonce per request.
@@ -319,11 +730,22 @@ async function startFixture(
       `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'nonce-${nonce}'`
     const fragment = req.headers.get(ORBIT_FRAGMENT_HEADER) !== null
     const html = await render(
-      url.pathname === '/' ? 'a' : 'b',
+      url.pathname === '/'
+        ? 'a'
+        : url.pathname === '/b'
+        ? 'b'
+        : url.pathname === '/state'
+        ? 'd'
+        : 'c',
       fragment,
       nonce,
       csp,
       url.searchParams.get('probe') !== '0',
+      {
+        mode: url.searchParams.get('mode') ?? 'errors',
+        scroll: url.searchParams.get('scroll') ?? 'none',
+      },
+      url.searchParams.get('state') ?? 'none',
     )
     return new Response(html, {
       headers: { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': csp },
@@ -332,14 +754,19 @@ async function startFixture(
   return {
     renderer,
     port: (server.addr as Deno.NetAddr).port,
-    stop: () => server.shutdown(),
+    stop: () => {
+      resetInitialStatePolicy()
+      return server.shutdown()
+    },
   }
 }
 
 /** The skeleton an app would write: the form is held back while it is marked. */
 function skeletonCss(): string {
   return `@media (scripting: enabled) { :root:has([data-draft-restoring='${FORM_ID}']) #${FORM_ID} ` +
-    `{ opacity: 0.4; pointer-events: none; } } #log { font: 12px monospace; white-space: pre-wrap; }`
+    `{ opacity: 0.4; pointer-events: none; } } #log { font: 12px monospace; white-space: pre-wrap; } ` +
+    // A class, not a `style` attribute: the default CSP blocks inline style attributes.
+    `.gap { height: 2200px; }`
 }
 
 await main()

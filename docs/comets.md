@@ -334,8 +334,15 @@ hydration, that the same holds after an Orbit navigation without a new document 
 page without the probe is not marked. `deno task spike:draft-probe -- --serve` serves the same pages
 instead and prints a URL (`--preact` serves the Preact build). Open it in any Chrome, type into the
 field, wait a second and reload: the log under the form shows `MARK SET` before the `PAINT` lines,
-and `MARK REMOVED` after them. The harness is a manual script and runs neither under `deno test` nor
-in CI.
+and `MARK REMOVED` after them. The same harness checks `focusFirstInvalid` (`/errors`, 2200px tall
+with a disabled invalid control before the real one): the first enabled invalid control has the
+focus and is in view after a full load, once; a form with no invalid control focuses nothing; a
+restored draft is focused after the mark is gone, on the restored text; a field the visitor is
+already in is not taken; the scroll is instant under `prefers-reduced-motion` and animated
+otherwise; the control stays in view with `ScrollRestoration` before, after and later (`idle`) than
+the form's comet; and an Orbit navigation focuses it again on each visit without a document load.
+`--serve` prints the pages with `?mode=clean|draft|steal` and `?scroll=before|after|idle` to try
+each by hand. The harness is a manual script and runs neither under `deno test` nor in CI.
 
 **Controlled values.** `restoreDraftValue` and `persistDraftValue` accept the form's `formId`, and
 with it follow the same lifecycle as the form's own fields: submitting the form clears the saved
@@ -672,8 +679,9 @@ into its own `useEffect`.
 
 ### Composing form behaviors: `ManagedForm`
 
-A ready-made Comet composing `FormDraftPersistence`/`SubmitGuard`/`UnsavedChangesGuard` under one
-`formId`, so enabling more than one doesn't mean repeating it across separate call sites:
+A ready-made Comet composing `FormDraftPersistence`/`SubmitGuard`/`UnsavedChangesGuard`, and the
+focus on the first invalid control (`focusFirstInvalid`, below), under one `formId`, so enabling
+more than one doesn't mean repeating it across separate call sites:
 
 ```tsx
 import { ManagedForm } from '@zanix/space/comet/react' // or '@zanix/space/comet/preact'
@@ -704,6 +712,63 @@ composed behavior — omit for the common case. Since `intercept` is a real func
 JSON-serializable, so it's excluded from `ManagedForm`'s own rendered Comet boundary props; pass it
 only by calling `attachManagedForm` directly from your own `'use comet'` file, the same way
 `useSubmitIntercept` already works standalone.
+
+**Focusing the first invalid control.** A form the server renders again with errors (a `422`
+re-render, or a redirect back to the form after a failed submit) reaches the client with the cursor
+nowhere, and the error can sit below the fold. `focusFirstInvalid` moves the focus to the first
+control marked `aria-invalid="true"` and brings it into view:
+
+```tsx
+<form id='new-trigger' method='post'>
+  <input name='email' aria-invalid={ctx.errors.email ? 'true' : undefined} />
+  {/* ... */}
+</form>
+<ManagedForm formId='new-trigger' focusFirstInvalid />
+```
+
+The contract with the application is only the attribute, so the option knows nothing about how an
+error is worded, styled or announced. It runs once per mount, on the next frame after the comet
+attaches, and does nothing when no control is marked. When the browser itself blocks a submit
+through native constraint validation it already focuses the first invalid control; this covers the
+error that comes back from the server, where no client-side check ran.
+
+- **Which control.** The first marked control in document order that can take the focus. A control
+  that is `disabled` (itself or through a `<fieldset>`), `hidden`, `inert`, inside a hidden or inert
+  container, or not rendered (`display: none`, `visibility: hidden`) is skipped for the next one, as
+  is a `type="hidden"` input. A container marked invalid, such as a `role="radiogroup"`, hands the
+  focus to the first usable control inside it, and is skipped when it has none.
+- **With a draft.** When the form's `draft` restores something (a render that follows a failed
+  submit, or one the page's `DraftProbe` marked), the focus waits until the restore has settled: the
+  same moment `data-draft-restoring` is removed, with the same 2 second ceiling. The focus then
+  lands on the restored value, and never on a field that is rewritten right after. A render that
+  restores nothing, including a `422` re-render (`hasServerValues`), focuses at once.
+- **A visitor already typing.** The focus is not taken from a text field, `select`, `textarea`,
+  checkbox, radio or `contenteditable` that already has it. A focused button or link does not block
+  it, which is what an Orbit navigation that started from a link leaves behind. A control the page
+  marked `autofocus` does not count as the visitor's choice: the invalid control wins over it. A
+  control that already has the focus is left where it is, with no scroll.
+- **Scrolling.** The control is centred in the viewport (`block: 'center'`), so a fixed header or
+  bottom bar does not cover it, with `behavior: 'smooth'`, or `'instant'` under
+  `prefers-reduced-motion: reduce`. The focus itself is taken without a scroll of its own
+  (`preventScroll`), so the page moves once.
+- **Orbit.** A client-side navigation to the form mounts the comet again, so it runs the same way as
+  on a full load, once per mount; a re-render of the same comet does not move the focus again.
+- **`UnsavedChangesGuard`.** Moving the focus fires no `input` or `change` event, so the form is not
+  marked as changed and no unload prompt follows.
+- **`ScrollRestoration`.** It sets the scroll position when it attaches, which could undo the scroll
+  of a form that focused first. The run is deferred one frame so that the comets hydrating in the
+  same burst have attached; a `ScrollRestoration` that hydrates later than that (a `visible` or
+  `media` strategy) could still reset the scroll after the focus, and the control would hold the
+  focus but sit out of view. The default strategy, and `idle`, were checked in Chrome.
+
+`attachFocusFirstInvalid` (`@zanix/space/comet`) is the same behavior for a form that does not use
+`ManagedForm`, with the form's `draft` options as an optional second input:
+
+```ts
+import { attachFocusFirstInvalid } from '@zanix/space/comet'
+
+useEffect(() => attachFocusFirstInvalid({ formId: 'new-trigger', draft }), [])
+```
 
 **Does not render the `<form>` itself**, same reason none of the primitives it composes do: a
 Comet's own props must be plain JSON, so a component that also needs to accept arbitrary field

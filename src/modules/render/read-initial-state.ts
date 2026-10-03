@@ -7,8 +7,14 @@ import { decodeFromWire } from './serialization-codec.ts'
  * zero-dependency `initial-state-global.ts` it imports) never imports `react-dom/server`, so
  * pulling it into a client bundle never drags server-only code along.
  *
- * @returns The value passed as `initialState` on the server, or `undefined` if the page was
- * rendered without one.
+ * A page renderer serializes the page's `loader` result only when the app asks:
+ * `defineSpaceApp({ serialization: { state } })` defaults to `'none'`, so on a page rendered by the
+ * framework this returns `undefined` unless the app set `state: 'all'`, `{ pick: [...] }` or
+ * `{ omit: [...] }`. A render that passes `initialState` to `renderToResponse` itself always carries
+ * it. Always handle the `undefined` case.
+ *
+ * @returns The value serialized into the page, or `undefined` if the page was rendered without
+ * state.
  *
  * @example
  * ```ts

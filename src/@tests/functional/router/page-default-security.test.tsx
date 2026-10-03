@@ -5,6 +5,10 @@ import { assert, assertEquals, assertMatch } from '@std/assert'
 import { SpacePageController } from 'modules/router/mod.ts'
 import { mockHandlerContext } from 'modules/testing/mod.ts'
 import { setCssManifest } from 'modules/render/css-manifest.ts'
+import {
+  resetInitialStatePolicy,
+  setInitialStatePolicy,
+} from 'modules/render/serialization-registry.ts'
 
 function View() {
   return <p>ok</p>
@@ -19,6 +23,44 @@ Deno.test(
       public override loader = () => ({})
     }
 
+    try {
+      // A page carries no state unless the app asks, so this app asks for it: the script exists
+      // for the nonce to be checked on.
+      setInitialStatePolicy({ mode: 'all' })
+      const response = await new DefaultCspPage(mockHandlerContext()).handleGet(
+        mockHandlerContext(),
+      )
+      const csp = response.headers.get('Content-Security-Policy')
+      assert(csp, 'expected a Content-Security-Policy header')
+      assertMatch(
+        csp,
+        /^default-src 'self'; script-src 'self' 'nonce-([^']+)'; style-src 'self' 'nonce-\1'$/,
+      )
+
+      const nonce = csp.match(/'nonce-([^']+)'/)?.[1]
+      assert(nonce, 'expected to extract a nonce from the CSP header')
+
+      const html = await response.text()
+      const escapedNonce = nonce.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      assertMatch(
+        html,
+        new RegExp(`<script[^>]*\\bnonce="${escapedNonce}"[^>]*>self\\.__ZANIX_SPACE_STATE__=`),
+      )
+    } finally {
+      resetInitialStatePolicy()
+    }
+  },
+)
+
+Deno.test(
+  'SpacePageController.handleGet: by default a page emits no initial-state script, and its CSP ' +
+    'header is the same nonce-based policy',
+  async () => {
+    class DefaultCspPage extends SpacePageController {
+      public override component = View
+      public override loader = () => ({ secret: 'server-only' })
+    }
+
     const response = await new DefaultCspPage(mockHandlerContext()).handleGet(
       mockHandlerContext(),
     )
@@ -28,13 +70,9 @@ Deno.test(
       csp,
       /^default-src 'self'; script-src 'self' 'nonce-([^']+)'; style-src 'self' 'nonce-\1'$/,
     )
-
-    const nonce = csp.match(/'nonce-([^']+)'/)?.[1]
-    assert(nonce, 'expected to extract a nonce from the CSP header')
-
     const html = await response.text()
-    const escapedNonce = nonce.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    assertMatch(html, new RegExp(`<script[^>]*\\bnonce="${escapedNonce}"`))
+    assert(!html.includes('__ZANIX_SPACE_STATE__'), html)
+    assert(!html.includes('server-only'), 'a loader value reached the document')
   },
 )
 

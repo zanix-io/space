@@ -34,6 +34,7 @@ export function ManagedForm(props: ManagedFormComponentProps): VNode | null {
     props.draft,
     props.submitGuard,
     props.unsavedChanges,
+    props.focusFirstInvalid,
   ])
   return restoring
     ? createElement(

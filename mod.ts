@@ -31,6 +31,7 @@ export type { BootstrapRemoteAppOptions } from 'modules/runtime/mod.ts'
 export type {
   AppSetupContext,
   ConfigAccessor,
+  InitialStateOption,
   RuntimeContext,
   SpaceAppConfig,
 } from 'typings/manifest.ts'

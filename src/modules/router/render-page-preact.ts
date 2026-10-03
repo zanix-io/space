@@ -29,6 +29,7 @@ import { resolveHead } from './head-descriptor.ts'
 import type { HeadDescriptor, ResolvedHead } from './head-descriptor.ts'
 import type { StylesheetRef } from '../render/css-manifest.ts'
 import { withCspSignatureMeta } from './csp-signature.ts'
+import { resolveInitialState } from '../render/initial-state-policy.ts'
 
 /**
  * Preact-core counterpart to `render-page-react.tsx` — the `PageRenderer`
@@ -334,7 +335,9 @@ export async function renderPageResponse<Params>(
     themeStyle: resolvedThemeStyle,
     pwa: pwaHead,
     nonce,
-    initialState: data,
+    // What crosses to the client: `data` under the app's `serialization.state` policy. The
+    // component still renders with all of `data`.
+    initialState: resolveInitialState(data),
     bootstrapModules: clientEntryUrl ? [clientEntryUrl] : undefined,
     // Resolved to an ABSOLUTE path — see `render-page-react.tsx`'s own identical comment for why:
     // `handleSsrModuleChanged` (`dev-client-script.ts`) compares this against `affectedRoutes`,

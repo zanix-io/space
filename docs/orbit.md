@@ -207,6 +207,10 @@ import { readInitialState } from '@zanix/space/client'
 const { id } = readInitialState<{ id: string }>() ?? {}
 ```
 
+`initialState` here is the explicit option, always emitted. A page rendered by the framework carries
+no state unless the app sets `serialization.state`; see "Controlling what crosses to the client"
+below.
+
 **What's safe to put in `initialState` (or a Comet's own props)**: plain JSON only — the same values
 `JSON.stringify`/`JSON.parse` round-trip losslessly (strings, finite numbers, booleans, `null`, and
 plain arrays/objects of the same). `undefined`/functions are silently dropped, `Date` serializes to
@@ -226,6 +230,137 @@ renderers. Everything else above is unchanged: `undefined`/functions are still d
 circular reference or `BigInt` still fails exactly the same way. Scoped to those three types on
 purpose — Space does not ship a general richer-than-JSON wire format, and this option is not a step
 toward one. With it off, the bytes on the wire are byte-for-byte what they were before it existed.
+
+### Controlling what crosses to the client (`serialization.state`)
+
+A page rendered by the framework hands nothing to its client by default. This section is the full
+contract: what the state is, the four values `serialization.state` takes, how to choose, and what
+the option does not touch.
+
+#### What `__ZANIX_SPACE_STATE__` is
+
+Every full-document render can carry one inline `<script>` that assigns the page's state to
+`self.__ZANIX_SPACE_STATE__` before hydration. `readInitialState()` (from `@zanix/space/client`)
+reads it back in the browser. For a page, that state is built from its `loader` result: the same
+value the component renders with on the server.
+
+Serializing the whole `loader` result is a trap, because the loader returns what the server needs to
+render, not what the browser needs to know. In Space 1.x it was serialized in full, which has two
+consequences. **Weight:** a page that returns its message catalog for `IntlProvider` ships every
+message key inside its own HTML, which in a large app is most of the document. **Privacy:** any
+value a `loader` returns for the server render, a person's profile, an email, a token a component
+used to call a service, was also written into the HTML as readable JSON, whether or not any client
+code used it. Since 2.0.0 a page serializes nothing unless the app asks.
+
+#### The four values
+
+```ts
+defineSpaceApp({
+  name: 'web',
+  serialization: { state: 'none' }, // the default; shown only to be explicit
+})
+```
+
+| `state`                  | What crosses to the client                                    | `readInitialState()`           |
+| ------------------------ | ------------------------------------------------------------- | ------------------------------ |
+| `'none'` (default)       | Nothing: no state script and no `self.__ZANIX_SPACE_STATE__`. | `undefined`                    |
+| `'all'`                  | Everything the `loader` returned, as 1.x did.                 | the whole result               |
+| `{ pick: ['a', 'b'] }`   | Only these top-level keys.                                    | an object with only those keys |
+| `{ omit: ['messages'] }` | Every top-level key except these.                             | an object without those keys   |
+
+```ts
+// 1. Nothing crosses. Right for an app whose Comets get everything they need through props.
+defineSpaceApp({ name: 'web' })
+
+// 2. Everything crosses. The 1.x behavior; use it only to keep an old client working.
+defineSpaceApp({ name: 'web', serialization: { state: 'all' } })
+
+// 3. Only what the client reads crosses. The safest way to keep a client that calls
+//    `readInitialState()`: a new key a loader starts returning stays on the server.
+defineSpaceApp({ name: 'web', serialization: { state: { pick: ['lang', 'user'] } } })
+
+// 4. Everything crosses except what only the server uses. Convenient, but a new key crosses by
+//    default, so prefer `pick` for anything sensitive.
+defineSpaceApp({ name: 'web', serialization: { state: { omit: ['messages'] } } })
+```
+
+`omit` and `pick` cannot be combined. Any invalid value, including a combination, an object with
+neither list, a key that is not an option or a list that is not an array of strings, throws a
+`InternalError` when the app starts, with a message that says what to use instead, so a typo never
+reaches a request. The rules for what counts as a state:
+
+- Keys are matched by name at the **top level** only. A nested key with the same name is part of its
+  parent and is kept or dropped with it.
+- `omit` and `pick` apply to a **plain object**. A `loader` result that is an array, a `Date`, a
+  `Map` or a class instance is serialized as it is. A key listed but absent from the result is
+  ignored. `pick: []` serializes an empty object.
+- The component always renders with the **whole** `loader` result. Only the serialized copy changes:
+  the value the `loader` returned is never mutated, and the page's ETag is still computed from all
+  of it.
+- It works together with `serialization.extendedTypes`: `Date`, `Map` and `Set` that cross still
+  round-trip as real instances.
+
+#### How to choose
+
+Ask one question: does any client code read `readInitialState()` or `self.__ZANIX_SPACE_STATE__`?
+
+- **No:** leave the default. This is the case for a Comet-based app, because a Comet receives its
+  data as its own props (`data-comet-props`), not through the state.
+- **Yes:** list what it reads with `pick`. If it reads everything, `'all'` keeps it working, with
+  the weight and privacy cost above.
+
+#### The message catalog
+
+The usual victim of the old default is the catalog. A page's `loader` calls `loadMessages()` and
+returns it so the server can format the page through `IntlProvider`. The browser rarely needs it: a
+Comet hydrates as its own root, with no `IntlProvider` above it, so it cannot use the page's catalog
+anyway and receives already-resolved strings as props. With the default nothing needs to be
+configured, and the catalog stays on the server. If you must keep the rest of the state, leave only
+the catalog out:
+
+```ts
+defineSpaceApp({ name: 'web', serialization: { state: { omit: ['messages'] } } })
+```
+
+When a Comet does have to format on the client (a plural or a date it computes after hydration),
+pass it the small subset of keys it uses as a prop and mount its own `IntlProvider` inside it,
+rather than shipping the page's whole catalog. For a larger, non-critical subset, see "Deliberately
+deferred" in [`docs/i18n.md`](./i18n.md): a Comet fetching its own subset on hydration is the
+natural fit.
+
+#### What the option does not change
+
+| Channel                                          | Affected?                                                                                                                           |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| The component's own props on the server          | No: it renders with the whole `loader` result.                                                                                      |
+| A Comet's props (`data-comet-props`)             | No: a separate channel, serialized as always.                                                                                       |
+| An explicit `renderToResponse({ initialState })` | No: it is explicit, so it is always emitted.                                                                                        |
+| `data-error-messages` on an error boundary       | No: it carries the boundary's own catalog. The React renderer emits it on every boundary, the Preact renderer only after a failure. |
+| An Orbit fragment                                | No: a fragment is not a document and never carried state.                                                                           |
+| The page's ETag and the CSP nonce                | No.                                                                                                                                 |
+
+`readInitialState()` returns `T | undefined`: `undefined` is its contract for a page that carries no
+state, which is now the normal case for a page. Always handle it.
+
+#### Migrating to 2.0.0
+
+If your client reads `readInitialState()` or `self.__ZANIX_SPACE_STATE__` from a page the framework
+rendered, it now gets `undefined`. Restore the data with the narrowest option that fits:
+
+```ts
+// before 2.0.0, implicit
+defineSpaceApp({ name: 'web' })
+
+// after: keep exactly the old behavior
+defineSpaceApp({ name: 'web', serialization: { state: 'all' } })
+
+// after: keep only what the client reads (recommended)
+defineSpaceApp({ name: 'web', serialization: { state: { pick: ['lang', 'user'] } } })
+```
+
+To find the readers, search the app and its dependencies for `readInitialState` and
+`__ZANIX_SPACE_STATE__`. A render that passes `initialState` to `renderToResponse` itself needs no
+change.
 
 ## See also
 

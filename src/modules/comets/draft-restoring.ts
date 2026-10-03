@@ -112,3 +112,29 @@ export function watchDraftRestoring(
     onSettled()
   })
 }
+
+/**
+ * Runs `run` once the form `formId` is no longer restoring a draft: at once when the render
+ * restores nothing ({@linkcode startsRestoring} is false and the page's probe set no mark), else
+ * when {@linkcode watchDraftRestoring} settles, which happens after every controlled value in
+ * `awaitValues` reported or {@linkcode DRAFT_RESTORE_TIMEOUT_MS} passed. For behavior that must
+ * not act on a form while its fields are still being rewritten (`attachFocusFirstInvalid`). Calls
+ * `run` at most once.
+ *
+ * @returns A cleanup function — stops waiting; `run` is not called after it.
+ */
+export function whenDraftRestored(
+  formId: string,
+  options: {
+    hasServerValues: boolean
+    returnedFromFailure?: boolean
+    awaitValues?: string[]
+  },
+  run: () => void,
+): () => void {
+  if (!startsRestoring(options) && !isDraftProbeMarked(formId)) {
+    run()
+    return () => {}
+  }
+  return watchDraftRestoring(formId, options, run)
+}

@@ -93,6 +93,11 @@ nothing else is stubbed ahead of time:
 - ✅ **i18n content resolution** (`loadMessages`, `defineSpaceApp({ messagesDir })`) — a
   `(lang, population)` base+override catalog, cached, bypassed under `znx space dev`. See
   [`docs/i18n.md`](./docs/i18n.md) for the full contract.
+- ✅ **Initial state** (`defineSpaceApp({ serialization: { state } })`) — what a page hands to its
+  own client in `self.__ZANIX_SPACE_STATE__`: nothing by default (`'none'`), or `'all'`, `{ pick }`
+  or `{ omit }`. A page's `loader` result is never serialized unless the app asks. See
+  ["Controlling what crosses to the client"](./docs/orbit.md#controlling-what-crosses-to-the-client-serializationstate)
+  for the contract and the 2.0.0 migration.
 - ✅ **Head management** (`SpacePageController.head`) — `<title>`/`<meta>`/`<link>` merged across
   the whole composition chain, most-specific-wins, deduplicated. See
   [`docs/head.md`](./docs/head.md) for the full precedence/dedup contract.
@@ -234,7 +239,8 @@ ready-made Comets under `@zanix/space/comet/react` / `@zanix/space/comet/preact`
 prevention), `ScrollRestoration` (scroll-position recovery across a refresh or an Orbit navigation),
 `UnsavedChangesGuard` (a native "leave site?" warning before an unsaved form is discarded),
 `NetworkStatus` (live online/offline as a `data-*` attribute), and `ManagedForm` (composes the three
-form-level behaviors above under one `formId`).
+form-level behaviors above under one `formId`, and with `focusFirstInvalid` focuses the first
+control the server rendered as `aria-invalid="true"`).
 
 ### Client-side navigation ("Orbit")
 
@@ -277,8 +283,8 @@ generating its own nonce'd content client-side), and the lower-level
 ### Middleware (guards, default CSP and security headers)
 
 Every page gets `Content-Security-Policy` and a small set of security headers automatically, with no
-configuration — nonce-based, not `'unsafe-inline'`, coordinated with `renderToResponse`'s own inline
-initial-state `<script>`:
+configuration — nonce-based, not `'unsafe-inline'`, coordinated with the inline initial-state
+`<script>` a render emits when a page carries state:
 
 ```tsx
 @Page('products/:id')

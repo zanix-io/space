@@ -5,6 +5,67 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.17.0] - 2026-10-03
+
+### Changed
+
+- **A page no longer serializes its `loader` result to the client by default.** A page's `loader`
+  result is the props its component renders with on the server, and 1.x also wrote all of it into
+  `self.__ZANIX_SPACE_STATE__`, readable JSON in the HTML. That cost weight (a page that returns its
+  message catalog for `IntlProvider` carried every message key in its own document, most of the page
+  in a large app) and privacy (any value a loader returned for the server render, a profile, an
+  email, a token a component used, reached the browser whether or not client code used it). The new
+  `serialization.state` option defaults to `'none'`: no state script, no
+  `self.__ZANIX_SPACE_STATE__`, and `readInitialState()` returns `undefined`. The component still
+  renders with the whole `loader` result.
+- **`defineSpaceApp({ serialization: { state } })`** chooses what crosses: `'none'` (the default),
+  `'all'` (everything the loader returned, the 1.x behavior), `{ pick: ['a', 'b'] }` (only those
+  top-level keys) or `{ omit: ['messages'] }` (every top-level key but those). `omit` and `pick`
+  cannot be combined, and an invalid value throws an `InternalError` when the app starts, with a
+  message that says what to use instead. Keys are matched at the top level only; `omit` and `pick`
+  apply to a plain object, and any other `loader` result (an array, a `Date`, a class instance) is
+  serialized as it is. The loader's value is never mutated, the page's ETag is still computed from
+  all of it, and it works together with `serialization.extendedTypes` in every mode.
+- **Unchanged:** an explicit `renderToResponse({ initialState })` is always emitted, a Comet's own
+  props (`data-comet-props`) are serialized as before, `data-error-messages` on an error boundary is
+  untouched, and Orbit fragments never carried state. `readInitialState()` keeps its `T | undefined`
+  return type; `undefined` is now the usual value on a page.
+- **The type `InitialStateOption`** is exported from `@zanix/space`.
+
+### Added
+
+- **`ManagedForm` option `focusFirstInvalid`.** A form the server renders again with errors reaches
+  the client with the focus nowhere, and the error can sit below the fold. With the option set, the
+  first control marked `aria-invalid="true"` takes the focus and is scrolled into view, once per
+  mount. The contract is only the attribute, so the option knows nothing about how an application
+  words or styles an error. A disabled, `hidden`, `inert` or not rendered control is skipped for the
+  next one, and a container marked invalid (a `role="radiogroup"`) hands the focus to its first
+  usable control. When the form's `draft` restores something, the focus waits for the restore to
+  settle (the moment `data-draft-restoring` is removed, with the same 2 second ceiling), so it lands
+  on the restored value. It never takes the focus from a field the visitor is already in (a control
+  the page marked `autofocus` does not count), and it scrolls instantly under
+  `prefers-reduced-motion: reduce`. Omitted, nothing changes.
+- **`attachFocusFirstInvalid`** (`@zanix/space/comet`, with `FocusFirstInvalidOptions` and
+  `FocusFirstInvalidDraft`): the same behavior for a form that does not use `ManagedForm`.
+
+### Notes
+
+If your client reads `readInitialState()` or `self.__ZANIX_SPACE_STATE__` from a page the framework
+rendered, it now gets `undefined`. Search your app and its dependencies for those two names, then
+restore the data with the narrowest option that fits:
+
+```ts
+// keep exactly the 1.x behavior
+defineSpaceApp({ name: 'web', serialization: { state: 'all' } })
+
+// keep only what the client reads (recommended: a key a loader starts returning stays server-side)
+defineSpaceApp({ name: 'web', serialization: { state: { pick: ['lang', 'user'] } } })
+```
+
+An app whose Comets get their data through props needs no change, and now stops shipping its message
+catalog in every page. A render that passes `initialState` to `renderToResponse` needs no change
+either. See "Controlling what crosses to the client" in [`docs/orbit.md`](./docs/orbit.md).
+
 ## [1.16.6] - 2026-10-03
 
 ### Added

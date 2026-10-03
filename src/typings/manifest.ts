@@ -49,6 +49,23 @@ export type { AppSetupContext, ConfigAccessor, RuntimeContext }
 export type { BehaviorDeclaration }
 
 /**
+ * What a page hands to its own client in `self.__ZANIX_SPACE_STATE__`. See
+ * `SpaceAppConfig.serialization` for what each form does and how to choose.
+ *
+ * - `'none'`: no state at all. The default.
+ * - `'all'`: everything the page's `loader` returned.
+ * - `{ pick }`: only these top-level keys.
+ * - `{ omit }`: every top-level key but these.
+ *
+ * `omit` and `pick` are mutually exclusive.
+ */
+export type InitialStateOption =
+  | 'none'
+  | 'all'
+  | { omit: readonly string[]; pick?: never }
+  | { pick: readonly string[]; omit?: never }
+
+/**
  * Author-facing configuration for a `@zanix/space` app — the parameter to `defineSpaceApp()`.
  *
  * Only `name` is required. Everything else either has a sensible default or is optional because
@@ -390,8 +407,48 @@ export interface SpaceAppConfig {
    * ```ts
    * defineSpaceApp({ name: 'storefront', serialization: { extendedTypes: true } })
    * ```
+   *
+   * **`state`** decides what a page hands to its own client in `self.__ZANIX_SPACE_STATE__`, the
+   * value `readInitialState()` reads back. A page's `loader` result is both the props its
+   * component renders with on the server and what could cross to the client, and the default is
+   * that **nothing crosses**: a page serializes no state, emits no script and sets no global, so
+   * data a `loader` returns for the server render (a message catalog, a person's profile, a
+   * token) never reaches the browser unless the app asks. Ask with the form that fits what the
+   * client actually reads:
+   *
+   * - `'none'` — the default. No state at all; `readInitialState()` returns `undefined`.
+   * - `'all'` — everything the `loader` returned, as before. Every key is serialized, including
+   *   any personal or sensitive value, so prefer `pick`.
+   * - `{ pick: ['a', 'b'] }` — only these top-level keys cross.
+   * - `{ omit: ['messages'] }` — every top-level key but these cross.
+   *
+   * `omit` and `pick` cannot be combined, and an invalid value throws when the app starts. The
+   * component always renders with the whole `loader` result: only the serialized copy changes, the
+   * `loader`'s value is never mutated, and the page's ETag is still computed from all of it.
+   * Keys are matched by name at the top level only (a nested key of the same name is handled
+   * with its parent), and `omit`/`pick` apply to a plain object: a `loader` result that is an
+   * array, a `Date` or a class instance is serialized as it is. It works together with
+   * `extendedTypes`.
+   *
+   * It decides only the automatic serialization of a page's `loader` result. An explicit
+   * `renderToResponse({ initialState })` is always emitted, a Comet's own props
+   * (`data-comet-props`) are unchanged, Orbit fragments carry no state, and neither does it cover
+   * `data-error-messages`, the separate attribute an error boundary carries its own message
+   * catalog in.
+   *
+   * @example
+   * ```ts
+   * // The default: nothing crosses.
+   * defineSpaceApp({ name: 'web' })
+   * // The client reads `readInitialState()`: let everything cross (what 1.x always did).
+   * defineSpaceApp({ name: 'web', serialization: { state: 'all' } })
+   * // Only what the client reads crosses.
+   * defineSpaceApp({ name: 'web', serialization: { state: { pick: ['lang', 'user'] } } })
+   * // Everything crosses but the message catalog, which only the server renders with.
+   * defineSpaceApp({ name: 'web', serialization: { state: { omit: ['messages'] } } })
+   * ```
    */
-  serialization?: { extendedTypes?: boolean }
+  serialization?: { extendedTypes?: boolean; state?: InitialStateOption }
   /**
    * PWA support — the Web App Manifest, icon routes, and (once `loadPwaBuildOutput` has run) a
    * generated service worker, all registered as part of this app's own `setup(ctx)`, same timing as

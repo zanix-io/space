@@ -178,3 +178,54 @@ Deno.test(
     }
   },
 )
+
+Deno.test(
+  'ManagedForm (react): focusFirstInvalid crosses the Comet boundary as a plain prop, and adds no markup of its own',
+  async () => {
+    try {
+      const html = stripHydrationComments(
+        await (
+          await renderToResponseReact(<ManagedFormReact formId='new-trigger' focusFirstInvalid />)
+        ).text(),
+      )
+
+      assert(
+        html.includes(
+          'data-comet-props="{&quot;formId&quot;:&quot;new-trigger&quot;,' +
+            '&quot;focusFirstInvalid&quot;:true}"',
+        ),
+        html,
+      )
+      assertFalse(html.includes('data-draft-restoring'), html)
+    } finally {
+      reset()
+    }
+  },
+)
+
+Deno.test(
+  'ManagedForm (preact): focusFirstInvalid crosses the Comet boundary as a plain prop, and adds no markup of its own',
+  async () => {
+    try {
+      setActiveRenderer('preact')
+      const html = stripHydrationComments(
+        await (
+          await renderToResponsePreact(
+            createElement(ManagedFormPreact, { formId: 'new-trigger', focusFirstInvalid: true }),
+          )
+        ).text(),
+      )
+
+      assert(
+        html.includes(
+          'data-comet-props="{&quot;formId&quot;:&quot;new-trigger&quot;,' +
+            '&quot;focusFirstInvalid&quot;:true}"',
+        ),
+        html,
+      )
+      assertFalse(html.includes('data-draft-restoring'), html)
+    } finally {
+      reset()
+    }
+  },
+)

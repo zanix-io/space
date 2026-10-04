@@ -48,6 +48,9 @@ export function installPreactRuntime(): void {
     // and does not claim.
     createElement: createElement as CometElementFactory,
     idScopeProvider: CometIdScopeProvider,
+    // No hoisting in Preact: a `<link>` where the boundary renders; the response drops repeats.
+    modulePreloader: (hrefs) =>
+      hrefs.map((href) => createElement('link', { key: href, rel: 'modulepreload', href })),
   })
 }
 

@@ -19,6 +19,7 @@ import deno from '@deno/vite-plugin'
 import react, { reactCompilerPreset } from '@vitejs/plugin-react'
 import preact from '@preact/preset-vite'
 import { cometPlugin } from 'modules/bundler/comet-plugin.ts'
+import { modulePreloadPlugin } from 'modules/bundler/modulepreload-plugin.ts'
 
 export type RendererKind = 'react' | 'preact'
 
@@ -78,6 +79,8 @@ export async function buildCometsClient(options: BuildCometsClientOptions): Prom
       deno(),
       rendererPlugins(renderer, compiler),
       cometPlugin({ knownEntryPaths: Object.values(comets) }),
+      // The manifest of static chunk dependencies `buildSpaceClient` also writes.
+      modulePreloadPlugin(),
     ],
   })
 }

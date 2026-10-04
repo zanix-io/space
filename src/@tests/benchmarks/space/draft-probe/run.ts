@@ -38,6 +38,11 @@ import { SpacePageController } from 'modules/router/mod.ts'
 import { setPageTree } from 'modules/router/page-tree-registry.ts'
 import { setCssManifest } from 'modules/render/css-manifest.ts'
 import { setCometManifest } from 'modules/comets/comet-manifest.ts'
+import { CLIENT_ENTRY_VIRTUAL_ID, setClientEntryManifest } from 'modules/render/client-entry.ts'
+import {
+  setModulePreloadEnabled,
+  setModulePreloadManifest,
+} from 'modules/render/modulepreload-manifest.ts'
 import { installReactRuntime } from '../../../../../mod-react.ts'
 import { installPreactRuntime } from '../../../../../mod-preact.ts'
 import { setActiveRenderer } from 'modules/router/active-renderer.ts'
@@ -133,12 +138,13 @@ async function main(): Promise<void> {
     await checkFocusFirstInvalid(browser, renderer, port, results)
     await checkState(browser, renderer, port, results)
     await checkLayoutStyles(browser, renderer, port, results)
+    await checkModulePreload(browser, renderer, port, results)
     await stop()
   }
   await browser.close()
 
   console.log(
-    '\n=== Draft probe, focusFirstInvalid, serialization.state and layout styles in a real browser ===\n',
+    '\n=== Draft probe, focusFirstInvalid, serialization.state, layout styles and module preloads in a real browser ===\n',
   )
   let failed = false
   for (const [name, ok] of Object.entries(results)) {
@@ -252,6 +258,127 @@ async function checkLayoutStyles(
   await page.waitForTimeout(1000)
   results[name('control: the same head link does apply on a full document')] =
     (await colorOf('.marker-head')) === 'rgb(4, 5, 6)'
+
+  results[name('no console or page errors, CSP included')] = problems.length === 0
+    ? true
+    : problems.join(' | ')
+  await context.close()
+}
+
+/**
+ * Module preloads, in a real browser: the head order, what the browser fetches and when, the
+ * default CSP, and an Orbit navigation. `/preload` has the preloads on; `/preload-off` is the
+ * control with them off, where each comet chunk is requested only after the entry has run.
+ */
+async function checkModulePreload(
+  // deno-lint-ignore no-explicit-any
+  browser: any,
+  renderer: Renderer,
+  port: number,
+  results: Record<string, boolean | string>,
+) {
+  const name = (label: string) => `${renderer}: module preload: ${label}`
+  const base = `http://localhost:${port}`
+  const context = await browser.newContext()
+  const page = await context.newPage()
+  const problems: string[] = []
+  page.on('pageerror', (error: Error) => problems.push(`pageerror: ${error.message}`))
+  page.on('console', (message: { type: () => string; text: () => string }) => {
+    if (message.type() === 'error') problems.push(`console: ${message.text()}`)
+  })
+  type Asset = { path: string; at: number; done: number }
+  const assets = (): Promise<Asset[]> =>
+    page.evaluate(async () => await (await fetch('/__assets')).json())
+  const reset = () => page.evaluate(async () => await fetch('/__assets/reset'))
+  /** Every link in document order: `s:<href>` for a stylesheet, `m:<href>` for a preload. React
+   * hoists them into `<head>`; Preact leaves a preload where its comet renders. */
+  const headLinks = (): Promise<string[]> =>
+    page.evaluate(() =>
+      [...document.querySelectorAll('link')].map((l) => {
+        const rel = l.getAttribute('rel')
+        return `${rel === 'stylesheet' ? 's' : rel === 'modulepreload' ? 'm' : '?'}:${
+          new URL(l.href).pathname
+        }`
+      })
+    )
+  const hydrated = (): Promise<boolean> =>
+    page.evaluate(() => {
+      const boundaries = [...document.querySelectorAll('[data-comet]')]
+      // Preact marks a hydrated root with `__k`; React puts a `__reactContainer$…` key on it.
+      return boundaries.length > 0 && boundaries.every((b) =>
+        // deno-lint-ignore no-explicit-any
+        (b as any).__k || (b as any)._children ||
+        Object.keys(b).some((key) => key.startsWith('__reactContainer'))
+      )
+    })
+
+  // The control first: with the option off, a comet chunk is asked for only once the entry ran.
+  await page.goto(`${base}/preload-off`, { waitUntil: 'load' })
+  await page.waitForFunction(() => document.querySelector('[data-comet]') !== null)
+  await page.waitForTimeout(2500)
+  const control = await assets()
+  const controlEntry = control.find((a) => /client-entry-/.test(a.path))
+  const controlComets = control.filter((a) => !/client-entry-/.test(a.path))
+  results[name('control: with the option off the page links no modulepreload of its own')] =
+    !(await headLinks()).some((l) => l.startsWith('m:') && !/client-entry-/.test(l))
+  results[name('control: without preloads a comet chunk waits for the entry to arrive')] =
+    controlEntry !== undefined && controlComets.length > 0 &&
+    controlComets.every((a) => a.at >= controlEntry.done)
+
+  // The page with the preloads on.
+  await reset()
+  await page.goto(`${base}/preload`, { waitUntil: 'load' })
+  await page.waitForFunction(() => document.querySelector('[data-comet]') !== null)
+  await page.waitForTimeout(2500)
+  const links = await headLinks()
+  const firstPreload = links.findIndex((l) => l.startsWith('m:'))
+  const lastSheet = links.map((l) => l.startsWith('s:')).lastIndexOf(true)
+  results[name('the document links the page stylesheet')] = lastSheet !== -1
+  results[name('every stylesheet comes before every modulepreload in the document')] =
+    firstPreload !== -1 && lastSheet !== -1 && lastSheet < firstPreload
+  const preloadHrefs = links.filter((l) => l.startsWith('m:'))
+  results[name('each preload URL is linked once')] = preloadHrefs.length > 0 &&
+    new Set(preloadHrefs).size === preloadHrefs.length
+
+  const log = await assets()
+  const entry = log.find((a) => /client-entry-/.test(a.path))
+  const comets = log.filter((a) => !/client-entry-/.test(a.path))
+  results[name('every asset is requested exactly once')] = log.length > 0 &&
+    new Set(log.map((a) => a.path)).size === log.length
+  results[name('the comet chunks are requested before the entry has arrived')] =
+    entry !== undefined && comets.length > 0 && comets.every((a) => a.at < entry.done)
+  const noPreloadHits = controlComets.length
+  results[name('the comets are hydrated')] = await hydrated()
+  results[name('the same chunks load with or without preloads')] =
+    new Set(comets.map((a) => a.path)).size === new Set(controlComets.map((a) => a.path)).size &&
+    noPreloadHits > 0
+  const violations = await page.evaluate(() =>
+    ((window as never as { __draftLog?: string[] }).__draftLog ?? []).filter((l) =>
+      l.includes('CSP VIOLATION')
+    )
+  )
+  results[name('the default CSP (script-src self + nonce) blocks none of them')] =
+    violations.length === 0 ? true : violations.join(' | ')
+
+  // An Orbit navigation to another page with comets: no chunk is fetched twice, no error.
+  await page.evaluate(() => {
+    ;(window as never as { __sameDocument: boolean }).__sameDocument = true
+  })
+  await page.click('[data-testid=to-errors]')
+  await page.waitForFunction(
+    () => document.querySelector('h1')?.textContent === 'Errors fixture',
+    undefined,
+    {
+      timeout: 8000,
+    },
+  )
+  await page.waitForTimeout(1500)
+  const afterOrbit = await assets()
+  results[name('an Orbit navigation is a client navigation')] = await page.evaluate(
+    () => (window as never as { __sameDocument?: boolean }).__sameDocument === true,
+  )
+  results[name('an Orbit navigation fetches no chunk twice')] =
+    new Set(afterOrbit.map((a) => a.path)).size === afterOrbit.length
 
   results[name('no console or page errors, CSP included')] = problems.length === 0
     ? true
@@ -654,6 +781,9 @@ async function startFixture(
   else installReactRuntime()
   setActiveRenderer(renderer)
   setCometManifest(JSON.parse(await Deno.readTextFile(join(outDir, 'comets-manifest.json'))))
+  const preloadManifest = JSON.parse(
+    await Deno.readTextFile(join(outDir, 'modulepreload-manifest.json')),
+  )
   const entryAsset = await findBuiltAsset(join(outDir, 'assets'), 'client-entry')
   const ManagedForm = (await import(`../../../../modules/comets/${managedFile}`)).default
   const ScrollRestoration = (await import(`../../../../modules/comets/${scrollFile}`)).default
@@ -691,6 +821,13 @@ async function startFixture(
   // instead of `styles`, as the control.
   const rootSegment = { layoutFilePath: '/fake/routes/layout.tsx' }
   const oneChain = [rootSegment, { layoutFilePath: '/fake/routes/one/layout.tsx' }]
+  // The preload fixture: under the root layout, so its stylesheet is a page-level `<link>` in the
+  // head, ahead of the preloads the comets ask for.
+  class PageE extends SpacePageController {
+    // deno-lint-ignore no-explicit-any
+    public override component = (() => null) as any
+  }
+  setPageTree(PageE, { filePath: '/fake/routes/preload/page.tsx', segments: [rootSegment] })
   const makePage = () =>
     class extends SpacePageController {
       // deno-lint-ignore no-explicit-any
@@ -732,6 +869,52 @@ async function startFixture(
     '/css/head.css': '.marker-head { color: rgb(4, 5, 6); }',
   }
   const hits: Record<string, number> = {}
+  /** Every `/assets/` request in arrival order with the time it arrived and when it was answered,
+   * so a check can tell a chunk requested ahead of the entry from one requested after it. */
+  const assetLog: { path: string; at: number; done: number }[] = []
+  const serverStart = performance.now()
+
+  /** `/preload` renders two comets that share chunks, with the module preloads on (`on`) or off
+   * (the control). The client entry is registered only while it renders, so the other fixture
+   * pages (which add the entry script by hand) are unchanged. */
+  async function renderPreloadPage(on: boolean, fragmentOnly: boolean, nonce: string, csp: string) {
+    const draft = { storageKey: 'fixture/preload', hasServerValues: false }
+    const body = () =>
+      el('div', null, [
+        el('h1', { key: 'h' }, 'Preload fixture'),
+        el('form', { key: 'f', id: 'preload-form', method: 'post' }, [
+          el('input', { key: 'i', name: 'note' }),
+        ]),
+        el(ManagedForm, { key: 'm', formId: 'preload-form', draft }),
+        el(ScrollRestoration, { key: 'sr' }),
+        el('a', { key: 'l', href: '/errors', 'data-testid': 'to-errors' }, 'go to errors'),
+      ])
+    setModulePreloadEnabled(on)
+    setModulePreloadManifest(preloadManifest)
+    setClientEntryManifest({ [CLIENT_ENTRY_VIRTUAL_ID]: entryAsset })
+    try {
+      const response = await renderPageResponse(
+        // deno-lint-ignore no-explicit-any
+        PageE as any,
+        body,
+        mockPageContext(),
+        undefined,
+        fragmentOnly,
+        nonce,
+        undefined,
+        normalizeCspSignature(csp),
+      )
+      let html = await response.text()
+      if (!fragmentOnly) {
+        html = html.replace('<head>', `<head><script nonce="${nonce}">${OBSERVER_SOURCE}</script>`)
+      }
+      return html
+    } finally {
+      setClientEntryManifest(undefined)
+      setModulePreloadManifest(undefined)
+      setModulePreloadEnabled(true)
+    }
+  }
 
   async function renderLayoutPage(path: string, fragmentOnly: boolean, nonce: string, csp: string) {
     const { Target, label, area } = layoutPages[path as keyof typeof layoutPages]
@@ -901,10 +1084,18 @@ async function startFixture(
 
   const server = Deno.serve({ port: 0, onListen: () => {} }, async (req) => {
     const url = new URL(req.url)
+    if (url.pathname === '/__assets') return Response.json(assetLog)
+    if (url.pathname === '/__assets/reset') {
+      assetLog.length = 0
+      return new Response('ok')
+    }
     if (url.pathname.startsWith('/assets/')) {
+      const entry = { path: url.pathname, at: performance.now() - serverStart, done: -1 }
+      assetLog.push(entry)
       try {
         const file = await Deno.readFile(join(outDir, url.pathname))
         await new Promise((resolve) => setTimeout(resolve, CLIENT_DELAY_MS))
+        entry.done = performance.now() - serverStart
         return new Response(file, {
           headers: { 'content-type': 'text/javascript' },
         })
@@ -917,6 +1108,20 @@ async function startFixture(
       hits[url.pathname] = (hits[url.pathname] ?? 0) + 1
       await new Promise((resolve) => setTimeout(resolve, LAYOUT_CSS_DELAY_MS))
       return new Response(layoutCss[url.pathname], { headers: { 'content-type': 'text/css' } })
+    }
+    if (url.pathname === '/preload' || url.pathname === '/preload-off') {
+      const nonce = crypto.randomUUID().replaceAll('-', '')
+      const csp =
+        `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'nonce-${nonce}'`
+      const html = await renderPreloadPage(
+        url.pathname === '/preload',
+        req.headers.get(ORBIT_FRAGMENT_HEADER) !== null,
+        nonce,
+        csp,
+      )
+      return new Response(html, {
+        headers: { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': csp },
+      })
     }
     if (url.pathname in layoutPages) {
       // The framework's zero-config default policy, with a fresh nonce per request.

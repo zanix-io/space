@@ -98,6 +98,10 @@ nothing else is stubbed ahead of time:
   or `{ omit }`. A page's `loader` result is never serialized unless the app asks. See
   ["Controlling what crosses to the client"](./docs/orbit.md#controlling-what-crosses-to-the-client-serializationstate)
   for the contract and the 1.17.0 migration.
+- ✅ **Module preloads** — a production page links `<link rel="modulepreload">` for its client entry
+  and its comets with the chunks they import, after the stylesheets, so hydration starts earlier. On
+  by default; `defineSpaceApp({ modulepreload: false })` turns it off. See
+  ["Preloading a comet's chunks"](./docs/comets.md#preloading-a-comets-chunks-modulepreload).
 - ✅ **Head management** (`SpacePageController.head`) — `<title>`/`<meta>`/`<link>` merged across
   the whole composition chain, most-specific-wins, deduplicated. See
   [`docs/head.md`](./docs/head.md) for the full precedence/dedup contract.

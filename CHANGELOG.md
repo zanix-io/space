@@ -34,6 +34,21 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **A production page preloads its comets' chunks (`<link rel="modulepreload">`).**
+  `zanix space
+  build` writes `modulepreload-manifest.json`: for the client entry and every comet,
+  the chunks it imports statically, directly or through another chunk. A comet boundary asks the
+  renderer to preload the entry and its own module with that list, so the browser fetches the whole
+  chain in one round instead of discovering each level of imports after the one above it. Requested
+  at the comet, a page with no comet preloads nothing of its own. React hoists each
+  `preloadModule()` into `<head>`, after the stylesheets, and links a URL once; Preact renders a
+  `<link>` at the comet and the response drops the repeats. They follow the stylesheets by design:
+  before them they delay the first paint. Measured on a throttled network over HTTP/2 (`web`'s
+  login, cold cache, 4× slower CPU) hydration came 44 % (Slow 4G) to 61 % (Fast 3G) earlier. On by
+  default; `defineSpaceApp({ modulepreload: false })` links none. None in `znx space dev`, none with
+  a build that predates the manifest, at most 24 imports per chunk, no nonce needed under the
+  default CSP. `loadModulePreloadManifest` and `resolveModulePreloads` are exported. See
+  [`docs/comets.md`](./docs/comets.md#preloading-a-comets-chunks-modulepreload).
 - **A `layout.tsx` can export `styles`.** Stylesheets scoped to an area: every page below the layout
   links them, and no page outside it does, so an app splits its CSS by area instead of linking every
   area's stylesheet on every page. The entries are the ones a page's `static styles` takes (a path

@@ -5,6 +5,7 @@ import { stringifyForWire } from './serialization-codec.ts'
 import { buildDevClientScript } from '../dev/dev-client-script.ts'
 import type { DevClientScriptOptions } from '../dev/dev-client-script.ts'
 import { placeHeadMarkup } from './head-markup.ts'
+import { dedupeModulePreloadLinks } from './modulepreload-manifest.ts'
 
 /**
  * Options for {@linkcode renderToResponse} (Preact).
@@ -206,7 +207,10 @@ export function renderToResponse(
   // After the scripts, not before — `placeHeadMarkup` targets the FIRST opening `<head>` tag, and
   // the script placement above only ever touches `</body>`, so the two never interfere. Ordering
   // them this way keeps each step operating on exactly the document the other produced.
-  const htmlWithHead = headMarkup ? placeHeadMarkup(htmlWithScripts, headMarkup) : htmlWithScripts
+  const placed = headMarkup ? placeHeadMarkup(htmlWithScripts, headMarkup) : htmlWithScripts
+  // Preact has no resource hoisting: two comets that share a dependency each render its
+  // `modulepreload`. Keep the first, the way React links a given `href` once.
+  const htmlWithHead = dedupeModulePreloadLinks(placed)
 
   const body = `${doctype ? '<!doctype html>' : ''}${htmlWithHead}`
   return new Response(body, {

@@ -11,6 +11,11 @@ import {
 import { parseStateOption } from 'modules/render/initial-state-policy.ts'
 import { loadPwaBuildOutput, registerPwa, setPwaConfig } from 'modules/pwa/mod.ts'
 import { addGlobalCssPaths, getCssManifest, loadCssManifest } from 'modules/render/css-manifest.ts'
+import {
+  loadModulePreloadManifest,
+  MODULE_PRELOAD_MANIFEST_FILE,
+  setModulePreloadEnabled,
+} from 'modules/render/modulepreload-manifest.ts'
 import { addCssSources } from 'modules/render/css-sources.ts'
 import {
   getClientEntryManifest,
@@ -171,6 +176,7 @@ export function defineSpaceApp(config: SpaceAppConfig): ZanixAppDefinition {
     preactDevTools,
     errorResponse,
     serialization,
+    modulepreload,
     validation,
     optimize,
     media,
@@ -190,6 +196,8 @@ export function defineSpaceApp(config: SpaceAppConfig): ZanixAppDefinition {
   setExtendedSerialization(serialization?.extendedTypes)
   // Validated here, at startup, so a mistyped option fails before the first request does.
   setInitialStatePolicy(parseStateOption(serialization?.state))
+  // On unless the app turns it off. Read at render time, like the registries above.
+  setModulePreloadEnabled(modulepreload !== false)
   if (pwa !== undefined) setPwaConfig(pwa === false ? undefined : pwa)
   // Same eager timing as `theme`/`headers` above — `setErrorResponseFormat` just sets a
   // module-level registry value, read at request time by `loader-error-handler.ts`/
@@ -340,6 +348,7 @@ export function defineSpaceApp(config: SpaceAppConfig): ZanixAppDefinition {
       if (clientBuildDir !== undefined && !isDevClientEnabled()) {
         await loadCometManifest(`${clientBuildDir}/comets-manifest.json`)
         await loadClientEntryManifest(`${clientBuildDir}/client-entry-manifest.json`)
+        await loadModulePreloadManifest(`${clientBuildDir}/${MODULE_PRELOAD_MANIFEST_FILE}`)
         await loadClientEntryProductionKey(Deno.cwd())
         await loadCssManifest(`${clientBuildDir}/css-manifest.json`)
         await loadAssetsManifest(`${clientBuildDir}/assets-manifest.json`)

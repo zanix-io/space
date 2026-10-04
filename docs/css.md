@@ -98,7 +98,9 @@ page outside it: an app splits its CSS by area (a layout per area) instead of li
 stylesheet on every page. They go through the same build as `globalCss` and a page's `styles` — one
 hashed, minified file per entry, with any `@import` inlined — so a layout gets all of that for free.
 A layout that declares no `styles` contributes nothing, and a `styles` that is not a list of
-stylesheets is an error when the routes load, naming the layout.
+stylesheets is an error when the routes load, naming the layout. Fewer stylesheets per page also let
+the page's module preloads follow them without delaying the first paint: see
+["Preloading a comet's chunks"](./comets.md#preloading-a-comets-chunks-modulepreload).
 
 The not-found page and the document a failing `loader` renders sit inside the app's **root** layout,
 so they link the root layout's `styles` too.

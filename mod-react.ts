@@ -31,6 +31,7 @@
  * @module
  */
 import { createElement } from 'react'
+import { preloadModule } from 'react-dom'
 import { installRendererRuntime } from 'modules/router/renderer-runtime.ts'
 import type { CometElementFactory } from 'modules/comets/element-factory.ts'
 import { CometIdScopeProvider } from 'modules/comets/comet-id-scope-react.tsx'
@@ -61,6 +62,11 @@ export function installReactRuntime(): void {
     // both really do satisfy; it hides no incompatibility.
     createElement: createElement as CometElementFactory,
     idScopeProvider: CometIdScopeProvider,
+    // React hoists a `preloadModule()` into `<head>`, after the stylesheets, and links one URL once.
+    modulePreloader: (hrefs) => {
+      for (const href of hrefs) preloadModule(href, { as: 'script' })
+      return []
+    },
   })
 }
 

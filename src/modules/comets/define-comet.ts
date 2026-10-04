@@ -17,6 +17,9 @@ import { getCometIdScopeProvider } from './comet-id-scope.ts'
 import { recordEvaluatedComet } from './evaluated-comets.ts'
 import { stringifyForWire } from '../render/serialization-codec.ts'
 import { getCometCssHrefs } from '../render/css-manifest.ts'
+import { resolveModulePreloads } from '../render/modulepreload-manifest.ts'
+import { resolveClientEntryUrl } from '../render/client-entry.ts'
+import { preloadCometModules } from './comet-module-preload.ts'
 import { getActiveRenderer } from '../router/active-renderer.ts'
 
 /**
@@ -217,6 +220,20 @@ export function defineComet<P extends object>(
       return h('link', { key: href, rel: 'stylesheet', href, media, precedence })
     })
 
+    // What the browser needs to hydrate this boundary, fetched together instead of one level of
+    // imports after another: the client entry and this comet's module, each with the chunks it
+    // imports statically (`modulepreload-manifest.json`). Asked for here, at the comet, so a page
+    // with no comet preloads nothing. The renderer places them after the stylesheets (React hoists
+    // them into `<head>`; Preact renders them here and the response drops repeats). `[]` in dev,
+    // with no build, or with `defineSpaceApp({ modulepreload: false })`.
+    const cometModuleUrl = resolveCometModuleUrl(sourceUrl)
+    const moduleLinks = preloadCometModules([
+      ...new Set([
+        ...resolveModulePreloads(resolveClientEntryUrl()),
+        ...resolveModulePreloads(cometModuleUrl),
+      ]),
+    ])
+
     return h(
       'div',
       {
@@ -233,12 +250,13 @@ export function defineComet<P extends object>(
         [COMET_ID_ATTR]: sourceHash,
         [COMET_STRATEGY_ATTR]: comet,
         [COMET_MEDIA_ATTR]: cometMedia,
-        [COMET_MODULE_ATTR]: resolveCometModuleUrl(sourceUrl),
+        [COMET_MODULE_ATTR]: cometModuleUrl,
         [COMET_EXPORT_ATTR]: exportName,
         [COMET_PERSIST_ATTR]: persist,
         [COMET_PROPS_ATTR]: serializedProps,
       },
       cssLinks,
+      moduleLinks,
       // `comet="only"` mounts fresh on the client (createRoot, never hydrateRoot) — rendering the
       // real component here too would just be thrown away and risk a hydration mismatch.
       //

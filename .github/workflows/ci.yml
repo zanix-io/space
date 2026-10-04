@@ -118,7 +118,38 @@ jobs:
           # local dev machine's own stale `node_modules/.vite` cache — a fresh runner like this one
           # never accumulates that state, so CI must explicitly opt back in to always run it.
           RUN_ENV_SENSITIVE_TESTS: 'true'
+          # The `nativeRuntimeModulesPlugin` test that renders a real `@zanix/space-ui` Comet through
+          # `ssrLoadModule` is opt-in too; it needs nothing beyond the flag.
+          RUN_NATIVE_RUNTIME_RELAY_TEST: 'true'
         # `--min-dep-age=0`: this repo's dependencies (e.g. `@zanix/utils`) get published and
         # consumed here within the same day; without this flag, Deno's own minimum-dependency-age
         # safety check can reject a fresh resolution of a package published too recently.
         run: deno test --min-dep-age=0 --allow-all
+
+      # The two module-identity tests (`native-runtime-modules.test.ts` for `@zanix/auth`,
+      # `native-runtime-modules-datamaster.test.ts` for `@zanix/datamaster/dlq`) pin a real, confirmed
+      # regression: a class a guard held through `ssrLoadModule` was a SECOND evaluation of the one
+      # `space.app.ts` registered DI metadata on, and every request failed with "Target is not a
+      # constructor". Each needs a top-level `imports` entry that the package must never ship (it would
+      # make `@zanix/auth` and `@zanix/datamaster` dependencies of this library), so they are opt-in
+      # and skipped above. This runner is thrown away after the job, which is the one place that entry
+      # can be added without leaving anything behind: it is inserted here, only for these two files.
+      - name: Run the module-identity tests
+        env:
+          RUN_ZANIX_AUTH_IDENTITY_TEST: 'true'
+          RUN_ZANIX_DATAMASTER_IDENTITY_TEST: 'true'
+        run: |
+          python3 - <<'PY'
+          import re
+          s = open('deno.jsonc').read()
+          m = re.search(r'"imports"\s*:\s*\{', s)
+          assert m, 'no top-level "imports" in deno.jsonc'
+          entries = (
+              '\n    "@zanix/auth": "jsr:@zanix/auth@^1.0.0",'
+              '\n    "@zanix/datamaster/dlq": "jsr:@zanix/datamaster@^1.9.0/dlq",'
+          )
+          open('deno.jsonc', 'w').write(s[:m.end()] + entries + s[m.end():])
+          PY
+          deno test --min-dep-age=0 --allow-all \
+            src/@tests/integration/bundler/native-runtime-modules.test.ts \
+            src/@tests/integration/bundler/native-runtime-modules-datamaster.test.ts

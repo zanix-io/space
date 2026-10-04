@@ -91,6 +91,12 @@ export {
 } from 'modules/render/mod.ts'
 export type { CssManifest, StylesheetRef } from 'modules/render/mod.ts'
 export {
+  loadModulePreloadManifest,
+  MODULE_PRELOAD_MANIFEST_FILE,
+  resolveModulePreloads,
+} from 'modules/render/mod.ts'
+export type { ModulePreloadManifest } from 'modules/render/mod.ts'
+export {
   getClientEntry,
   loadClientEntryManifest,
   resolveClientEntrySpecifier,

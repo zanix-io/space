@@ -163,6 +163,56 @@ startup so `defineComet` can resolve the right URL per request. In development, 
 needed at all — Vite's dev server already serves every project file at its own root-relative path,
 so `defineComet` derives a working URL directly, with zero build step involved.
 
+### Preloading a comet's chunks (`modulepreload`)
+
+A comet's chunk imports other chunks (the client entry, the runtime, modules two comets share), and
+those import more. A browser that learns about each level only after the level above it arrived
+fetches the page's JavaScript as a chain of round trips, and the comets hydrate late. In a
+production build every page therefore tells the browser what it will need, up front, with
+`<link rel="modulepreload">`.
+
+`zanix space build` writes `modulepreload-manifest.json` next to the other manifests: for every
+chunk a page starts from (the client entry and each comet) the chunks it imports **statically**,
+directly or through another chunk, nearest first. A dynamic `import()` is not listed: it loads when
+the code asks for it. `defineSpaceApp({ clientBuildDir })` loads it at startup.
+
+A comet boundary asks the renderer to preload the client entry and its own module, each with that
+list. Because the request is made **at the comet**, a page with no comet preloads nothing of its
+own:
+
+|                        | React                                        | Preact                                                    |
+| ---------------------- | -------------------------------------------- | --------------------------------------------------------- |
+| How                    | `ReactDOM.preloadModule()`                   | a `<link rel="modulepreload">` where the boundary renders |
+| Where                  | hoisted into `<head>`, after the stylesheets | in the body, at the comet                                 |
+| A URL two comets share | linked once by React                         | linked once: the response drops the repeats               |
+
+**After the stylesheets, never before.** A preload that precedes the page's stylesheets competes
+with the CSS the first paint waits for. Measured in Chrome with a throttled network (`web`'s login,
+cold cache, 4× slower CPU, HTTP/2), a preload placed after the stylesheets brought hydration forward
+by 44 % on Slow 4G and by 61 % on Fast 3G; on its own it added 130 to 340 ms to the first paint,
+which is why it matters that the stylesheets are few (see `styles` on a layout in
+[`docs/css.md`](./css.md)): with them split by area the first paint was unchanged and hydration 52 %
+to 64 % earlier. Over HTTP/1.1, where requests queue behind six connections, a preload placed before
+the stylesheets delayed the first paint by 3 % to 25 %. These are numbers from one app on a local
+machine with a simulated network, not a promise for another.
+
+```ts
+// On by default. Turn it off for the whole app:
+defineSpaceApp({ name: 'web', modulepreload: false })
+```
+
+- **Development** emits none: `znx space dev` has no build and no hashed chunk names.
+- **An older build** (no `modulepreload-manifest.json`) links none, without an error.
+- **At most 24 imports per chunk** are listed, so an unusually deep graph cannot ask the browser for
+  dozens of modules at once.
+- **No nonce.** A same-origin `modulepreload` is allowed by the default policy
+  (`script-src 'self' 'nonce-…'`): the real-browser check in `deno task spike:draft-probe` reports
+  no violation. A policy that does not allow same-origin scripts needs its own allowance.
+- **Orbit.** A fragment carries the preloads of the comets it renders, so their chunks start loading
+  as the swap inserts them. The client entry and the runtime are already loaded by the document, so
+  the browser reuses them and fetches nothing twice. The client only extracts stylesheets from a
+  fragment; a preload stays where it renders.
+
 ### Mount modes and persistence
 
 `comet="only"` mounts fresh on the client (`createRoot`, never `hydrateRoot`) instead of rendering

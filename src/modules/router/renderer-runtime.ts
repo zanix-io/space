@@ -33,6 +33,8 @@ import type { CometElementFactory } from '../comets/element-factory.ts'
 import { setCometElementFactory } from '../comets/element-factory.ts'
 import type { CometIdScopeProvider } from '../comets/comet-id-scope.ts'
 import { setCometIdScopeProvider } from '../comets/comet-id-scope.ts'
+import type { CometModulePreloader } from '../comets/comet-module-preload.ts'
+import { setCometModulePreloader } from '../comets/comet-module-preload.ts'
 
 /**
  * Everything one renderer must provide for this framework to render anything at all — the complete
@@ -52,6 +54,9 @@ export type RendererRuntime = {
   /** This renderer's own Comet id-scope Provider, used by `useCometStableId`. See
    * {@linkcode CometIdScopeProvider}. */
   idScopeProvider: CometIdScopeProvider
+  /** How this renderer preloads module chunks from a Comet boundary. Optional: without it no
+   * module preload is emitted. See {@linkcode CometModulePreloader}. */
+  modulePreloader?: CometModulePreloader
 }
 
 let installedRenderer: RendererKind | undefined
@@ -76,6 +81,7 @@ export function installRendererRuntime(kind: RendererKind, runtime: RendererRunt
   setLoaderErrorRenderer(runtime.renderLoaderError)
   setCometElementFactory(kind, runtime.createElement)
   setCometIdScopeProvider(kind, runtime.idScopeProvider)
+  if (runtime.modulePreloader) setCometModulePreloader(kind, runtime.modulePreloader)
   installedRenderer = kind
 }
 

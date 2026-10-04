@@ -450,6 +450,28 @@ export interface SpaceAppConfig {
    */
   serialization?: { extendedTypes?: boolean; state?: InitialStateOption }
   /**
+   * Whether a production page links `<link rel="modulepreload">` for its client entry and its
+   * comets, each with the chunks it imports statically, so the browser fetches them together
+   * instead of discovering one level of imports after another. On by default. Set `false` to link
+   * none.
+   *
+   * The links follow the page's stylesheets in the `<head>` (a comet's own links are rendered at
+   * the comet, after its own stylesheets), so they never compete with the CSS the first paint waits
+   * for. They need the build's `modulepreload-manifest.json`: with none (`znx space dev`, or a build
+   * that predates it) no page links any.
+   *
+   * @default true
+   *
+   * @example
+   * ```ts
+   * // The default: preload the client entry and the comets of every page.
+   * defineSpaceApp({ name: 'web' })
+   * // No `modulepreload` links at all.
+   * defineSpaceApp({ name: 'web', modulepreload: false })
+   * ```
+   */
+  modulepreload?: boolean
+  /**
    * PWA support — the Web App Manifest, icon routes, and (once `loadPwaBuildOutput` has run) a
    * generated service worker, all registered as part of this app's own `setup(ctx)`, same timing as
    * `loadRoutes()`. Unlike CSS's build-only config, this genuinely drives runtime behavior (the

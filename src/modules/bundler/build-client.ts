@@ -37,6 +37,7 @@ import {
   resolveClientEntryFilePath,
 } from 'modules/render/client-entry.ts'
 import { clientEntryPlugin } from './client-entry-plugin.ts'
+import { modulePreloadPlugin } from './modulepreload-plugin.ts'
 import { normalizeSourceKey } from 'modules/comets/comet-manifest.ts'
 import {
   getAssetsDirConfig,
@@ -620,6 +621,9 @@ export async function buildSpaceClient(
         ],
       }),
       ...cssPlugin({ ...css, cometEntries, globalEntries, pageEntries, layoutEntries }),
+      // Writes `modulepreload-manifest.json`: every chunk a page starts from (the client entry and the
+      // comets) with the chunks it imports statically, so a page can preload them together.
+      modulePreloadPlugin(),
       ...(pwa ? [pwaPlugin(resolvePwaPluginOptions(pwa, root))] : []),
       // An explicit, shared `manifestRegistry` — never either plugin's own internal fallback one —
       // since this is exactly the "composing multiple producers into one build" case

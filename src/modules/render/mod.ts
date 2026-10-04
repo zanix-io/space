@@ -20,6 +20,12 @@ export {
 } from './css-manifest.ts'
 export type { CssManifest, StylesheetRef } from './css-manifest.ts'
 export {
+  loadModulePreloadManifest,
+  MODULE_PRELOAD_MANIFEST_FILE,
+  resolveModulePreloads,
+} from './modulepreload-manifest.ts'
+export type { ModulePreloadManifest } from './modulepreload-manifest.ts'
+export {
   getClientEntry,
   loadClientEntryManifest,
   resolveClientEntrySpecifier,

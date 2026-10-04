@@ -28,16 +28,16 @@ Deno.test('Page: a page with no action is reachable via GET but not POST', async
   }
   void GetOnlyPage
 
-  const servers = await bootstrapServers({ ssr: { port: 20301 } })
+  const servers = await bootstrapServers({ ssr: { port: 20931 } })
   try {
     const getRes = await fetch(
-      'http://localhost:20301/page-decorator/get-only',
+      'http://localhost:20931/page-decorator/get-only',
     )
     assertEquals(getRes.status, 200)
     await getRes.body?.cancel()
 
     const postRes = await fetch(
-      'http://localhost:20301/page-decorator/get-only',
+      'http://localhost:20931/page-decorator/get-only',
       {
         method: 'POST',
       },
@@ -62,10 +62,10 @@ Deno.test(
     }
     void NoCspViaOptions
 
-    const servers = await bootstrapServers({ ssr: { port: 20304 } })
+    const servers = await bootstrapServers({ ssr: { port: 20934 } })
     try {
       const res = await fetch(
-        'http://localhost:20304/page-decorator/no-csp-via-options',
+        'http://localhost:20934/page-decorator/no-csp-via-options',
       )
       assertEquals(res.headers.get('Content-Security-Policy'), null)
       await res.body?.cancel()
@@ -83,10 +83,10 @@ Deno.test('Page: a page with an action is also reachable via POST', async () => 
   }
   void ActionPage
 
-  const servers = await bootstrapServers({ ssr: { port: 20302 } })
+  const servers = await bootstrapServers({ ssr: { port: 20932 } })
   try {
     const postRes = await fetch(
-      'http://localhost:20302/page-decorator/with-action',
+      'http://localhost:20932/page-decorator/with-action',
       {
         method: 'POST',
       },
@@ -154,17 +154,17 @@ Deno.test(
     }
     void ProductPage
 
-    const servers = await bootstrapServers({ ssr: { port: 20303 } })
+    const servers = await bootstrapServers({ ssr: { port: 20933 } })
     try {
       const first = await fetch(
-        'http://localhost:20303/page-decorator/cache-fixture/42',
+        'http://localhost:20933/page-decorator/cache-fixture/42',
       )
       assertStringIncludes(await first.text(), '<p>Product 42</p>')
       assertEquals(fetchCount, 1)
 
       // Second request, same id — served from TestCacheProvider's own store, fetcher not re-run.
       const second = await fetch(
-        'http://localhost:20303/page-decorator/cache-fixture/42',
+        'http://localhost:20933/page-decorator/cache-fixture/42',
       )
       assertStringIncludes(await second.text(), '<p>Product 42</p>')
       assertEquals(fetchCount, 1)

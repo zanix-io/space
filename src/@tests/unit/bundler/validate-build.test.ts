@@ -16,6 +16,7 @@ function page(overrides: Partial<DiscoveredPage> = {}): DiscoveredPage {
     filePath: 'routes/products/page.tsx',
     routePath: 'products',
     styles: [],
+    layoutStyles: [],
     head: { title: 'Widget', meta: [{ name: 'description', content: 'A widget.' }], link: [] },
     headIsDynamic: false,
     hasUnconditionalRedirect: false,

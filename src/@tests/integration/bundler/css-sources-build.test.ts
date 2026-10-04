@@ -2,8 +2,18 @@ import { assert, assertEquals } from '@std/assert'
 import { join } from '@std/path'
 import { getTemporaryFolder } from '@zanix/helpers'
 import { buildSpaceClient } from 'modules/bundler/build-client.ts'
-import { setGlobalCssPaths } from 'modules/render/css-manifest.ts'
-import { addCssSources, resetCssSources } from 'modules/render/css-sources.ts'
+import { setDevClientEnabled } from 'modules/dev/dev-client-registry.ts'
+import {
+  getGlobalCssPaths,
+  resolveCssHrefs,
+  setGlobalCssPaths,
+} from 'modules/render/css-manifest.ts'
+import {
+  addCssSources,
+  getCssSourcePaths,
+  materializeCssSources,
+  resetCssSources,
+} from 'modules/render/css-sources.ts'
 
 const TMP_ROOT = getTemporaryFolder(import.meta.url)
 
@@ -12,6 +22,7 @@ async function withTempDir(run: (root: string) => Promise<void>): Promise<void> 
   try {
     await run(root)
   } finally {
+    setDevClientEnabled(false)
     resetCssSources()
     setGlobalCssPaths(undefined)
     await Deno.remove(root, { recursive: true })
@@ -73,8 +84,40 @@ for (const renderer of ['react', 'preact'] as const) {
   )
 }
 
+/** The built stylesheet texts of the manifest's `global` scope, in manifest order. */
+async function builtGlobalTexts(
+  outDir: string,
+  manifest: { global: (string | { href: string })[] },
+): Promise<string[]> {
+  return await Promise.all(
+    manifest.global.map((_, index) => builtGlobalCss(outDir, manifest, index)),
+  )
+}
+
+async function readManifest(outDir: string): Promise<{ global: (string | { href: string })[] }> {
+  return JSON.parse(await Deno.readTextFile(join(outDir, 'css-manifest.json')))
+}
+
+/** The source text of the files a root-relative path list names, in list order. */
+async function sourceTexts(
+  root: string,
+  paths: (string | { href: string })[],
+): Promise<string[]> {
+  return await Promise.all(
+    paths.map((ref) => Deno.readTextFile(join(root, typeof ref === 'string' ? ref : ref.href))),
+  )
+}
+
+const MARKERS = ['.m-iam', '.m-ui', '.m-a', '.m-b'] as const
+
+/** Each marker appears in exactly one built stylesheet: the order of the markers is the order of
+ * the sheets, whatever hash the build gave them. */
+function markerOrder(texts: string[]): string[] {
+  return texts.map((text) => MARKERS.find((marker) => text.includes(marker.slice(1))) ?? '?')
+}
+
 Deno.test(
-  'buildSpaceClient: a caller that passes its own globalCss owns the whole list, sources are not added',
+  "buildSpaceClient: a caller's own globalCss is merged behind the cssSources, never instead of them",
   async () => {
     await withTempDir(async (root) => {
       await Deno.writeTextFile(join(root, 'own.css'), '.own { color: blue; }\n')
@@ -85,11 +128,135 @@ Deno.test(
         globalCss: ['./own.css'],
         css: { tailwind: false },
       })
-      const manifest = JSON.parse(
-        await Deno.readTextFile(join(result.outDir, 'css-manifest.json')),
+      const manifest = await readManifest(result.outDir)
+      assertEquals(manifest.global.length, 2)
+      assert((await builtGlobalCss(result.outDir, manifest, 0)).includes('color:red'))
+      assert((await builtGlobalCss(result.outDir, manifest, 1)).includes('color:#00f'))
+    })
+  },
+)
+
+Deno.test(
+  'buildSpaceClient: the built manifest lists the stylesheets in the order zanix space dev serves ' +
+    'them, with cssSources AND an explicit globalCss',
+  async () => {
+    await withTempDir(async (root) => {
+      await Deno.writeTextFile(join(root, 'a.css'), '.m-a { color: green; }\n')
+      await Deno.writeTextFile(join(root, 'b.css'), '.m-b { color: gray; }\n')
+      setGlobalCssPaths(['./a.css', './b.css'])
+      addCssSources([
+        { name: 'iam', css: '.m-iam { margin: 1px; }\n' },
+        { name: 'ui', css: '.m-ui { padding: 2px; }\n' },
+      ])
+      // What the CLI did: the app's list, read before the sources were files, passed explicitly.
+      const explicit = getGlobalCssPaths()
+      assertEquals(explicit, ['./a.css', './b.css'])
+
+      const result = await buildSpaceClient({ root, globalCss: explicit, css: { tailwind: false } })
+      const prod = markerOrder(
+        await builtGlobalTexts(result.outDir, await readManifest(result.outDir)),
       )
-      assertEquals(manifest.global.length, 1)
-      assert((await builtGlobalCss(result.outDir, manifest, 0)).includes('color:#00f'))
+
+      // The dev list: what `resolveCssHrefs()` resolves in `zanix space dev`.
+      setDevClientEnabled(true)
+      const devPaths = getGlobalCssPaths() ?? []
+      const dev = markerOrder(await sourceTexts(root, devPaths))
+      const devHrefs = resolveCssHrefs() ?? []
+
+      assertEquals(prod, ['.m-iam', '.m-ui', '.m-a', '.m-b'])
+      assertEquals(dev, prod)
+      assertEquals(devHrefs.length, prod.length)
+    })
+  },
+)
+
+Deno.test(
+  'buildSpaceClient: a globalCss that already names the materialized cssSources is not listed twice ' +
+    'and keeps its own order',
+  async () => {
+    await withTempDir(async (root) => {
+      await Deno.writeTextFile(join(root, 'a.css'), '.m-a { color: green; }\n')
+      setGlobalCssPaths(['./a.css'])
+      addCssSources([
+        { name: 'iam', css: '.m-iam { margin: 1px; }\n' },
+        { name: 'ui', css: '.m-ui { padding: 2px; }\n' },
+      ])
+      await materializeCssSources(root)
+      // The caller read the list AFTER the sources were files: it already contains them...
+      const alreadyComposed = getGlobalCssPaths() ?? []
+      assertEquals(alreadyComposed.length, 3)
+      // ...and a caller that put one of them after its own sheet keeps that choice.
+      const reordered = ['./a.css', getCssSourcePaths()[0], getCssSourcePaths()[1]]
+
+      const same = await buildSpaceClient({
+        root,
+        globalCss: alreadyComposed,
+        css: { tailwind: false },
+      })
+      const sameManifest = await readManifest(same.outDir)
+      assertEquals(sameManifest.global.length, 3)
+      assertEquals(markerOrder(await builtGlobalTexts(same.outDir, sameManifest)), [
+        '.m-iam',
+        '.m-ui',
+        '.m-a',
+      ])
+
+      const moved = await buildSpaceClient({ root, globalCss: reordered, css: { tailwind: false } })
+      const movedManifest = await readManifest(moved.outDir)
+      assertEquals(movedManifest.global.length, 3)
+      assertEquals(markerOrder(await builtGlobalTexts(moved.outDir, movedManifest)), [
+        '.m-a',
+        '.m-iam',
+        '.m-ui',
+      ])
+    })
+  },
+)
+
+Deno.test(
+  'buildSpaceClient: an @import inside a cssSource is flattened into that source, in its position',
+  async () => {
+    await withTempDir(async (root) => {
+      await Deno.writeTextFile(join(root, 'shared.css'), '.m-b { color: gray; }\n')
+      await Deno.writeTextFile(join(root, 'a.css'), '.m-a { color: green; }\n')
+      setGlobalCssPaths(['./a.css'])
+      // `.space/css-sources/iam.css` imports a file two directories up.
+      addCssSources([
+        { name: 'iam', css: "@import '../../shared.css';\n.m-iam { margin: 1px; }\n" },
+      ])
+
+      const result = await buildSpaceClient({
+        root,
+        globalCss: ['./a.css'],
+        css: { tailwind: false },
+      })
+      const manifest = await readManifest(result.outDir)
+      const texts = await builtGlobalTexts(result.outDir, manifest)
+      assertEquals(texts.length, 2)
+      // The source comes first, as one sheet that holds the imported rules before its own...
+      assert(!texts[0].includes('@import'))
+      assert(texts[0].includes('gray'))
+      assert(texts[0].indexOf('gray') < texts[0].indexOf('margin'))
+      // ...and the app's own sheet follows it.
+      assert(texts[1].includes('green'))
+    })
+  },
+)
+
+Deno.test(
+  "buildSpaceClient: with no globalCss argument the app's sources and its own list are built",
+  async () => {
+    await withTempDir(async (root) => {
+      await Deno.writeTextFile(join(root, 'a.css'), '.m-a { color: green; }\n')
+      setGlobalCssPaths(['./a.css'])
+      addCssSources([{ name: 'iam', css: '.m-iam { margin: 1px; }\n' }])
+
+      const result = await buildSpaceClient({ root, css: { tailwind: false } })
+      const manifest = await readManifest(result.outDir)
+      assertEquals(markerOrder(await builtGlobalTexts(result.outDir, manifest)), [
+        '.m-iam',
+        '.m-a',
+      ])
     })
   },
 )

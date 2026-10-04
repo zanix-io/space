@@ -29,6 +29,15 @@ A `layout.tsx` may declare its own `head` too — a plain descriptor, or a funct
 export const head = () => ({ title: 'Products' })
 ```
 
+**CSS does not belong here.** A `link` with `rel: 'stylesheet'` in a head renders in a full document
+and nowhere else: it is not built, hashed or minified, it is not part of an Orbit navigation
+fragment (so navigating into the area leaves it unstyled), and it does not sit in the stylesheet
+cascade order. Declare an area's CSS with the layout's `styles` export, a page's with
+`static styles` (see
+[`docs/css.md`](./css.md#responsive-delivery-media-per-layout-and-per-page-styles-and-comet-scoped-css)).
+Keep `link` for tags that are not your own stylesheets: `canonical`, `alternate`/`hreflang`, icons,
+a preload.
+
 ### Precedence and deduplication
 
 **Precedence**: the page wins over its nearest layout, which wins over the next one out, ... down to

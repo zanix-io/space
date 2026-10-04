@@ -34,6 +34,23 @@ adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **A `layout.tsx` can export `styles`.** Stylesheets scoped to an area: every page below the layout
+  links them, and no page outside it does, so an app splits its CSS by area instead of linking every
+  area's stylesheet on every page. The entries are the ones a page's `static styles` takes (a path
+  string, or `{ href, media }`), relative to the layout's own file, and go through the same build as
+  `globalCss`: one hashed, minified file per entry, `@import` inlined, listed in a new `layouts`
+  scope of `css-manifest.json` keyed by the layout's file path. A document links `global`, then the
+  layouts from the root layout down to the page's nearest, then the page's own `styles`, then a
+  comet's, without repeats (a stylesheet two levels list links once, at its first position). An
+  Orbit fragment carries the same list without `global`: navigating inside one layout requests
+  nothing again, and entering another area inserts that layout's stylesheets and waits for them
+  before the swap, so the new area never appears unstyled. The not-found page and the document of a
+  failed `loader` link the root layout's `styles`. `zanix space dev` resolves them live, relative to
+  each layout, the way a page's are. A `styles` that is not a list of stylesheets fails when the
+  routes load (`SPACE_LAYOUT_STYLES_INVALID`), naming the layout. A `link` with `rel: 'stylesheet'`
+  in a head is not a substitute: it renders in a full document only, is not built, and is not
+  carried by an Orbit fragment (documented in `docs/css.md` and `docs/head.md`).
+
 - **`ManagedForm` option `focusFirstInvalid`.** A form the server renders again with errors reaches
   the client with the focus nowhere, and the error can sit below the fold. With the option set, the
   first control marked `aria-invalid="true"` takes the focus and is scrolled into view, once per
@@ -65,6 +82,37 @@ defineSpaceApp({ name: 'web', serialization: { state: { pick: ['lang', 'user'] }
 An app whose Comets get their data through props needs no change, and now stops shipping its message
 catalog in every page. A render that passes `initialState` to `renderToResponse` needs no change
 either. See "Controlling what crosses to the client" in [`docs/orbit.md`](./docs/orbit.md).
+
+### Fixed
+
+- **A stylesheet that two pages (or a layout and a page) import was listed under only the first.**
+  `css-manifest.json`'s `pages` scope marked a built file as taken by the first page that imported
+  it, so every later page importing the same file linked nothing and lost its styles. A file is now
+  listed under each owner that imports it; one a comet or `globalCss` already links still is not
+  listed again.
+- **A production build left the declared `cssSources` out of `css-manifest.json`** when the caller
+  passed its own `globalCss`, which is what `zanix space build` did with the list it read before the
+  sources were materialized: the sources were files in `.space/css-sources/` and `zanix space dev`
+  served them, but a production page lost a package's default styles (`iam`'s OTP field, `app-kit`'s
+  loading dots). `buildSpaceClient` now always materializes the app's `cssSources` and puts them in
+  front of the caller's `globalCss`, the order `zanix space dev` serves, so the two link the same
+  stylesheets in the same order. The merge is idempotent: a list that already names a materialized
+  source is not listed twice and keeps its order. An explicit `globalCss` replaces the app's own
+  `globalCss`, no longer its `cssSources`. Behavior change for a caller that relied on the earlier
+  rule to leave the sources out: declare no `cssSources` for that build.
+- **A production build left out the Comets a dependency renders for the app.** The build gave a
+  Comet its own chunk only when the project's own source rendered it from a named import, so a
+  package's default-exported Comet, and one that a package's own view is handed and calls without
+  JSX, never reached `comets-manifest.json`. `@zanix/iam`'s `LoginTwoStep`, `PasswordToggleField`,
+  `OtpCodeField`, `OtpResend` and `RateLimitCountdown` were requested from `https://jsr.io/...` in
+  the browser and blocked by the default `script-src`, and the page logged "Failed to hydrate a
+  Comet boundary" (`zanix space dev` worked, since it resolves a Comet from its live URL).
+  `defineComet` now records the module URL it is given, and the build reads which Comet modules the
+  pages' static import graph ran, adding each one outside the project (an `https://` URL, or a real
+  path outside the root) as an entry. Comets in a barrel the app imports are built too, whether or
+  not a request renders them; one reached only by a runtime `import()`, or loaded through
+  `zanix space build`'s temporary rewritten copy of a local file, is not seen. See "Comets that ship
+  in a dependency" in [`docs/comets.md`](./docs/comets.md).
 
 ## [1.16.6] - 2026-10-03
 

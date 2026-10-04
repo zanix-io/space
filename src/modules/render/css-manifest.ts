@@ -3,6 +3,7 @@ import { isDevClientEnabled } from '../dev/dev-client-registry.ts'
 import { resolveDevCssHrefs, resolveDevPageCssHrefs } from '../dev/dev-css-hrefs.ts'
 import { getCssSourcePaths } from './css-sources.ts'
 import { normalizeSourceKey } from '../comets/comet-manifest.ts'
+import { getRootLayoutStyles } from '../router/app-shell-registry.ts'
 
 /** A single stylesheet reference — the one shape every CSS delivery scope (global, page, comet)
  * uses, so none of them ends up as an independent, duplicated mechanism. A plain `string` is the
@@ -29,6 +30,11 @@ export type StylesheetRef = string | { href: string; media?: string }
  * rendering page B, unlike `global`, which every page always gets. See {@linkcode
  * resolvePageCssHrefs}.
  *
+ * `layouts`, keyed by a layout's own source `filePath` (the identity `scanPageFiles` reports as a
+ * segment's `layoutFilePath`), is that layout's OWN `export const styles` — linked on every page
+ * whose composition chain contains the layout, in chain order (root layout first, the page's nearest
+ * layout last), between `global` and the page's own `styles`. See {@linkcode resolveScopedCssHrefs}.
+ *
  * `comets`, keyed by a comet's own `sourceUrl` (the exact same identity `comets-manifest.json`
  * already uses — see `comet-manifest.ts`), is that comet's OWN CSS (its `.module.css` imports,
  * correlated at build time via each comet's own forced chunk — see `cssPlugin`'s own doc for how).
@@ -38,6 +44,8 @@ export type StylesheetRef = string | { href: string; media?: string }
 export interface CssManifest {
   /** Every app-wide stylesheet, applied to every page. */
   global: StylesheetRef[]
+  /** Per-layout stylesheets, keyed by the layout's own source `filePath`. */
+  layouts?: Record<string, StylesheetRef[]>
   /** Per-page stylesheets, keyed by the page's own route. */
   pages?: Record<string, StylesheetRef[]>
   /** Per-comet stylesheets, keyed by the comet's own `sourceUrl` identity. */
@@ -188,4 +196,99 @@ export function resolvePageCssHrefs(
   if (!filePath) return []
   if (isDevClientEnabled()) return styles ? resolveDevPageCssHrefs(filePath, styles) : []
   return manifest?.pages?.[filePath] ?? []
+}
+
+/** The href of one stylesheet reference, whichever form it takes. */
+function hrefOf(ref: StylesheetRef): string {
+  return typeof ref === 'string' ? ref : ref.href
+}
+
+/**
+ * Removes every stylesheet reference whose `href` an earlier one already carries, keeping the first
+ * occurrence and the order of the rest. The cascade order a document links (`global`, layouts root
+ * to leaf, page, comets) stays exactly as composed; a stylesheet shared by two scopes is linked
+ * once, at its first position.
+ *
+ * Keyed by `href` alone, the same key Orbit's client uses to recognize a stylesheet already live in
+ * the document, so a response never carries a link the client would skip anyway.
+ */
+export function dedupeStylesheetRefs(refs: readonly StylesheetRef[]): StylesheetRef[] {
+  const seen = new Set<string>()
+  const result: StylesheetRef[] = []
+  for (const ref of refs) {
+    const href = hrefOf(ref)
+    if (seen.has(href)) continue
+    seen.add(href)
+    result.push(ref)
+  }
+  return result
+}
+
+/** The part of a route segment {@linkcode resolveLayoutCssHrefs} reads: where the layout lives and
+ * the `styles` it exports. */
+export type LayoutStylesSource = {
+  /** The layout's source path, as `scanPageFiles` reported it. `undefined` for a segment without
+   * a `layout.tsx`. */
+  layoutFilePath?: string
+  /** The layout's own `export const styles`. Read only in dev. */
+  styles?: StylesheetRef[]
+}
+
+/**
+ * The stylesheet hrefs of the layouts in a composition chain, root layout first, the nearest layout
+ * last, without duplicates. Dev-aware, same split as {@linkcode resolvePageCssHrefs}: in
+ * `znx space dev` each layout's LIVE `styles` resolve relative to its own file through
+ * {@linkcode resolveDevPageCssHrefs}; outside dev, `styles` is ignored and the production manifest's
+ * `layouts` scope (built from that same export) is the only source.
+ *
+ * `[]` (never `undefined`) when no layout in the chain declares styles, or no manifest was loaded.
+ *
+ * @param segments - A page's composition chain, root first, as `PageTree.segments` stores it.
+ */
+export function resolveLayoutCssHrefs(
+  segments: readonly LayoutStylesSource[],
+): StylesheetRef[] {
+  const dev = isDevClientEnabled()
+  const refs: StylesheetRef[] = []
+  for (const { layoutFilePath, styles } of segments) {
+    if (!layoutFilePath) continue
+    if (dev) {
+      if (styles) refs.push(...resolveDevPageCssHrefs(layoutFilePath, styles))
+    } else {
+      refs.push(...(manifest?.layouts?.[layoutFilePath] ?? []))
+    }
+  }
+  return dedupeStylesheetRefs(refs)
+}
+
+/**
+ * Every stylesheet a page's own route scopes, in cascade order: the `styles` of each layout in its
+ * composition chain from the root layout to the nearest one, then the page's own `styles`, without
+ * duplicates. `global` is not part of it (every document links that first, and an Orbit fragment
+ * never carries it), and neither is a comet's own CSS (resolved where the comet renders). This is
+ * the list an Orbit fragment links, and what a full document links after `global`.
+ *
+ * @param tree - The page's composition, from `getPageTree`; `undefined` for a page never routed
+ * through `loadRoutes()`.
+ * @param pageStyles - The page's own `static styles`, read only in dev.
+ */
+export function resolveScopedCssHrefs(
+  tree: { segments: readonly LayoutStylesSource[]; filePath: string } | undefined,
+  pageStyles: StylesheetRef[] | undefined,
+): StylesheetRef[] {
+  if (!tree) return []
+  return dedupeStylesheetRefs([
+    ...resolveLayoutCssHrefs(tree.segments),
+    ...resolvePageCssHrefs(tree.filePath, pageStyles),
+  ])
+}
+
+/**
+ * The stylesheet hrefs of the app's root layout alone, for a document rendered outside a page (the
+ * not-found page, a `loader` that failed): those documents wrap their content in the root layout,
+ * so its `styles` apply to them. `[]` when the app has no root layout, or it declares no styles.
+ */
+export function resolveRootLayoutCssHrefs(): StylesheetRef[] {
+  const root = getRootLayoutStyles()
+  return root ? resolveLayoutCssHrefs([root]) : []
 }

@@ -230,6 +230,20 @@ export type RedirectConfig = {
  * export default function ProductsLayout({ children }: LayoutProps) { ... }
  * ```
  *
+ * A `layout.tsx` may ALSO export a named `styles` — the stylesheets of this layout's area, linked on
+ * every page below it and on no page outside it. The entries are the ones a page's `static styles`
+ * takes (a path string, or `{ href, media }`), relative to the layout's own file, built like
+ * `globalCss` (hashed, minified, `@import` inlined). A document links `global`, then each layout's
+ * `styles` from the root layout down to the nearest, then the page's own, then a comet's, without
+ * repeats; an Orbit fragment carries the same list without `global`:
+ * ```ts
+ * // routes/chat/layout.tsx
+ * export const styles = ['./chat.css', { href: './chat-print.css', media: 'print' }]
+ * export default function ChatLayout({ children }: LayoutProps) { ... }
+ * ```
+ * Use `styles` for CSS and the layout's `head` for the `<link>` tags that are not your own
+ * stylesheets: a head link is not built and is not carried by an Orbit navigation.
+ *
  * A `layout.tsx` may ALSO export a named `loader` — a function of {@linkcode PageContext} (the
  * exact same context shape a page's own `loader` receives, including `request`/`url`/`csrfToken`),
  * resolving to whatever this layout wants as its own {@linkcode LayoutProps.data}:

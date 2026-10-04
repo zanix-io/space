@@ -346,7 +346,7 @@ export abstract class SpacePageController<
    * resolves by — deliberately different from `defineSpaceApp({ globalCss })`'s own root-relative
    * resolution, since these are declared inside the page's own file, not centrally). Genuinely
    * scoped: linked ONLY on a response for THIS page, after `global` and before any Comet's own CSS
-   * (cascade order — global → page → comet) — a stylesheet declared here is never linked when
+   * (cascade order — global → layouts → page → comet) — a stylesheet declared here is never linked when
    * rendering a different page. Order matters, same as `globalCss`'s own "order matters, later
    * entries can override earlier ones" contract, preserved through the build the same way.
    *
@@ -357,8 +357,9 @@ export abstract class SpacePageController<
    * own beyond `global` — the overwhelming majority — at zero behavior change from before this
    * field existed.
    *
-   * Not yet composed with a layout's own styles (page → layout → root inheritance) — only a page's
-   * own, direct declaration is resolved today; this is a deliberate scope limit, not an oversight.
+   * A layout's own stylesheets are a separate declaration: a `layout.tsx`'s named `styles` export
+   * (see `LayoutProps`), linked on every page below that layout, before this page's own. A
+   * stylesheet both list links once.
    */
   public static styles?: StylesheetRef[]
 

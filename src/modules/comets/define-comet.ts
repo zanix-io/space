@@ -14,6 +14,7 @@ import { hashSourceKey, normalizeSourceKey, resolveCometModuleUrl } from './come
 import { getCometElementFactory } from './element-factory.ts'
 import type { CometElementFactory } from './element-factory.ts'
 import { getCometIdScopeProvider } from './comet-id-scope.ts'
+import { recordEvaluatedComet } from './evaluated-comets.ts'
 import { stringifyForWire } from '../render/serialization-codec.ts'
 import { getCometCssHrefs } from '../render/css-manifest.ts'
 import { getActiveRenderer } from '../router/active-renderer.ts'
@@ -125,6 +126,10 @@ export function defineComet<P extends object>(
       { meta: { sourceUrl } },
     )
   }
+
+  // The build reads this to give every Comet a page's module graph reaches its own chunk (see
+  // `evaluated-comets.ts`): a dependency's Comet is rarely one the app's own source names.
+  recordEvaluatedComet(sourceUrl)
 
   function CometBoundary(props: P & CometProps): SpaceChildren {
     const { comet = 'load', cometMedia, persist, ...rest } = props

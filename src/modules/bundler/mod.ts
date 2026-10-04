@@ -54,7 +54,12 @@ export { buildSpaceClient } from './build-client.ts'
 export type { BuildSpaceClientOptions, BuildSpaceClientResult } from './build-client.ts'
 export { discoverComets } from './discover-comets.ts'
 export { collectPageStyles, discoverPages } from './discover-pages.ts'
-export type { DiscoveredPage, DiscoveredPageStyle, ModuleImporter } from './discover-pages.ts'
+export type {
+  DiscoveredLayoutStyle,
+  DiscoveredPage,
+  DiscoveredPageStyle,
+  ModuleImporter,
+} from './discover-pages.ts'
 export { deriveAutoSitemapEntries } from './auto-sitemap.ts'
 export { validateBuild } from './validate-build.ts'
 export type { ValidateBuildOptions, ValidateBuildResult } from './validate-build.ts'

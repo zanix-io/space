@@ -13,15 +13,24 @@ import type { MediaOptimizeOptions } from './media-plugin-types.ts'
 import { ASSETS_PLUGIN_SPECIFIER, MEDIA_PLUGIN_SPECIFIER } from './build-plugin-specifiers.ts'
 import { createAssetManifestRegistry } from 'modules/assets/asset-manifest-registry.ts'
 import { resolvePwaPluginOptions } from './resolve-pwa-plugin-options.ts'
-import { discoverComets, discoverUsedCometImports } from './discover-comets.ts'
-import { collectPageStyles, discoverPages, type ModuleImporter } from './discover-pages.ts'
+import {
+  discoverComets,
+  discoverEvaluatedComets,
+  discoverUsedCometImports,
+} from './discover-comets.ts'
+import {
+  collectLayoutStyles,
+  collectPageStyles,
+  discoverPages,
+  type ModuleImporter,
+} from './discover-pages.ts'
 import { scanPageFiles } from 'modules/router/scan-page-files.ts'
 import {
   DEFAULT_ERROR_VIEW_PREACT_URL,
   DEFAULT_ERROR_VIEW_REACT_URL,
 } from 'modules/router/default-view-specifiers.ts'
 import { getGlobalCssPaths, type StylesheetRef } from 'modules/render/css-manifest.ts'
-import { materializeCssSources } from 'modules/render/css-sources.ts'
+import { materializeCssSources, withCssSourcePaths } from 'modules/render/css-sources.ts'
 import {
   CLIENT_ENTRY_VIRTUAL_ID,
   getClientEntry,
@@ -67,6 +76,10 @@ export interface BuildSpaceClientOptions {
    * to build against a different list on purpose (e.g. a build script that never imports
    * `space.app.ts` at all). Each entry is a `StylesheetRef` — a plain string, or `{href, media}`
    * to carry a `media` attribute through to the built `css-manifest.json`'s own `global` scope.
+   *
+   * The app's declared `cssSources` are built either way: with an explicit list they are put in
+   * front of it (the order `zanix space dev` serves), and a source the list already names is not
+   * added twice. An explicit list replaces the app's own `globalCss`, never its `cssSources`.
    */
   globalCss?: StylesheetRef[]
   /**
@@ -272,13 +285,14 @@ function toEntryName(root: string, filePath: string): string {
 export async function buildSpaceClient(
   options: BuildSpaceClientOptions,
 ): Promise<BuildSpaceClientResult> {
-  // The declared `cssSources` join the default `globalCss` list only once they are files; a caller
-  // that passes its own `globalCss` owns the whole list.
-  if (options.globalCss === undefined) await materializeCssSources(options.root)
+  // The declared `cssSources` are made files first, always: they are part of the app's stylesheet
+  // list whoever calls this (the CLI, a build script, a standalone deployment), exactly as
+  // `zanix space dev` serves them. A caller's own `globalCss` is merged behind them, not instead.
+  await materializeCssSources(options.root)
   const {
     root,
     outDir = '.dist/client',
-    globalCss = getGlobalCssPaths() ?? [],
+    globalCss: explicitGlobalCss,
     clientEntry = getClientEntry(),
     routesDir = getRoutesDir(),
     css,
@@ -294,6 +308,12 @@ export async function buildSpaceClient(
     sitemapLocations: explicitSitemapLocations,
     importModule,
   } = options
+
+  // Without an explicit list, the app's own composed list, which already has the materialized
+  // sources in front. With one, the same order: the sources the caller did not list, then its list.
+  const globalCss = explicitGlobalCss === undefined
+    ? getGlobalCssPaths() ?? []
+    : withCssSourcePaths(root, explicitGlobalCss)
 
   const comets = await discoverComets(root)
   const resolvedOutDir = resolve(root, outDir)
@@ -427,10 +447,26 @@ export async function buildSpaceClient(
   // flattened into one list, since a page's own CSS must stay scoped to that page (never folded
   // into `global` — see `discoverPages`'s own doc for the full identity/side-effect reasoning).
   const pageEntries: Record<string, Array<{ entryName: string; media?: string }>> = {}
+  // `layoutFilePath -> [{entryName, media}]`, the same technique grouped by the layout each style
+  // belongs to: a layout's CSS stays scoped to the pages under that layout (`css-manifest.json`'s
+  // `layouts` scope), never folded into `global`.
+  const layoutEntries: Record<string, Array<{ entryName: string; media?: string }>> = {}
   // ONE pass over every page, shared by CSS entry construction here and by document validation
   // below — see `discoverPages`'s own doc: importing each page module once serves both `styles`
   // and `head`/`redirect`, instead of a separate scan+import per concern.
   const discoveredPages = await discoverPages(routesDir, importModule)
+
+  // Comets a dependency renders for the app (`@zanix/iam`'s `LoginTwoStep`, handed to a view of its
+  // own), which no source scan above can see: importing the pages just now ran every Comet module
+  // in their static import graph, and `discoverEvaluatedComets` reads which. See its own doc.
+  const evaluatedCometFiles = await discoverEvaluatedComets(root, [
+    ...comets,
+    ...errorBoundaryFiles,
+    ...usedCometFiles,
+  ])
+  for (const cometFile of evaluatedCometFiles) {
+    input[toEntryName(realRoot, cometFile)] = cometFile
+  }
 
   // `defineSpaceApp({ sitemap: 'auto' })` derives its own entries from THIS SAME discovery pass —
   // no second scan, no per-page declaration beyond what routing already captured. A literal array
@@ -462,6 +498,11 @@ export async function buildSpaceClient(
       sitemapLocations,
       config: validation,
     })
+  for (const { layoutFilePath, resolvedCssPath, media } of collectLayoutStyles(discoveredPages)) {
+    const entryName = toEntryName(realRoot, resolvedCssPath)
+    input[entryName] = resolvedCssPath
+    ;(layoutEntries[layoutFilePath] ??= []).push({ entryName, media })
+  }
   for (const { pageFilePath, resolvedCssPath, media } of collectPageStyles(discoveredPages)) {
     const entryName = toEntryName(realRoot, resolvedCssPath)
     input[entryName] = resolvedCssPath
@@ -570,8 +611,15 @@ export async function buildSpaceClient(
       clientEntryPlugin({ renderer, entryId: resolvedClientEntry }),
       deno(),
       ...spacePlugin({ renderer, preactDevTools }),
-      cometPlugin({ knownEntryPaths: [...comets, ...errorBoundaryFiles, ...usedCometFiles] }),
-      ...cssPlugin({ ...css, cometEntries, globalEntries, pageEntries }),
+      cometPlugin({
+        knownEntryPaths: [
+          ...comets,
+          ...errorBoundaryFiles,
+          ...usedCometFiles,
+          ...evaluatedCometFiles,
+        ],
+      }),
+      ...cssPlugin({ ...css, cometEntries, globalEntries, pageEntries, layoutEntries }),
       ...(pwa ? [pwaPlugin(resolvePwaPluginOptions(pwa, root))] : []),
       // An explicit, shared `manifestRegistry` — never either plugin's own internal fallback one —
       // since this is exactly the "composing multiple producers into one build" case

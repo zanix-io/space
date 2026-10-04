@@ -23,6 +23,7 @@ import type { HeadDescriptor, ResolvedHead } from 'modules/router/head-descripto
 import type { RedirectConfig } from 'typings/page.ts'
 import { resolveHead } from 'modules/router/head-descriptor.ts'
 import { scanPageFiles } from 'modules/router/scan-page-files.ts'
+import { readLayoutStyles } from 'modules/router/layout-styles.ts'
 
 /** One page's own `static styles` entry, resolved to a real, on-disk CSS file. */
 export type DiscoveredPageStyle = {
@@ -36,6 +37,17 @@ export type DiscoveredPageStyle = {
   media?: string
 }
 
+/** One layout's own `export const styles` entry, resolved to a real, on-disk CSS file. */
+export type DiscoveredLayoutStyle = {
+  /** This layout's source file path, EXACTLY as `scanPageFiles` reported it for the SAME `routesDir`
+   * value `loadRoutes()` will be called with — the identity `css-manifest.json`'s `layouts` scope is
+   * keyed by. Not realpath'd, for the same reason as {@linkcode DiscoveredPageStyle.pageFilePath}. */
+  layoutFilePath: string
+  /** This entry's CSS file, realpath'd — resolved relative to the LAYOUT FILE's own directory. */
+  resolvedCssPath: string
+  media?: string
+}
+
 /** Everything one page contributes to a build, statically. */
 export type DiscoveredPage = {
   /** Source path, as `scanPageFiles` reported it. */
@@ -44,6 +56,9 @@ export type DiscoveredPage = {
   routePath: string
   /** This page's own declared stylesheets, resolved. Empty for the overwhelming majority. */
   styles: DiscoveredPageStyle[]
+  /** The `styles` of every layout in this page's chain, resolved, root layout first — the order a
+   * document links them in. A layout shared by several pages appears in each of their lists. */
+  layoutStyles: DiscoveredLayoutStyle[]
   /**
    * The head resolved across this page's own declaration and every layout in its chain, through the
    * SAME `resolveHead` the renderers use. Never a second implementation: resolution has one
@@ -79,6 +94,7 @@ type PageModuleShape = {
 
 type LayoutModuleShape = {
   head?: HeadDescriptor | ((params: Record<string, string>) => HeadDescriptor)
+  styles?: unknown
 }
 
 /**
@@ -117,6 +133,31 @@ export async function discoverPages(
     return pending
   }
 
+  // A layout's styles resolve once per file however many pages share the layout.
+  const layoutStylesCache = new Map<string, Promise<DiscoveredLayoutStyle[]>>()
+  const resolveLayoutStyles = (
+    layoutFilePath: string,
+    layoutModule: LayoutModuleShape,
+  ): Promise<DiscoveredLayoutStyle[]> => {
+    let pending = layoutStylesCache.get(layoutFilePath)
+    if (!pending) {
+      const layoutDir = dirname(layoutFilePath)
+      pending = Promise.all(
+        (readLayoutStyles(layoutFilePath, layoutModule.styles) ?? []).map(
+          async (stylesheet): Promise<DiscoveredLayoutStyle> => ({
+            layoutFilePath,
+            resolvedCssPath: await Deno.realPath(
+              resolve(layoutDir, typeof stylesheet === 'string' ? stylesheet : stylesheet.href),
+            ),
+            media: typeof stylesheet === 'string' ? undefined : stylesheet.media,
+          }),
+        ),
+      )
+      layoutStylesCache.set(layoutFilePath, pending)
+    }
+    return pending
+  }
+
   return await Promise.all(pages.map(async (page): Promise<DiscoveredPage> => {
     const pageModule = await importOnce(page.filePath) as PageModuleShape
     const declaration = pageModule.default
@@ -140,6 +181,9 @@ export async function discoverPages(
 
     // Layout heads, nearest-first — the exact order `resolveHead` expects after the page's own.
     const layoutHeads: Array<{ filePath: string; head: HeadDescriptor }> = []
+    // Nearest-first like the heads, reversed into root-first once the walk ends: the cascade order a
+    // document links layout stylesheets in is the opposite of head precedence.
+    const layoutStylesNearestFirst: DiscoveredLayoutStyle[][] = []
     const descriptors: Array<HeadDescriptor | undefined> = [
       typeof pageHead === 'function' ? undefined : pageHead,
     ]
@@ -153,6 +197,8 @@ export async function discoverPages(
       // import here is already served from `importOnce`'s cache whenever layouts are shared.
       // deno-lint-ignore no-await-in-loop
       const layoutModule = await importOnce(layoutFilePath) as LayoutModuleShape
+      // deno-lint-ignore no-await-in-loop
+      layoutStylesNearestFirst.push(await resolveLayoutStyles(layoutFilePath, layoutModule))
       const layoutHead = layoutModule.head
       if (typeof layoutHead === 'function') {
         // A layout's head function takes `params`, which a build does not have either.
@@ -169,6 +215,7 @@ export async function discoverPages(
       filePath: page.filePath,
       routePath: page.routePath,
       styles,
+      layoutStyles: layoutStylesNearestFirst.reverse().flat(),
       head: resolveHead(descriptors),
       headIsDynamic,
       hasUnconditionalRedirect: declaration?.redirect !== undefined &&
@@ -181,4 +228,20 @@ export async function discoverPages(
 /** Every discovered page's styles, flattened — the shape `build-client.ts` consumes. */
 export function collectPageStyles(pages: DiscoveredPage[]): DiscoveredPageStyle[] {
   return pages.flatMap((page) => page.styles)
+}
+
+/**
+ * Every discovered layout's styles, flattened and without repeats — the shape `build-client.ts`
+ * consumes. A layout shared by many pages contributes its entries once.
+ */
+export function collectLayoutStyles(pages: DiscoveredPage[]): DiscoveredLayoutStyle[] {
+  const seen = new Set<string>()
+  const result: DiscoveredLayoutStyle[] = []
+  for (const style of pages.flatMap((page) => page.layoutStyles)) {
+    const key = `${style.layoutFilePath}\u0000${style.resolvedCssPath}\u0000${style.media ?? ''}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    result.push(style)
+  }
+  return result
 }

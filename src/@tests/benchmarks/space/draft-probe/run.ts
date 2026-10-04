@@ -36,6 +36,7 @@ import { buildCometsClient } from '../variants/build-comets-client.ts'
 import { findBuiltAsset } from '../variants/static-server.ts'
 import { SpacePageController } from 'modules/router/mod.ts'
 import { setPageTree } from 'modules/router/page-tree-registry.ts'
+import { setCssManifest } from 'modules/render/css-manifest.ts'
 import { setCometManifest } from 'modules/comets/comet-manifest.ts'
 import { installReactRuntime } from '../../../../../mod-react.ts'
 import { installPreactRuntime } from '../../../../../mod-preact.ts'
@@ -131,12 +132,13 @@ async function main(): Promise<void> {
     await checkRenderer(browser, renderer, port, results)
     await checkFocusFirstInvalid(browser, renderer, port, results)
     await checkState(browser, renderer, port, results)
+    await checkLayoutStyles(browser, renderer, port, results)
     await stop()
   }
   await browser.close()
 
   console.log(
-    '\n=== Draft probe, focusFirstInvalid and serialization.state in a real browser ===\n',
+    '\n=== Draft probe, focusFirstInvalid, serialization.state and layout styles in a real browser ===\n',
   )
   let failed = false
   for (const [name, ok] of Object.entries(results)) {
@@ -144,6 +146,117 @@ async function main(): Promise<void> {
     console.log(`  ${ok === true ? 'PASS' : 'FAIL'}  ${name}${ok === true ? '' : `  (${ok})`}`)
   }
   Deno.exit(failed ? 1 : 0)
+}
+
+/**
+ * Records, the first time each marker element exists, the colour it computes at that very moment:
+ * right after an Orbit swap inserts it, before any later load could change the answer.
+ */
+const STYLE_OBSERVER_SOURCE = `
+  window.__swapStyle = {};
+  new MutationObserver(function () {
+    document.querySelectorAll('[class^="marker-"]').forEach(function (el) {
+      var key = el.className + '@' + document.querySelector('h1').textContent;
+      if (!(key in window.__swapStyle)) window.__swapStyle[key] = getComputedStyle(el).color;
+    });
+  }).observe(document, { childList: true, subtree: true });
+`
+
+async function checkLayoutStyles(
+  // deno-lint-ignore no-explicit-any
+  browser: any,
+  renderer: Renderer,
+  port: number,
+  results: Record<string, boolean | string>,
+) {
+  const name = (label: string) => `${renderer}: layout styles: ${label}`
+  const base = `http://localhost:${port}`
+  const context = await browser.newContext()
+  const page = await context.newPage()
+  const problems: string[] = []
+  page.on('pageerror', (error: Error) => problems.push(`pageerror: ${error.message}`))
+  page.on('console', (message: { type: () => string; text: () => string }) => {
+    if (message.type() === 'error') problems.push(`console: ${message.text()}`)
+  })
+  const stylesheets = (): Promise<string[]> =>
+    page.evaluate(() =>
+      [...document.querySelectorAll('link[rel="stylesheet"]')].map((link) =>
+        new URL((link as HTMLLinkElement).href).pathname
+      )
+    )
+  const colorOf = (selector: string): Promise<string | null> =>
+    page.evaluate((sel: string) => {
+      const el = document.querySelector(sel)
+      return el ? getComputedStyle(el).color : null
+    }, selector)
+  const swapColor = (key: string): Promise<string | undefined> =>
+    page.evaluate(
+      (k: string) => (window as never as { __swapStyle: Record<string, string> }).__swapStyle[k],
+      key,
+    )
+  const hits = (): Promise<Record<string, number>> =>
+    page.evaluate(async () => await (await fetch('/__hits')).json())
+  const goTo = async (testId: string, heading: string) => {
+    await page.click(`[data-testid=${testId}]`)
+    await page.waitForFunction(
+      (h: string) => document.querySelector('h1')?.textContent === h,
+      heading,
+      { timeout: 8000 },
+    )
+  }
+
+  // A full document: the layouts' stylesheets link root layout first, and they apply.
+  await page.goto(`${base}/one`, { waitUntil: 'load' })
+  await page.waitForTimeout(1500)
+  results[name('a full document links the root layout, then the nearest layout')] =
+    JSON.stringify(await stylesheets()) === JSON.stringify(['/css/root.css', '/css/one.css'])
+  results[name('the layouts styles apply to the document')] =
+    (await colorOf('.marker-root')) === 'rgb(10, 20, 30)' &&
+    (await colorOf('.marker-one')) === 'rgb(1, 2, 3)'
+  await page.evaluate(() => {
+    ;(window as never as { __sameDocument: boolean }).__sameDocument = true
+  })
+
+  // Inside one layout: no new link, no new request, no reload.
+  await goTo('to-one-next', 'one-next')
+  const afterSameLayout = await stylesheets()
+  const sameLayoutHits = await hits()
+  results[name('navigating inside the same layout inserts no stylesheet')] =
+    JSON.stringify(afterSameLayout) === JSON.stringify(['/css/root.css', '/css/one.css'])
+  results[name('navigating inside the same layout requests no stylesheet again')] =
+    sameLayoutHits['/css/root.css'] === 1 && sameLayoutHits['/css/one.css'] === 1
+  results[name('navigating inside the same layout is a client navigation')] = await page.evaluate(
+    () => (window as never as { __sameDocument?: boolean }).__sameDocument === true,
+  )
+
+  // Into another area: its layout stylesheet is inserted, and the swap waits for it.
+  await goTo('to-two', 'two')
+  results[name('entering another area inserts that layout stylesheet once')] =
+    (await stylesheets()).filter((href) => href === '/css/two.css').length === 1
+  results[name('the new area is styled at the moment the swap inserts it')] =
+    (await swapColor('marker-two@two')) === 'rgb(7, 8, 9)'
+  results[name('the shared root layout stylesheet is not requested again')] =
+    (await hits())['/css/root.css'] === 1
+  results[name('entering another area is a client navigation')] = await page.evaluate(
+    () => (window as never as { __sameDocument?: boolean }).__sameDocument === true,
+  )
+
+  // Control: a stylesheet declared through a layout's `head` link is neither carried by the Orbit
+  // fragment nor waited for, so the new area is unstyled when it appears.
+  await goTo('to-head', 'head')
+  results[name('control: a head link is not carried by an Orbit navigation')] =
+    !(await stylesheets()).includes('/css/head.css')
+  results[name('control: the area is unstyled when the swap inserts it')] =
+    (await swapColor('marker-head@head')) !== 'rgb(4, 5, 6)'
+  await page.goto(`${base}/head`, { waitUntil: 'load' })
+  await page.waitForTimeout(1000)
+  results[name('control: the same head link does apply on a full document')] =
+    (await colorOf('.marker-head')) === 'rgb(4, 5, 6)'
+
+  results[name('no console or page errors, CSP included')] = problems.length === 0
+    ? true
+    : problems.join(' | ')
+  await context.close()
 }
 
 async function checkRenderer(
@@ -573,6 +686,84 @@ async function startFixture(
   }
   setPageTree(PageD, { filePath: '/fake/routes/state/page.tsx', segments: [] })
 
+  // The layout-styles fixture: two areas, each under its own layout, below one root layout. `/one`
+  // and `/one/next` share a layout; `/head` declares its stylesheet through the layout's `head`
+  // instead of `styles`, as the control.
+  const rootSegment = { layoutFilePath: '/fake/routes/layout.tsx' }
+  const oneChain = [rootSegment, { layoutFilePath: '/fake/routes/one/layout.tsx' }]
+  const makePage = () =>
+    class extends SpacePageController {
+      // deno-lint-ignore no-explicit-any
+      public override component = (() => null) as any
+    }
+  const layoutPages = {
+    '/one': { Target: makePage(), label: 'one', area: 'one' },
+    '/one/next': { Target: makePage(), label: 'one-next', area: 'one' },
+    '/two': { Target: makePage(), label: 'two', area: 'two' },
+    '/head': { Target: makePage(), label: 'head', area: 'head' },
+  }
+  const layoutChains: Record<string, Parameters<typeof setPageTree>[1]['segments']> = {
+    '/one': oneChain,
+    '/one/next': oneChain,
+    '/two': [rootSegment, { layoutFilePath: '/fake/routes/two/layout.tsx' }],
+    '/head': [rootSegment, {
+      layoutFilePath: '/fake/routes/head/layout.tsx',
+      head: { link: [{ rel: 'stylesheet', href: '/css/head.css' }] },
+    }],
+  }
+  for (const [path, { Target }] of Object.entries(layoutPages)) {
+    setPageTree(Target, { filePath: `/fake/routes${path}/page.tsx`, segments: layoutChains[path] })
+  }
+  setCssManifest({
+    global: [],
+    layouts: {
+      '/fake/routes/layout.tsx': ['/css/root.css'],
+      '/fake/routes/one/layout.tsx': ['/css/one.css'],
+      '/fake/routes/two/layout.tsx': ['/css/two.css'],
+    },
+  })
+  // Every stylesheet answers after a delay, so a swap that does not wait for it is visible as an
+  // unstyled element; `hits` counts the requests each one received.
+  const LAYOUT_CSS_DELAY_MS = 350
+  const layoutCss: Record<string, string> = {
+    '/css/root.css': '.marker-root { color: rgb(10, 20, 30); }',
+    '/css/one.css': '.marker-one { color: rgb(1, 2, 3); }',
+    '/css/two.css': '.marker-two { color: rgb(7, 8, 9); }',
+    '/css/head.css': '.marker-head { color: rgb(4, 5, 6); }',
+  }
+  const hits: Record<string, number> = {}
+
+  async function renderLayoutPage(path: string, fragmentOnly: boolean, nonce: string, csp: string) {
+    const { Target, label, area } = layoutPages[path as keyof typeof layoutPages]
+    const body = () =>
+      el('div', null, [
+        el('h1', { key: 'h' }, label),
+        el('p', { key: 'r', className: 'marker-root' }, 'root'),
+        el('p', { key: 'a', className: `marker-${area}` }, area),
+        ...['/one', '/one/next', '/two', '/head'].map((to) =>
+          el('a', { key: to, href: to, 'data-testid': `to${to.replaceAll('/', '-')}` }, to)
+        ),
+      ])
+    const response = await renderPageResponse(
+      // deno-lint-ignore no-explicit-any
+      Target as any,
+      body,
+      mockPageContext(),
+      undefined,
+      fragmentOnly,
+      nonce,
+      undefined,
+      normalizeCspSignature(csp),
+    )
+    let html = await response.text()
+    if (!fragmentOnly) {
+      html = html
+        .replace('<head>', `<head><script nonce="${nonce}">${STYLE_OBSERVER_SOURCE}</script>`)
+        .replace('</body>', `<script type="module" src="${entryAsset}"></script></body>`)
+    }
+    return html
+  }
+
   async function render(
     which: 'a' | 'b' | 'c' | 'd',
     fragmentOnly: boolean,
@@ -721,6 +912,27 @@ async function startFixture(
         return new Response('not found', { status: 404 })
       }
     }
+    if (url.pathname === '/__hits') return Response.json(hits)
+    if (url.pathname in layoutCss) {
+      hits[url.pathname] = (hits[url.pathname] ?? 0) + 1
+      await new Promise((resolve) => setTimeout(resolve, LAYOUT_CSS_DELAY_MS))
+      return new Response(layoutCss[url.pathname], { headers: { 'content-type': 'text/css' } })
+    }
+    if (url.pathname in layoutPages) {
+      // The framework's zero-config default policy, with a fresh nonce per request.
+      const nonce = crypto.randomUUID().replaceAll('-', '')
+      const csp =
+        `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'nonce-${nonce}'`
+      const html = await renderLayoutPage(
+        url.pathname,
+        req.headers.get(ORBIT_FRAGMENT_HEADER) !== null,
+        nonce,
+        csp,
+      )
+      return new Response(html, {
+        headers: { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': csp },
+      })
+    }
     if (!['/', '/b', '/errors', '/state'].includes(url.pathname)) {
       return new Response('not found', { status: 404 })
     }
@@ -756,6 +968,7 @@ async function startFixture(
     port: (server.addr as Deno.NetAddr).port,
     stop: () => {
       resetInitialStatePolicy()
+      setCssManifest(undefined)
       return server.shutdown()
     },
   }

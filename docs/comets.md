@@ -47,6 +47,32 @@ internally. Writing the `'use comet'`-directive file above is the whole build-si
 discovers it and builds it as its own separate output chunk, rather than letting it get inlined into
 whatever page imports it to render it server-side.
 
+**Comets that ship in a dependency.** A production build gives a Comet its own chunk from three
+sources, and the third is what makes a package's Comets work without any wiring from the app:
+
+1. every file under the project root that starts with `'use comet'`;
+2. every Comet the app's own source renders from a **named** import of a package (`<SubmitGuard />`,
+   `<NavDrawer />`), found by reading the source;
+3. every Comet module in the **static import graph of the app's pages and layouts**. The build
+   imports each page to read its `styles` and `head`, so each Comet module they reach has already
+   run its own `defineComet` by then, and that is read back instead of guessed. It covers what
+   reading source cannot: a Comet a package exports as its default
+   (`export default defineComet(...)`), one a package's own view is handed and calls without JSX
+   (`@zanix/iam`'s `LoginEntryView` renders its `LoginTwoStep` that way), and one reached through
+   another Comet.
+
+Two limits follow from reading what ran. A Comet reached only by a runtime `import()` that no page
+imports statically is not seen. And every Comet module in the graph gets a chunk, whether or not a
+given request renders it: importing a barrel (`@zanix/space/comet/preact`) builds all of its Comets,
+and a chunk nobody renders costs nothing at runtime. A module that `zanix space build` loaded
+through a temporary rewritten copy (a local package outside the project root, linked into the
+workspace) is left out, since the copy's URL names neither the real file nor anything that outlives
+the import: such a Comet needs one of the first two sources.
+
+When a Comet does not hydrate in production (`Failed to hydrate a Comet boundary`, or a request to
+the package's own `https://jsr.io/...` URL blocked by a strict `script-src`), check that its module
+appears in `comets-manifest.json`: a Comet missing from it was not in any source above.
+
 ```ts
 // main.ts — load the manifests cometPlugin/clientEntryPlugin wrote during the client build,
 // before serving anything

@@ -2,7 +2,11 @@ import { createElement, Fragment } from 'preact'
 import type { ComponentChildren, ComponentType } from 'preact'
 import type { LayoutProps, NotFoundProps } from 'typings/page.ts'
 import { renderToResponse } from '../render/render-to-response-preact.ts'
-import { resolveCssHrefs } from '../render/css-manifest.ts'
+import {
+  dedupeStylesheetRefs,
+  resolveCssHrefs,
+  resolveRootLayoutCssHrefs,
+} from '../render/css-manifest.ts'
 import { resolvePwaHead } from '../pwa/pwa-registry.ts'
 import { isDevClientEnabled } from '../dev/dev-client-registry.ts'
 import { applyDocumentShell } from './document-shell-preact.ts'
@@ -66,7 +70,7 @@ export function renderNotFoundResponse(
 
   const document: DocumentModel = {
     head: resolvedHead,
-    cssHrefs: resolveCssHrefs() ?? [],
+    cssHrefs: dedupeStylesheetRefs([...(resolveCssHrefs() ?? []), ...resolveRootLayoutCssHrefs()]),
     pwa: resolvePwaHead(),
     devClient: isDevClientEnabled() ? {} : undefined,
   }

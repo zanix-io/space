@@ -6,7 +6,11 @@ import type { ClassConstructor } from '@zanix/server'
 import type { ErrorBoundaryProps, LayoutProps, PageContext } from 'typings/page.ts'
 import logger from '@zanix/logger'
 import { renderToResponse } from '../render/render-to-response-preact.ts'
-import { resolveCssHrefs, resolvePageCssHrefs } from '../render/css-manifest.ts'
+import {
+  dedupeStylesheetRefs,
+  resolveCssHrefs,
+  resolveScopedCssHrefs,
+} from '../render/css-manifest.ts'
 import { resolveClientEntryUrl } from '../render/client-entry.ts'
 import { resolvePwaHead } from '../pwa/pwa-registry.ts'
 import { isDevClientEnabled } from '../dev/dev-client-registry.ts'
@@ -282,10 +286,13 @@ export async function renderPageResponse<Params>(
   // Same cast reasoning as `rawPageHead` below (`ClassConstructor<T>` exposes no static members) —
   // read here, before `cssHrefs`, since it needs to feed into that same computation.
   const pageStyles = (Target as unknown as typeof SpacePageController).styles
-  const pageCssRefs = resolvePageCssHrefs(getPageTree(Target)?.filePath, pageStyles)
-  // Global first, then this page's own — preserves cascade order (global → page → comet; a
-  // Comet's own CSS never appears in this list, resolved separately at its own render position).
-  const cssHrefs = fragmentOnly ? undefined : [...(resolveCssHrefs() ?? []), ...pageCssRefs]
+  const pageCssRefs = resolveScopedCssHrefs(getPageTree(Target), pageStyles)
+  // Global first, then the route's own (layouts root to leaf, then the page) — preserves cascade
+  // order (global → layouts → page → comet; a Comet's own CSS never appears in this list, resolved
+  // separately at its own render position). A stylesheet two scopes both list links once.
+  const cssHrefs = fragmentOnly
+    ? undefined
+    : dedupeStylesheetRefs([...(resolveCssHrefs() ?? []), ...pageCssRefs])
   const pwaHead = fragmentOnly ? undefined : resolvePwaHead()
   // Same reasoning as `cssHrefs`/`pwaHead` above — page-independent, already in effect on the page
   // an Orbit fragment is swapping into.

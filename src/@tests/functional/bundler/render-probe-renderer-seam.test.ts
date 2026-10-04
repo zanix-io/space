@@ -45,6 +45,7 @@ const PAGES: DiscoveredPage[] = [{
   routePath: 'home',
   filePath: '/routes/home/page.tsx',
   styles: [],
+  layoutStyles: [],
   head: { title: 'Probed', meta: [], link: [] },
   headIsDynamic: false,
   hasUnconditionalRedirect: false,

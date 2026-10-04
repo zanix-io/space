@@ -2,6 +2,7 @@ import type { ClassConstructor } from '@zanix/server'
 import type { SpacePageController } from './space-page-controller.ts'
 import type { HeadDescriptor } from './head-descriptor.ts'
 import type { PageContext } from 'typings/page.ts'
+import type { StylesheetRef } from '../render/css-manifest.ts'
 
 /** A single directory level's own `layout.tsx`/`loading.tsx`/`error.tsx`, already imported.
  * `unknown`, not `ComponentType<...>` from either 'react' or 'preact' — this registry is shared,
@@ -41,6 +42,19 @@ export type ResolvedSegment = {
   errorFilePath?: string
   head?: HeadDescriptor | ((params: Record<string, string>) => HeadDescriptor)
   loader?: (ctx: PageContext) => unknown | Promise<unknown>
+  /**
+   * This segment's own `layout.tsx` source path, exactly as `scanPageFiles` reported it (NOT
+   * realpath'd: it is the key `css-manifest.json`'s `layouts` scope is built under, and must match a
+   * string the build produces independently from the same `routesDir`). `undefined` for a segment
+   * without a layout.
+   */
+  layoutFilePath?: string
+  /**
+   * `layout.tsx`'s own named `styles` export — stylesheets this layout scopes to every page under it,
+   * relative to the layout's own file. Read by `resolveLayoutCssHrefs` (`render/css-manifest.ts`),
+   * which uses it only in dev; production resolves the same export from the built manifest.
+   */
+  styles?: StylesheetRef[]
 }
 
 /** A page's full composition chain, root directory first, its own directory last. */

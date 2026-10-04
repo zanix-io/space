@@ -289,6 +289,7 @@ Deno.test(
       'head',
       'headIsDynamic',
       'layoutHeads',
+      'layoutStyles',
       'routePath',
       'styles',
     ])

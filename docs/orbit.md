@@ -124,12 +124,13 @@ from the very same entry the prefetch already warmed — no separate cache neede
 
 ### CSS during navigation
 
-A fragment response carries every stylesheet the destination page needs — its own `static styles`
-plus any Comet it renders — as real `<link rel="stylesheet">` tags in its body, resolved through the
-exact same logic a full document render uses (see
-[`docs/css.md`](./css.md#responsive-delivery-media-per-page-styles-and-comet-scoped-css) for the
-`global`/page/comet contract itself). `global` is deliberately never repeated here — it's an
-app-wide list, already present since the initial load.
+A fragment response carries every stylesheet the destination route needs — the `styles` of each
+layout in its chain (root layout first), its own `static styles`, plus any Comet it renders — as
+real `<link rel="stylesheet">` tags in its body, resolved through the exact same logic a full
+document render uses (see
+[`docs/css.md`](./css.md#responsive-delivery-media-per-layout-and-per-page-styles-and-comet-scoped-css)
+for the `global`/layout/page/comet contract itself). `global` is deliberately never repeated here —
+it's an app-wide list, already present since the initial load.
 
 Before completing a swap, the client extracts every `<link rel="stylesheet">` from the fragment,
 dedupes by `href` against what the current document already has anywhere in it (not just `<head>` —
@@ -142,7 +143,12 @@ instead of inserting a duplicate `<link>`; nothing here is a client-side registr
 exists" — that stays the server's manifest, read fresh from each fragment.
 
 A page whose CSS is already fully covered by what's already loaded (the common case) triggers none
-of this — the fragment simply doesn't need any `<link>` insertion.
+of this — the fragment simply doesn't need any `<link>` insertion. Navigating between two pages of
+one layout therefore requests nothing again (the layout's stylesheets are already in the document),
+while entering another area, a different layout, inserts that layout's stylesheets and waits for
+them before the swap: the new area never appears unstyled. A stylesheet declared through a layout's
+`head` `<link>` is not part of this: a fragment carries no head links, so it neither inserts nor
+waits for one — declare per-area CSS with the layout's `styles` export.
 
 ### CSP during navigation
 
@@ -250,7 +256,7 @@ consequences. **Weight:** a page that returns its message catalog for `IntlProvi
 message key inside its own HTML, which in a large app is most of the document. **Privacy:** any
 value a `loader` returns for the server render, a person's profile, an email, a token a component
 used to call a service, was also written into the HTML as readable JSON, whether or not any client
-code used it. Since 2.0.0 a page serializes nothing unless the app asks.
+code used it. Since 1.17.0 a page serializes nothing unless the app asks.
 
 #### The four values
 
@@ -342,13 +348,13 @@ natural fit.
 `readInitialState()` returns `T | undefined`: `undefined` is its contract for a page that carries no
 state, which is now the normal case for a page. Always handle it.
 
-#### Migrating to 2.0.0
+#### Migrating to 1.17.0
 
 If your client reads `readInitialState()` or `self.__ZANIX_SPACE_STATE__` from a page the framework
 rendered, it now gets `undefined`. Restore the data with the narrowest option that fits:
 
 ```ts
-// before 2.0.0, implicit
+// before 1.17.0, implicit
 defineSpaceApp({ name: 'web' })
 
 // after: keep exactly the old behavior

@@ -1,8 +1,9 @@
-import { join } from '@std/path'
+import { isAbsolute, join, relative } from '@std/path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import type { Loader } from '@deno/loader'
 import { InternalError } from '@zanix/errors'
 import { USE_COMET_DIRECTIVE } from './comet-directive.ts'
+import { getEvaluatedCometUrls } from '../comets/evaluated-comets.ts'
 import { getBrowserLoader, resolveDenoAt } from './deno-specifier-resolver.ts'
 
 const IGNORED_DIR_NAMES = new Set([
@@ -329,4 +330,92 @@ export async function discoverUsedCometImports(root: string): Promise<Set<string
     [...uniqueCandidates.values()].map((candidate) => resolveCometEntry(candidate, loader)),
   )
   return new Set(resolved.filter((url): url is string => url !== null))
+}
+
+/** A temporary, rewritten sibling of a project or workspace file: `@zanix/cli`'s
+ * `importProjectModule` writes one as `.zanix-import-<uuid>.js` next to the original and deletes it
+ * once the import that needed it resolves. A Comet loaded through one reports THAT file as its
+ * `import.meta.url`, which names neither the real file nor anything that outlives the import. */
+const GENERATED_MODULE_RE = /\.zanix-import-[^/\\]+\.(js|json)$/
+
+/** A module of `@zanix/space` itself as JSR serves it, whatever the version. */
+const SPACE_JSR_MODULE_RE = /^https:\/\/jsr\.io\/@zanix\/space\/[^/]+\//
+
+/** This copy of `@zanix/space`'s own `src/modules/` directory, as a `file://` URL (a checkout, or an
+ * install resolved to local files): where every module the package publishes lives, and not its
+ * tests or fixtures. */
+const SPACE_SOURCE_DIR_URL = new URL('../', import.meta.url).href
+
+/** Whether `url` is a module of `@zanix/space` itself, by where it lives and never by its name. */
+function isSpaceOwnModule(url: string): boolean {
+  return SPACE_JSR_MODULE_RE.test(url) || url.startsWith(SPACE_SOURCE_DIR_URL)
+}
+
+/**
+ * Every Comet the pages' own module graph reaches that lives OUTSIDE the project, read from the
+ * modules that have already run (`evaluated-comets.ts`) instead of guessed from source text, ready
+ * to feed into `build-client.ts`'s `input`/`knownEntryPaths` like the other discovery functions'
+ * results (a real local path, or a plain `https://` URL).
+ *
+ * Complements {@linkcode discoverUsedCometImports}, which reads the app's own source for a JSX
+ * element built from a NAMED import, and cannot see a Comet that a dependency renders for the app:
+ * `@zanix/iam`'s `LoginEntryView` is a plain component that is handed its `LoginTwoStep` Comet (a
+ * default export) and calls it through the element factory, so no such element ever appears in the
+ * app's source or in the dependency's. Every module in a page's static import graph has run its own
+ * `defineComet` by the time the build has imported the pages (`discoverPages`), so the graph is
+ * exact: default exports, injected components and Comets reached through other Comets all count.
+ * Call it AFTER the pages have been imported.
+ *
+ * What it keeps, and why:
+ * - an `https://` (or `http://`) URL, as is: a package installed from JSR, whose files are never
+ *   rewritten;
+ * - a `file://` path that exists and lies outside `root`, realpath'd (an npm package, or a linked
+ *   local package imported without rewriting): the project's own Comets are found by
+ *   {@linkcode discoverComets} already, and counting them again here could only add a duplicate.
+ *
+ * What it leaves out: the Comets `@zanix/space` itself ships (`SubmitGuard`, `ManagedForm`, ...),
+ * recognised by where their module lives (this package's own `src/modules/` directory, or any
+ * `https://jsr.io/@zanix/space/<version>/` URL) and not by name. Space defines them all when its
+ * `comet` barrel is evaluated, whether or not the app uses them, so counting them would give every
+ * app a chunk for each; they are built only when the app renders them, which
+ * {@linkcode discoverUsedCometImports} detects. Also left out: a `.zanix-import-*` temporary file
+ * (see {@linkcode GENERATED_MODULE_RE}), `blob:` and `data:` URLs, and anything in `known`.
+ *
+ * @param root - The project root, as {@linkcode discoverComets}'s own `root`.
+ * @param known - Entries already registered by the other discovery functions, in the same form they
+ * return (realpaths, `https://` URLs). Anything listed is not returned again.
+ */
+export async function discoverEvaluatedComets(
+  root: string,
+  known: Iterable<string> = [],
+): Promise<Set<string>> {
+  const skip = new Set(known)
+  const realRoot = await Deno.realPath(root)
+  const found = new Set<string>()
+
+  await Promise.all(
+    getEvaluatedCometUrls().map(async (url) => {
+      if (isSpaceOwnModule(url)) return
+      if (url.startsWith('https://') || url.startsWith('http://')) {
+        if (!skip.has(url)) found.add(url)
+        return
+      }
+      if (!url.startsWith('file://')) return
+
+      const path = fileURLToPath(url)
+      if (GENERATED_MODULE_RE.test(path)) return
+
+      let real: string
+      try {
+        real = await Deno.realPath(path)
+      } catch {
+        return
+      }
+      // Inside the project (or the root itself): `discoverComets`'s own walk covers it.
+      const fromRoot = relative(realRoot, real)
+      if (fromRoot === '' || (!fromRoot.startsWith('..') && !isAbsolute(fromRoot))) return
+      if (!skip.has(real)) found.add(real)
+    }),
+  )
+  return found
 }

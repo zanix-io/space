@@ -6,7 +6,11 @@ import type { ClassConstructor } from '@zanix/server'
 import type { ErrorBoundaryProps, LayoutProps, PageContext } from 'typings/page.ts'
 import logger from '@zanix/logger'
 import { renderToResponse } from '../render/render-to-response.tsx'
-import { resolveCssHrefs, resolvePageCssHrefs } from '../render/css-manifest.ts'
+import {
+  dedupeStylesheetRefs,
+  resolveCssHrefs,
+  resolveScopedCssHrefs,
+} from '../render/css-manifest.ts'
 import { resolveClientEntryUrl } from '../render/client-entry.ts'
 import { resolvePwaHead } from '../pwa/pwa-registry.ts'
 import { isDevClientEnabled } from '../dev/dev-client-registry.ts'
@@ -364,11 +368,13 @@ export async function renderPageResponse<Params>(
   // static members at all — same reasoning `SpacePageController.handleGet`'s own `Ctor` cast uses.
   const rawPageHead = (Target as unknown as typeof SpacePageController).head
   const pageHead = typeof rawPageHead === 'function' ? rawPageHead(data) : rawPageHead
-  // Same cast reasoning as `rawPageHead` above. `resolvePageCssHrefs` is dev-aware on its own (see
+  // Same cast reasoning as `rawPageHead` above. `resolveScopedCssHrefs` is dev-aware on its own (see
   // that function's own doc) — `styles` is only ever actually read in dev; production resolves
-  // purely from the manifest via this same page's own `filePath`.
+  // purely from the manifest via the layouts' and this page's own `filePath`. The list is the
+  // stylesheets this ROUTE scopes, in cascade order: each layout's `styles` from the root layout to
+  // the nearest, then the page's own.
   const pageStyles = (Target as unknown as typeof SpacePageController).styles
-  const pageCssRefs = resolvePageCssHrefs(getPageTree(Target)?.filePath, pageStyles)
+  const pageCssRefs = resolveScopedCssHrefs(getPageTree(Target), pageStyles)
   const { element, head } = await composeSegments(
     Target,
     <RealComponent {...(data as Record<string, unknown>)} />,
@@ -415,11 +421,11 @@ export async function renderPageResponse<Params>(
     : withCspSignatureMeta(head, cspSignature)
   const document: DocumentModel | undefined = fragmentOnly ? undefined : {
     head: headWithCspSignature,
-    // Global first, then this page's own — preserves cascade order (global → page → comet; a
-    // Comet's own CSS never appears in this list at all, resolved separately at its own render
-    // position — see `define-comet.ts`'s own doc). Both `undefined`-safe on their own; the
-    // spread never needs an extra null check.
-    cssHrefs: [...(resolveCssHrefs() ?? []), ...pageCssRefs],
+    // Global first, then the route's own (layouts root to leaf, then the page) — preserves cascade
+    // order (global → layouts → page → comet; a Comet's own CSS never appears in this list at all,
+    // resolved separately at its own render position — see `define-comet.ts`'s own doc). A
+    // stylesheet two scopes both list links once, at its first position.
+    cssHrefs: dedupeStylesheetRefs([...(resolveCssHrefs() ?? []), ...pageCssRefs]),
     themeStyle,
     pwa: resolvePwaHead(),
     nonce,

@@ -1,4 +1,5 @@
 import type { HeadDescriptor } from './head-descriptor.ts'
+import type { LayoutStylesSource } from '../render/css-manifest.ts'
 
 // `unknown`, not `ComponentType<...>` from either 'react' or 'preact' — `Layout`/`Component` hold
 // either a React or a Preact component depending on `defineSpaceApp({ renderer })`, and this module
@@ -14,6 +15,7 @@ import type { HeadDescriptor } from './head-descriptor.ts'
 // Whole-app singletons, not per-page state (unlike `page-tree-registry.ts`'s `WeakMap`) — an app
 // has exactly one root layout and one not-found page, discovered once by `loadRoutes()`.
 let rootLayout: unknown
+let rootLayoutStyles: LayoutStylesSource | undefined
 let notFoundComponent: unknown
 let notFoundHead: HeadDescriptor | undefined
 
@@ -26,6 +28,21 @@ export function setRootLayout(Layout: unknown): void {
 
 export function getRootLayout(): unknown {
   return rootLayout
+}
+
+/**
+ * Set once by `loadRoutes()` alongside {@linkcode setRootLayout}: where the root `layout.tsx`
+ * lives and the `styles` it exports (`undefined` when the app has no root layout). The documents
+ * this framework renders outside a page (not-found, a failed `loader`) wrap their content in the
+ * root layout, so they link its styles the way a page does.
+ */
+export function setRootLayoutStyles(source: LayoutStylesSource | undefined): void {
+  rootLayoutStyles = source
+}
+
+/** Read by `resolveRootLayoutCssHrefs` (`render/css-manifest.ts`). */
+export function getRootLayoutStyles(): LayoutStylesSource | undefined {
+  return rootLayoutStyles
 }
 
 /** Set once by `loadRoutes()` after discovering `routesDir`'s own `not-found.tsx`, if any. Read by

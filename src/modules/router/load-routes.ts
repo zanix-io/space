@@ -10,14 +10,25 @@ import { setPageTree } from './page-tree-registry.ts'
 import type { ResolvedSegment } from './page-tree-registry.ts'
 import type { SpacePageController } from './space-page-controller.ts'
 import type { HeadDescriptor } from './head-descriptor.ts'
-import { setNotFoundComponent, setNotFoundHead, setRootLayout } from './app-shell-registry.ts'
+import {
+  setNotFoundComponent,
+  setNotFoundHead,
+  setRootLayout,
+  setRootLayoutStyles,
+} from './app-shell-registry.ts'
+import { readLayoutStyles } from './layout-styles.ts'
 import { getActiveRenderer } from './active-renderer.ts'
 
 /** The shape any dynamic module import resolves to, as far as this module cares. `head`/`loader`
  * are only ever meaningfully present on a `layout.tsx` module — its own named exports, discovered
  * alongside the default export below, same import call, no separate file scan (see this module's
  * own segment resolution). */
-export type ImportedModule = { default?: unknown; head?: unknown; loader?: unknown }
+export type ImportedModule = {
+  default?: unknown
+  head?: unknown
+  loader?: unknown
+  styles?: unknown
+}
 
 /** Options for {@linkcode loadRoutes}. */
 export interface LoadRoutesOptions {
@@ -79,16 +90,16 @@ async function resolveRootSingleton(
   dirs: string[],
   fileName: string,
   importModule: (path: string) => Promise<ImportedModule>,
-): Promise<ImportedModule> {
+): Promise<{ module: ImportedModule; filePath?: string }> {
   for (const dir of dirs) {
     const filePath = join(dir, fileName)
     // Sequential on purpose, not parallelizable: this is a first-match-wins lookup, so a later
     // directory's copy must never even be imported once an earlier one has answered — importing it
     // would run its module side effects for a file this app has decided not to use.
     // deno-lint-ignore no-await-in-loop
-    if (fileExists(filePath)) return await importModule(filePath)
+    if (fileExists(filePath)) return { module: await importModule(filePath), filePath }
   }
-  return {}
+  return { module: {} }
 }
 
 /**
@@ -222,12 +233,20 @@ async function loadRoutesOnce(
     resolveRootSingleton(dirs, 'not-found.tsx', importModule),
   ])
 
-  setRootLayout(rootLayout.default)
-  setNotFoundComponent(notFound.default)
+  setRootLayout(rootLayout.module.default)
+  setRootLayoutStyles(
+    rootLayout.filePath
+      ? {
+        layoutFilePath: rootLayout.filePath,
+        styles: readLayoutStyles(rootLayout.filePath, rootLayout.module.styles),
+      }
+      : undefined,
+  )
+  setNotFoundComponent(notFound.module.default)
   // A `not-found.tsx` may export a named `head` exactly like a `layout.tsx` may — same discovery,
   // same single import, no separate file scan. `createNotFoundHandler` falls back to this package's
   // own default when it declares none.
-  setNotFoundHead(notFound.head as HeadDescriptor | undefined)
+  setNotFoundHead(notFound.module.head as HeadDescriptor | undefined)
 
   // Deregisters a page whose file no longer exists under `routesDir` at all — a rename or delete,
   // never a plain edit (an edited-but-still-present file goes through the per-page comparison
@@ -309,6 +328,8 @@ async function loadRoutesOnce(
             layout: layoutModule?.default,
             head: layoutModule?.head as ResolvedSegment['head'],
             loader: layoutModule?.loader as ResolvedSegment['loader'],
+            layoutFilePath: segment.layoutFilePath,
+            styles: readLayoutStyles(segment.layoutFilePath, layoutModule?.styles),
             loading: segment.loadingFilePath
               ? (await importModule(segment.loadingFilePath)).default
               : undefined,

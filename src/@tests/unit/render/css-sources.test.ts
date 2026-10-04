@@ -16,6 +16,7 @@ import {
   getCssSources,
   materializeCssSources,
   resetCssSources,
+  withCssSourcePaths,
 } from 'modules/render/css-sources.ts'
 
 const TMP_ROOT = getTemporaryFolder(import.meta.url)
@@ -169,4 +170,54 @@ Deno.test('cssSources: dev links the materialized sources first, prod reads the 
     setCssManifest({ global: ['/assets/iam-1.css', '/assets/app-2.css'] })
     assertEquals(resolveCssHrefs(), ['/assets/iam-1.css', '/assets/app-2.css'])
   })
+})
+
+Deno.test('cssSources: withCssSourcePaths puts the sources in front of the caller list, which it never mutates', async () => {
+  reset()
+  await withTempRoot(async (root) => {
+    addCssSources([
+      { name: 'iam', css: '.a {}' },
+      { name: 'print', css: '.p {}', media: 'print' },
+    ])
+    await materializeCssSources(root)
+    const own = ['./app.css', { href: './mobile.css', media: '(max-width: 599px)' }]
+
+    assertEquals(withCssSourcePaths(root, own), [
+      './.space/css-sources/iam.css',
+      { href: './.space/css-sources/print.css', media: 'print' },
+      './app.css',
+      { href: './mobile.css', media: '(max-width: 599px)' },
+    ])
+    assertEquals(own.length, 2)
+  })
+})
+
+Deno.test('cssSources: withCssSourcePaths is idempotent, comparing entries by the file they resolve to', async () => {
+  reset()
+  await withTempRoot(async (root) => {
+    addCssSources([{ name: 'iam', css: '.a {}' }, { name: 'ui', css: '.b {}' }])
+    await materializeCssSources(root)
+    const composed = withCssSourcePaths(root, ['./app.css'])
+
+    // Merging an already merged list changes nothing.
+    assertEquals(withCssSourcePaths(root, composed), composed)
+    // The same file named another way is the same stylesheet: an absolute path, a path without `./`.
+    assertEquals(
+      withCssSourcePaths(root, [join(root, CSS_SOURCES_DIR, 'iam.css'), 'app.css']),
+      ['./.space/css-sources/ui.css', join(root, CSS_SOURCES_DIR, 'iam.css'), 'app.css'],
+    )
+    // A caller that listed a source after its own sheet keeps that order.
+    assertEquals(
+      withCssSourcePaths(root, ['./app.css', './.space/css-sources/iam.css']),
+      ['./.space/css-sources/ui.css', './app.css', './.space/css-sources/iam.css'],
+    )
+  })
+})
+
+Deno.test('cssSources: withCssSourcePaths is a copy of the list when no source was declared', () => {
+  reset()
+  const own = ['./app.css']
+  const merged = withCssSourcePaths('/project', own)
+  assertEquals(merged, ['./app.css'])
+  assert(merged !== own)
 })

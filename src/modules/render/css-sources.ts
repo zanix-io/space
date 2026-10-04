@@ -11,7 +11,7 @@
  *
  * @module
  */
-import { join } from '@std/path'
+import { join, resolve } from '@std/path'
 import { InternalError } from '@zanix/errors'
 
 /**
@@ -33,7 +33,12 @@ export const CSS_SOURCES_DIR = '.space/css-sources'
 
 const NAME_PATTERN = /^[a-z0-9][a-z0-9-]*$/
 
-type MaterializedPath = string | { href: string; media: string }
+/** The path a materialized source is listed under: a plain path, or one that carries its `media`. */
+export type MaterializedPath = string | { href: string; media: string }
+
+/** A stylesheet list entry, structurally `StylesheetRef` (`css-manifest.ts` imports this module, so the
+ * type is not imported back). */
+export type ListedStylesheet = string | { href: string; media?: string }
 
 let sources: CssSource[] = []
 let materialized: MaterializedPath[] = []
@@ -73,6 +78,31 @@ export function getCssSources(): CssSource[] {
  * ahead of the app's own `globalCss`. */
 export function getCssSourcePaths(): MaterializedPath[] {
   return materialized
+}
+
+/**
+ * The stylesheet list a build links: `globalCss` with the materialized `cssSources` in front of it,
+ * the order `getGlobalCssPaths` gives and `zanix space dev` serves, so a package's default styles
+ * come before the app's own and the app's rules override them by ordinary cascade.
+ *
+ * It is idempotent. A source whose file the caller already lists (a caller that read
+ * `getGlobalCssPaths()` after {@linkcode materializeCssSources}) stays where the caller put it and
+ * is not added again; entries are compared by the file they resolve to under `root`, so `./a.css`
+ * and an absolute path to it are the same stylesheet. With no declared sources the result is a copy
+ * of `globalCss`.
+ *
+ * @param root - The project root, the directory `globalCss` paths resolve against.
+ * @param globalCss - The caller's own list, which is never mutated.
+ * @returns A new list: the sources the caller did not list, then `globalCss`.
+ */
+export function withCssSourcePaths(
+  root: string,
+  globalCss: readonly ListedStylesheet[],
+): ListedStylesheet[] {
+  if (materialized.length === 0) return [...globalCss]
+  const file = (ref: ListedStylesheet) => resolve(root, typeof ref === 'string' ? ref : ref.href)
+  const listed = new Set(globalCss.map(file))
+  return [...materialized.filter((ref) => !listed.has(file(ref))), ...globalCss]
 }
 
 /** Test-only escape hatch — clears the declared sources and the materialized paths. Not exported

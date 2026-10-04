@@ -97,7 +97,7 @@ nothing else is stubbed ahead of time:
   own client in `self.__ZANIX_SPACE_STATE__`: nothing by default (`'none'`), or `'all'`, `{ pick }`
   or `{ omit }`. A page's `loader` result is never serialized unless the app asks. See
   ["Controlling what crosses to the client"](./docs/orbit.md#controlling-what-crosses-to-the-client-serializationstate)
-  for the contract and the 2.0.0 migration.
+  for the contract and the 1.17.0 migration.
 - ✅ **Head management** (`SpacePageController.head`) — `<title>`/`<meta>`/`<link>` merged across
   the whole composition chain, most-specific-wins, deduplicated. See
   [`docs/head.md`](./docs/head.md) for the full precedence/dedup contract.
@@ -455,14 +455,15 @@ export default defineSpaceApp({
 })
 ```
 
-Global CSS accepts a `media` per entry (`{ href, media }`), a page controller can declare its own
-`static styles`, and a Comet's own `*.module.css` ships only on a page that actually renders that
-Comet — never globally. A package ships default styles for its own screens through `cssSources`,
-placed ahead of `globalCss` so the app overrides them. See [`docs/css.md`](./docs/css.md) for the
-build plugin's full contract, including that responsive-delivery/scoping story, and
-[`docs/theming.md`](./docs/theming.md) for the design-token convention, including the
-`theme.resolve` contract above in full (sanitization, CSP `style-src`, `ETag` folding per
-population).
+Global CSS accepts a `media` per entry (`{ href, media }`), a `layout.tsx` can export `styles` for
+every page below it (an app splits its CSS by area, one layout each), a page controller can declare
+its own `static styles`, and a Comet's own `*.module.css` ships only on a page that actually renders
+that Comet — never globally. A package ships default styles for its own screens through
+`cssSources`, placed ahead of `globalCss` so the app overrides them. See
+[`docs/css.md`](./docs/css.md) for the build plugin's full contract, including that
+responsive-delivery/scoping story, and [`docs/theming.md`](./docs/theming.md) for the design-token
+convention, including the `theme.resolve` contract above in full (sanitization, CSP `style-src`,
+`ETag` folding per population).
 
 ### Assets
 

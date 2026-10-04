@@ -52,6 +52,12 @@ of the current page, not a local re-render of the segment's original children: t
 mounted fresh, with no live reference to whatever originally threw, so only a real round-trip to the
 server can actually recover.
 
+**What a `layout.tsx` can export**: its default component, plus the named exports `head` (the
+layout's [head](./head.md), a descriptor or a function of `params`), `loader` (data for the layout's
+own `data` prop) and `styles` (the stylesheets of the layout's area, linked on every page below it —
+see
+[per-layout `styles`](./css.md#responsive-delivery-media-per-layout-and-per-page-styles-and-comet-scoped-css)).
+
 ### Document shell
 
 A root `layout.tsx` (directly under `routesDir`) owns the actual `<html>` document:

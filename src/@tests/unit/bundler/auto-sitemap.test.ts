@@ -13,6 +13,7 @@ function page(overrides: Partial<DiscoveredPage> = {}): DiscoveredPage {
     filePath: 'routes/products/page.tsx',
     routePath: 'products',
     styles: [],
+    layoutStyles: [],
     head: head(),
     headIsDynamic: false,
     hasUnconditionalRedirect: false,

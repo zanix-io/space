@@ -56,6 +56,15 @@ export interface CssPluginOptions {
    * build): no behavior change at all, `pages` is simply never written.
    */
   pageEntries?: Record<string, Array<{ entryName: string; media?: string }>>
+  /**
+   * `layoutFilePath -> [{entryName, media}]` (see `build-client.ts`'s own construction, from
+   * `discoverPages`/`collectLayoutStyles`), in DECLARATION order PER LAYOUT — the same correlation as
+   * `pageEntries`, grouped by the layout each entry belongs to. Written under
+   * `css-manifest.json`'s `layouts[layoutFilePath]`: linked on every page whose composition chain
+   * contains that layout, never on a page outside it. Omitted entirely (no layout declares `styles`
+   * in this build): `layouts` is simply never written.
+   */
+  layoutEntries?: Record<string, Array<{ entryName: string; media?: string }>>
 }
 
 const MANIFEST_FILE_NAME = 'css-manifest.json'
@@ -70,11 +79,13 @@ const MANIFEST_FILE_NAME = 'css-manifest.json'
  * serve each declared stylesheet directly (a `?direct` suffix on its URL, no manifest, no
  * hashing) — same `<link>` shape, no build step in between.
  *
- * The manifest has three scopes: `global` (every stylesheet not claimed by a comet or a page —
+ * The manifest has four scopes: `global` (every stylesheet not claimed by a comet or a page —
  * `globalCss`, Tailwind, CSS Modules used outside a Comet, vanilla-extract), linked on every
  * full-document response, in the same order `globalCss` declared it (and carrying each entry's own
  * `media`, when given) whenever `globalEntries` correlates it to a known entry — see that option's
- * own doc; `pages`, keyed by a page's own source `filePath`, linked ONLY on that specific page's own
+ * own doc; `layouts`, keyed by a layout's own source `filePath`, linked on every page whose composition
+ * chain contains that layout, between `global` and the page's own scope; `pages`, keyed by a page's
+ * own source `filePath`, linked ONLY on that specific page's own
  * response, alongside `global` (see `render-page-react.tsx`/`render-page-preact.ts`'s own doc for
  * where the two get concatenated); and `comets`, keyed by comet source identity, linked ONLY when
  * that specific comet is actually used on the current page (see `define-comet.ts`'s own doc for
@@ -113,6 +124,7 @@ export function cssPlugin(options: CssPluginOptions = {}): Plugin[] {
     cometEntries = {},
     globalEntries = [],
     pageEntries = {},
+    layoutEntries = {},
   } = options
   const plugins: Plugin[] = []
 
@@ -170,28 +182,49 @@ export function cssPlugin(options: CssPluginOptions = {}): Plugin[] {
         }
       }
 
-      // Page scope, in DECLARATION order PER PAGE — same correlation approach as comets/global
-      // above, walking `pageEntries` (grouped by page, not flattened) so a page's own CSS lands
-      // under its own key in `pages`, never in `global` — a stylesheet declared by page A must
-      // never link on page B.
-      const pages: Record<string, StylesheetRef[]> = {}
-      for (const [pageFilePath, entries] of Object.entries(pageEntries)) {
-        const hrefs: StylesheetRef[] = []
-        for (const { entryName, media } of entries) {
-          const chunk = Object.values(bundle).find((c) =>
-            c.type === 'chunk' && c.name === entryName
-          )
-          const importedCss = chunk?.type === 'chunk' ? chunk.viteMetadata?.importedCss : undefined
-          if (!importedCss || importedCss.size === 0) continue
+      // Layout and page scopes, in DECLARATION order PER OWNER — the same correlation as comets and
+      // global above, walking the entry lists (grouped by owner, not flattened) so an owner's own
+      // CSS lands under its own key, never in `global`: a stylesheet declared by layout or page A
+      // must never link outside A's own pages.
+      //
+      // What a stylesheet may NOT be is already claimed by a comet or by `global` (it links there).
+      // Between owners it may repeat: two pages, or a layout and a page, that import the SAME file
+      // each list it, because it is one real asset linked wherever its owner applies. Every file
+      // either scope uses is still marked claimed, so the fallback sweep below never folds it into
+      // `global`.
+      const claimedByCometOrGlobal = new Set(claimedCssFileNames)
+      const scoped = (
+        ownerEntries: Record<string, Array<{ entryName: string; media?: string }>>,
+      ): Record<string, StylesheetRef[]> => {
+        const result: Record<string, StylesheetRef[]> = {}
+        for (const [owner, entries] of Object.entries(ownerEntries)) {
+          const hrefs: StylesheetRef[] = []
+          const listedForOwner = new Set<string>()
+          for (const { entryName, media } of entries) {
+            const chunk = Object.values(bundle).find((c) =>
+              c.type === 'chunk' && c.name === entryName
+            )
+            const importedCss = chunk?.type === 'chunk'
+              ? chunk.viteMetadata?.importedCss
+              : undefined
+            if (!importedCss || importedCss.size === 0) continue
 
-          for (const cssFileName of importedCss) {
-            if (claimedCssFileNames.has(cssFileName)) continue
-            claimedCssFileNames.add(cssFileName)
-            hrefs.push(media === undefined ? `/${cssFileName}` : { href: `/${cssFileName}`, media })
+            for (const cssFileName of importedCss) {
+              if (claimedByCometOrGlobal.has(cssFileName)) continue
+              claimedCssFileNames.add(cssFileName)
+              if (listedForOwner.has(cssFileName)) continue
+              listedForOwner.add(cssFileName)
+              hrefs.push(
+                media === undefined ? `/${cssFileName}` : { href: `/${cssFileName}`, media },
+              )
+            }
           }
+          if (hrefs.length > 0) result[owner] = hrefs
         }
-        if (hrefs.length > 0) pages[pageFilePath] = hrefs
+        return result
       }
+      const layouts = scoped(layoutEntries)
+      const pages = scoped(pageEntries)
 
       // Fallback sweep — any `.css` asset no known entry (comet, global, or page) claimed, in
       // whatever order `Object.values(bundle)` yields. Covers a direct `cssPlugin()` caller that
@@ -209,10 +242,12 @@ export function cssPlugin(options: CssPluginOptions = {}): Plugin[] {
 
       const hasComets = Object.keys(comets).length > 0
       const hasPages = Object.keys(pages).length > 0
-      if (global.length === 0 && !hasComets && !hasPages) return
+      const hasLayouts = Object.keys(layouts).length > 0
+      if (global.length === 0 && !hasComets && !hasPages && !hasLayouts) return
 
       const manifest: CssManifest = {
         global,
+        ...(hasLayouts ? { layouts } : {}),
         ...(hasPages ? { pages } : {}),
         ...(hasComets ? { comets } : {}),
       }

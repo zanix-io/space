@@ -61,7 +61,8 @@ Deno.test(
 
     const activated = await activateApps([app])
     const [serverId] = await bootstrapServers({
-      rest: { application: 'fixture-assets-api-app', id: 'fixture-assets-api-app' },
+      // An explicit port off the Zanix default (8000): a local dev stack holds that one.
+      rest: { application: 'fixture-assets-api-app', id: 'fixture-assets-api-app', port: 20935 },
     })
     assert(serverId, 'the server should have been started')
     try {

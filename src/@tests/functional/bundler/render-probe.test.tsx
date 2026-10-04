@@ -77,6 +77,7 @@ function discovered(overrides: Partial<DiscoveredPage> = {}): DiscoveredPage {
     filePath: 'routes/widget/page.tsx',
     routePath: 'widget',
     styles: [],
+    layoutStyles: [],
     head: { title: HEAD.title, meta: HEAD.meta, link: HEAD.link },
     headIsDynamic: false,
     hasUnconditionalRedirect: false,

@@ -75,6 +75,14 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+/** Polls instead of a fixed `sleep`: the dynamic import plus the render can exceed a fixed delay
+ * when the full suite runs under load. */
+async function waitFor(condition: () => boolean, timeoutMs = 5000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  // deno-lint-ignore no-await-in-loop
+  while (!condition() && Date.now() < deadline) await sleep(10)
+}
+
 function countErrors(): { count: () => number; restore: () => void } {
   const original = logger.error
   let calls = 0
@@ -216,7 +224,7 @@ Deno.test(
     document.body.appendChild(boundary)
 
     hydrateComets(fakeRoot([boundary]))
-    await sleep(150)
+    await waitFor(() => boundary.innerHTML.includes('widget:x'))
 
     assert(boundary.innerHTML.includes('widget:x'), boundary.innerHTML)
   },
@@ -232,7 +240,7 @@ Deno.test(
     document.body.appendChild(boundary)
 
     hydrateComets(fakeRoot([boundary]))
-    await sleep(150)
+    await waitFor(() => boundary.innerHTML.includes('widget:'))
 
     assert(boundary.innerHTML.includes('widget:'), boundary.innerHTML)
   },
@@ -249,7 +257,7 @@ Deno.test(
     document.body.appendChild(boundary)
 
     hydrateComets(fakeRoot([boundary]))
-    await sleep(150)
+    await waitFor(() => boundary.innerHTML.includes('named:y'))
 
     assert(boundary.innerHTML.includes('named:y'), boundary.innerHTML)
   },
@@ -282,7 +290,7 @@ Deno.test(
     const errors = countErrors()
     try {
       hydrateComets(fakeRoot([boundary]))
-      await sleep(150)
+      await waitFor(() => boundary.innerHTML.includes('inner:z'))
 
       assertEquals(errors.count(), 0, 'the nested Comet must not have thrown/logged anything')
       assert(boundary.innerHTML.includes('outer:z'), boundary.innerHTML)
@@ -321,7 +329,7 @@ Deno.test(
     outlet.appendChild(boundary2)
 
     hydrateComets(fakeRoot([boundary1, boundary2]))
-    await sleep(150)
+    await waitFor(() => boundary2.innerHTML !== '' && boundary1.innerHTML !== '')
 
     detachPersistedComets(outlet)
     assertEquals(
@@ -367,7 +375,7 @@ Deno.test(
     outlet.appendChild(boundary)
 
     hydrateComets(fakeRoot([boundary]))
-    await sleep(150)
+    await waitFor(() => boundary.innerHTML.includes('widget:plain'))
     assert(boundary.innerHTML.includes('widget:plain'), `not mounted: ${boundary.innerHTML}`)
 
     disposeOutletComets(outlet)

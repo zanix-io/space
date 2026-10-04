@@ -79,6 +79,14 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+/** Polls instead of a fixed `sleep`: the dynamic import plus React's async render can exceed a
+ * fixed delay when the full suite runs under load. */
+async function waitFor(condition: () => boolean, timeoutMs = 5000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  // deno-lint-ignore no-await-in-loop
+  while (!condition() && Date.now() < deadline) await sleep(10)
+}
+
 function countErrors(): { count: () => number; restore: () => void } {
   const original = logger.error
   let calls = 0
@@ -188,7 +196,7 @@ Deno.test(
     document.body.appendChild(boundary)
 
     hydrateErrorBoundaries(fakeRoot([boundary]))
-    await sleep(150)
+    await waitFor(() => boundary.innerHTML.includes('fallback:boom:'))
 
     assert(boundary.innerHTML.includes('fallback:boom:'), boundary.innerHTML)
     assert(boundary.innerHTML.includes('"id":"42"'), boundary.innerHTML)
@@ -211,7 +219,7 @@ Deno.test(
     document.body.appendChild(boundary)
 
     hydrateErrorBoundaries(fakeRoot([boundary]))
-    await sleep(150)
+    await waitFor(() => boundary.innerHTML.includes('fallback:Unknown error:'))
 
     assert(boundary.innerHTML.includes('fallback:Unknown error:'), boundary.innerHTML)
   },
@@ -239,7 +247,7 @@ Deno.test(
     document.body.appendChild(boundary)
 
     hydrateErrorBoundaries(fakeRoot([boundary]))
-    await sleep(150)
+    await waitFor(() => boundary.innerHTML.includes('fallback:pailas:'))
 
     assert(boundary.innerHTML.includes('fallback:pailas:'), boundary.innerHTML)
   },

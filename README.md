@@ -238,13 +238,17 @@ import Counter from '../comets/counter.tsx'
 
 See [`docs/comets.md`](./docs/comets.md) for the full contract: wiring, mount modes,
 cross-navigation state persistence (`persist`), the build-time `'server-only'` boundary, and the
-ready-made Comets under `@zanix/space/comet/react` / `@zanix/space/comet/preact` —
-`FormDraftPersistence` (session/local-scoped form draft recovery), `SubmitGuard` (double-submit
-prevention), `ScrollRestoration` (scroll-position recovery across a refresh or an Orbit navigation),
-`UnsavedChangesGuard` (a native "leave site?" warning before an unsaved form is discarded),
-`NetworkStatus` (live online/offline as a `data-*` attribute), and `ManagedForm` (composes the three
-form-level behaviors above under one `formId`, and with `focusFirstInvalid` focuses the first
-control the server rendered as `aria-invalid="true"`).
+ready-made Comets under `@zanix/space/comet/react` / `@zanix/space/comet/preact` (full reference in
+[`docs/form-drafts.md`](./docs/form-drafts.md) and
+[`docs/form-behaviors.md`](./docs/form-behaviors.md)) — `FormDraftPersistence` (session/local-scoped
+form draft recovery), `SubmitGuard` (double-submit prevention), `ScrollRestoration` (scroll-position
+recovery across a refresh or an Orbit navigation), `UnsavedChangesGuard` (a native "leave site?"
+warning before an unsaved form is discarded), `NetworkStatus` (live online/offline as a `data-*`
+attribute), and `ManagedForm` (composes the three form-level behaviors above under one `formId`, and
+with `focusFirstInvalid` focuses the first control the server rendered as `aria-invalid="true"`, and
+with `clearInvalidOnInput` clears a control's error as soon as the visitor edits it, and with
+`validateInline` validates in the page with the field's own messages, instead of the browser's
+native bubble).
 
 ### Client-side navigation ("Orbit")
 
@@ -539,6 +543,10 @@ mandatory default `rateLimitGuard` bounds anonymous write volume. See
 - [`docs/routing.md`](./docs/routing.md) — file-based routing, layout nesting, the document shell,
   and error/not-found recovery.
 - [`docs/comets.md`](./docs/comets.md) — selective hydration: wiring, mount modes, `persist`.
+- [`docs/form-drafts.md`](./docs/form-drafts.md) — `FormDraftPersistence`: form draft recovery
+  across a refresh or a failed submit.
+- [`docs/form-behaviors.md`](./docs/form-behaviors.md) — `SubmitGuard`, `ScrollRestoration`,
+  `UnsavedChangesGuard`, `NetworkStatus`, asynchronous submit interception, and `ManagedForm`.
 - [`docs/orbit.md`](./docs/orbit.md) — client-side navigation, prefetch, and manual rendering.
 - [`docs/middleware.md`](./docs/middleware.md) — CSP/security headers, `csrfGuard`, language
   routing, population resolution.

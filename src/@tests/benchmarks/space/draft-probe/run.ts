@@ -22,7 +22,7 @@
  * `--serve` prints one URL per renderer. Each page shows a live log of what the page observed
  * (mark set/removed with timestamps against the first paint, CSP violations, whether the document
  * was loaded again), so the checks need no DevTools. The steps and the expected log are in
- * `docs/comets.md`, "Checking the probe in a real browser".
+ * `docs/form-drafts.md`, "Checking the probe in a real browser".
  *
  * @module
  */

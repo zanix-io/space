@@ -1,6 +1,8 @@
 import { attachFormDraftPersistence } from './form-draft-persistence.ts'
 import type { FormDraftPersistenceOptions } from './form-draft-persistence.ts'
 import { attachFocusFirstInvalid } from './focus-first-invalid.ts'
+import { attachValidateInline } from './validate-inline.ts'
+import { attachClearInvalidOnInput } from './clear-invalid-on-input.ts'
 import { attachSubmitGuard } from './submit-guard.ts'
 import type { SubmitGuardOptions } from './submit-guard.ts'
 import { attachSubmitIntercept } from './submit-intercept.ts'
@@ -11,7 +13,8 @@ import type { UnsavedChangesGuardOptions } from './unsaved-changes-guard.ts'
 /**
  * Composes {@linkcode attachFormDraftPersistence}/{@linkcode attachSubmitGuard}/
  * {@linkcode attachSubmitIntercept}/{@linkcode attachUnsavedChangesGuard}/
- * {@linkcode attachFocusFirstInvalid} under one `formId`, so a
+ * {@linkcode attachFocusFirstInvalid}/{@linkcode attachClearInvalidOnInput}/
+ * {@linkcode attachValidateInline} under one `formId`, so a
  * page author enabling more than one doesn't repeat it across separate calls (or separate
  * ready-made Comets, one per behavior). Does NOT render a `<form>` itself, same reason none of the
  * primitives it composes do: a Comet's own props must be plain JSON (see `define-comet.ts`'s own
@@ -73,6 +76,32 @@ export type ManagedFormOptions = {
    * control the visitor is already in.
    */
   focusFirstInvalid?: boolean
+  /**
+   * Enables {@linkcode attachClearInvalidOnInput}: when the visitor edits a control the server
+   * rendered as `aria-invalid="true"`, that control loses the mark, its `aria-describedby` loses
+   * the id of its error (an id ending in `-error`; a hint stays) and the error element is hidden,
+   * so the error no longer sits there while the visitor corrects the value. Only that control is
+   * touched: not the form banner, not the errors of other controls. An `input` or `change` event
+   * inside the control counts as an edit; focus, blur and the restore of a `draft` do not. Omit/
+   * `false` (the default) to keep every error until the form is rendered again; set it together
+   * with `focusFirstInvalid` for the usual server-validated form.
+   */
+  clearInvalidOnInput?: boolean
+  /**
+   * Enables {@linkcode attachValidateInline}: once hydrated, the form is `noValidate` (no native
+   * bubble) and the browser's own constraint validation runs in the page instead. On `submit`,
+   * every control that fails it is marked `aria-invalid="true"` and gets an error element under it
+   * (the `Alert` markup `Field` renders for a server error, wired in through `aria-describedby`),
+   * the submission is cancelled and the first one takes the focus; after that, a control is
+   * checked again when the visitor edits and leaves it. The message comes from the control's
+   * `data-message-*`/`data-validation-message` attribute (on it or an ancestor, `Field`'s
+   * `validationMessages` sets them), else its `validationMessage`. A cancelled submit dispatches
+   * the bubbling `space:form-invalid` event on the form, for an application summary. The server
+   * keeps validating, and without JavaScript the browser's own bubble applies. Omit/`false` (the
+   * default) to keep the browser's own validation. Combines with `focusFirstInvalid` (the server's
+   * `422`), `clearInvalidOnInput` and `submitGuard`: a submit this cancels never reaches the guard.
+   */
+  validateInline?: boolean
 }
 
 /**
@@ -85,8 +114,20 @@ export type ManagedFormOptions = {
  * `useEffect(() => attachManagedForm(options), deps)`.
  */
 export function attachManagedForm(options: ManagedFormOptions): () => void {
-  const { formId, draft, submitGuard, intercept, unsavedChanges, focusFirstInvalid } = options
+  const {
+    formId,
+    draft,
+    submitGuard,
+    intercept,
+    unsavedChanges,
+    focusFirstInvalid,
+    clearInvalidOnInput,
+    validateInline,
+  } = options
   const cleanups: Array<() => void> = []
+
+  // First: its capture-phase `submit` listener must run before the other behaviors' own.
+  if (validateInline) cleanups.push(attachValidateInline({ formId }))
 
   if (draft) cleanups.push(attachFormDraftPersistence({ formId, ...draft }))
   if (submitGuard) {
@@ -101,6 +142,8 @@ export function attachManagedForm(options: ManagedFormOptions): () => void {
 
   // Last: after the draft's own fields restored (`draft` above restores them synchronously).
   if (focusFirstInvalid) cleanups.push(attachFocusFirstInvalid({ formId, draft }))
+
+  if (clearInvalidOnInput) cleanups.push(attachClearInvalidOnInput({ formId }))
 
   return () => {
     for (const cleanup of cleanups.toReversed()) cleanup()

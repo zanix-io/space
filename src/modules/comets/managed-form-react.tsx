@@ -30,11 +30,15 @@ export type ManagedFormComponentProps = Omit<ManagedFormOptions, 'intercept'>
  *   submitGuard
  *   unsavedChanges
  *   focusFirstInvalid
+ *   clearInvalidOnInput
  * />
  * ```
  *
  * `focusFirstInvalid` moves the focus to the first control the server rendered as
- * `aria-invalid="true"` (see {@linkcode ManagedFormOptions.focusFirstInvalid}).
+ * `aria-invalid="true"` (see {@linkcode ManagedFormOptions.focusFirstInvalid}); `clearInvalidOnInput` clears a control's
+ * error as soon as the visitor edits it (see {@linkcode ManagedFormOptions.clearInvalidOnInput});
+ * `validateInline` validates in the browser with the page's own messages (see
+ * {@linkcode ManagedFormOptions.validateInline}).
  *
  * **Never accepts `intercept`** — `ManagedFormOptions.intercept` is a real function, and this
  * component's own props cross the server/client boundary as plain JSON (`defineComet`'s own
@@ -59,6 +63,8 @@ export function ManagedForm(props: ManagedFormComponentProps): ReactElement | nu
     props.submitGuard,
     props.unsavedChanges,
     props.focusFirstInvalid,
+    props.clearInvalidOnInput,
+    props.validateInline,
   ])
   return restoring
     ? createElement('span', { hidden: true, 'data-draft-restoring': props.formId })

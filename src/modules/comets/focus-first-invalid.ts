@@ -94,7 +94,7 @@ function isUsable(element: Element): boolean {
 
 /** The control to focus for one element marked invalid: the element itself when it can take the
  * focus, else the first focusable control inside it. `null` when none can be focused. */
-function resolveFocusable(marked: Element): HTMLElement | null {
+export function resolveFocusable(marked: Element): HTMLElement | null {
   if (marked.matches(FOCUSABLE_SELECTOR)) return isUsable(marked) ? marked as HTMLElement : null
   for (const inner of marked.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)) {
     if (isUsable(inner)) return inner
@@ -114,6 +114,19 @@ export function findFirstInvalidControl(form: Element): HTMLElement | null {
   return null
 }
 
+/** Focuses `target` and scrolls it into view: `behavior: 'instant'` under
+ * `prefers-reduced-motion: reduce`, `'smooth'` otherwise. Shared with `validate-inline.ts`, which
+ * moves the focus the same way after a submit it cancelled. */
+export function revealControl(target: HTMLElement): void {
+  target.focus({ preventScroll: true })
+  const reduced = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches === true
+  target.scrollIntoView?.({
+    block: 'center',
+    inline: 'nearest',
+    behavior: reduced ? 'instant' : 'smooth',
+  })
+}
+
 /** Focuses and reveals the first invalid control of `form`, unless the visitor already moved the
  * focus into another control (or it is already on the target). */
 function focusFirstInvalid(form: Element): void {
@@ -126,13 +139,7 @@ function focusFirstInvalid(form: Element): void {
   // `autofocus` is the page's own choice, not the visitor's: the invalid control wins over it.
   if (active && active.matches(ENTRY_SELECTOR) && !active.hasAttribute('autofocus')) return
 
-  target.focus({ preventScroll: true })
-  const reduced = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches === true
-  target.scrollIntoView?.({
-    block: 'center',
-    inline: 'nearest',
-    behavior: reduced ? 'instant' : 'smooth',
-  })
+  revealControl(target)
 }
 
 /**

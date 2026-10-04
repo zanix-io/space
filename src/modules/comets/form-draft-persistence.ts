@@ -9,6 +9,7 @@ import {
 } from './draft-storage.ts'
 import { recoverSubmittedDraft, settleDraftOnSubmit } from './draft-lifecycle.ts'
 import { reportDraftValueRestored } from './draft-restoring.ts'
+import { dispatchDraftRestoreEvent } from './draft-restore-event.ts'
 
 export { DEFAULT_DRAFT_DEBOUNCE_MS }
 export type { DraftStorageKind }
@@ -179,7 +180,7 @@ function restoreForm(
     // never passed one — see this function's own doc). A real, bubbling event is what makes such a
     // field's own `onChange`/`onInput` handler fire and sync its internal state to match, the same
     // path a genuine keystroke/click already takes — not a special restore-only code path.
-    el.dispatchEvent(new Event(fieldChangeEventType(el), { bubbles: true }))
+    dispatchDraftRestoreEvent(el, fieldChangeEventType(el))
   })
 }
 

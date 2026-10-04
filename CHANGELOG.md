@@ -5,6 +5,54 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.18.0] - 2026-10-04
+
+### Added
+
+- **`ManagedForm`'s `validateInline` option** (and `attachValidateInline`, `FORM_INVALID_EVENT` and
+  the message-attribute constants, exported from `@zanix/space/comet`): validation in the browser,
+  with the page's own messages, instead of the browser's native bubble. Once hydrated the form is
+  `noValidate`; on `submit` every control that fails the browser's constraint validation
+  (`required`, `type`, `pattern`, `min`/`max`, `minlength`/`maxlength`, `step`, `setCustomValidity`,
+  and the `data-value-missing` marker of `@zanix/space-ui`'s `Select`/`DatePicker`/`RadioGroup`)
+  gets `aria-invalid="true"` and an error element wired in through `aria-describedby`, the submit is
+  cancelled and the first invalid control takes the focus (the same focus and scroll as
+  `focusFirstInvalid`). A control is checked again when the visitor edits and leaves it, never while
+  they type a first value. The error is the `Alert` markup `Field` renders for a server error
+  (`id="{field}-error"`, `data-space-ui="alert"`), reusing an element the server already rendered,
+  so both look the same. The message is the failure's `data-message-*` attribute
+  (`data-message-required`, ...), else `data-validation-message`, read from the control or an
+  ancestor (`Field`'s `validationMessages`, or the `<form>` for a default), else the control's own
+  `validationMessage`. A cancelled submit dispatches the bubbling `space:form-invalid` event, with
+  the invalid controls and messages, for an application-owned summary toast. Server validation is
+  unchanged, and without JavaScript the browser's own bubble applies. **Off by default**, like every
+  other `ManagedForm` option, so no existing form changes. It attaches before the other behaviors
+  and stops a submit it cancels, so `submitGuard` never disables the buttons for a submit that did
+  not happen. Composed controls fire their `change` and re-render after it, so they are looked at
+  one tick later. Needs `@zanix/space-ui` 2.9.0 for `required` on `Select`/`DatePicker`/`RadioGroup`
+  and for `Field`'s `validationMessages`; native controls and `Combobox`/`MultiSelect`/`FileInput`
+  work with any version.
+- **`ManagedForm`'s `clearInvalidOnInput` option** (and `attachClearInvalidOnInput`, exported from
+  `@zanix/space/comet`): a control the server rendered as `aria-invalid="true"` stops showing its
+  error as soon as the visitor edits it. For the edited control it removes `aria-invalid`, removes
+  the error id (an id ending in `-error`, the `Alert` that `@zanix/space-ui`'s `Field` renders) from
+  `aria-describedby` while keeping the other ids, and hides the error element (`hidden`, not
+  removed: no orphan `role="alert"`, nothing announced, and a server re-render brings it back). One
+  delegated `input`/`change` listener on the form drives it; focus, blur and the events a draft
+  restore dispatches clear nothing, and the form banner, the toast and other controls' errors are
+  never touched. A native radio clears its whole marked group. Composed `@zanix/space-ui` controls
+  (`Select`, `DatePicker`, `MultiSelect`, `Combobox`, `RadioGroup`) fire the `change` it listens to
+  from `@zanix/space-ui` 2.9.0. **Off by default**, like every other `ManagedForm` option, so no
+  existing form changes behavior: add `clearInvalidOnInput` next to `focusFirstInvalid`.
+- Draft restore events are now marked internally (`draft-restore-event.ts`) so a listener can tell a
+  restored value from a visitor's edit. The events themselves are unchanged.
+
+### Documentation
+
+- The ready-made form Comets move out of `docs/comets.md` into `docs/form-drafts.md`
+  (`FormDraftPersistence`) and `docs/form-behaviors.md` (`SubmitGuard`, `ScrollRestoration`,
+  `UnsavedChangesGuard`, `NetworkStatus`, asynchronous submit interception, `ManagedForm`).
+
 ## [1.17.1] - 2026-10-03
 
 ### Fixed

@@ -34,6 +34,7 @@ const globals = globalThis as any
 globals.document = dom.document
 globals.Event = dom.Event
 globals.FormData = dom.FormData
+globals.CustomEvent = dom.CustomEvent
 globals.HTMLFormElement = dom.HTMLFormElement
 globals.HTMLInputElement = dom.HTMLInputElement
 globals.HTMLTextAreaElement = dom.HTMLTextAreaElement

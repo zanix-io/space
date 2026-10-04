@@ -50,5 +50,16 @@ export { attachNetworkStatus, DEFAULT_NETWORK_STATUS_ATTRIBUTE } from './network
 export type { NetworkStatusOptions } from './network-status.ts'
 export { attachFocusFirstInvalid } from './focus-first-invalid.ts'
 export type { FocusFirstInvalidDraft, FocusFirstInvalidOptions } from './focus-first-invalid.ts'
+export { attachClearInvalidOnInput } from './clear-invalid-on-input.ts'
+export type { ClearInvalidOnInputOptions } from './clear-invalid-on-input.ts'
+export {
+  attachValidateInline,
+  FALLBACK_MESSAGE,
+  FORM_INVALID_EVENT,
+  VALIDATION_MESSAGE_ATTRIBUTE,
+  VALIDITY_MESSAGE_ATTRIBUTES,
+  VALUE_MISSING_ATTRIBUTE,
+} from './validate-inline.ts'
+export type { FormInvalidDetail, ValidateInlineOptions } from './validate-inline.ts'
 export { attachManagedForm } from './managed-form.ts'
 export type { ManagedFormOptions } from './managed-form.ts'

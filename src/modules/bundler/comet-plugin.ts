@@ -234,7 +234,9 @@ export function cometPlugin(options: CometPluginOptions = {}): Plugin {
     name: 'zanix-space-comets',
     apply: 'build',
     async transform(code, id) {
-      if (USE_COMET_DIRECTIVE.test(code)) {
+      // Both directives need their literal text in the source, so a module without it skips the
+      // regex entirely (the common case: every other module in the graph, CSS included).
+      if (code.includes('use comet') && USE_COMET_DIRECTIVE.test(code)) {
         // `resolveComparableId` is what keeps this set matching `generateBundle`'s own lookup
         // later, regardless of whether `id` is an ordinary local file (realpath'd, same reasoning
         // as `'server-only'` below always needed) or a ready-made Comet resolved through a remote
@@ -257,7 +259,7 @@ export function cometPlugin(options: CometPluginOptions = {}): Plugin {
         }
         return null
       }
-      if (SERVER_ONLY_DIRECTIVE.test(code)) {
+      if (code.includes('server-only') && SERVER_ONLY_DIRECTIVE.test(code)) {
         serverOnlySourceIds.add(await resolveComparableId(id))
       }
       return null

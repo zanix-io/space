@@ -1,4 +1,5 @@
 import { basename } from '@std/path'
+import { directivePrologueRegex } from './directive-prologue.ts'
 
 /** A leading `'server-only'`/`"server-only"` directive prologue — the same grammar slot (and
  * detection style) as `'use comet'`/`'use strict'`: a plain string-literal expression statement,
@@ -21,8 +22,7 @@ import { basename } from '@std/path'
  * of that same "one shared implementation, two call sites" contract, for the VIOLATION MESSAGE
  * itself.
  */
-export const SERVER_ONLY_DIRECTIVE =
-  /^(?:\s*\/\/[^\n]*\n|\s*\/\*[\s\S]*?\*\/)*\s*(['"])server-only\1;?/
+export const SERVER_ONLY_DIRECTIVE: RegExp = directivePrologueRegex('server-only')
 
 /**
  * Renders a `'server-only'` violation exactly as a developer needs to fix it — shared verbatim

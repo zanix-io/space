@@ -1,3 +1,5 @@
+import { directivePrologueRegex } from './directive-prologue.ts'
+
 /** A leading `'use comet'`/`"use comet"` directive prologue — the same grammar slot (and detection
  * style) as `'use strict'`/React Server Components' `'use client'`: a plain string-literal
  * expression statement, allowed to be preceded by comments, before any other code. This is a
@@ -6,6 +8,8 @@
  *
  * Shared between `comet-plugin.ts` (build-time chunk-splitting/manifest) and `discover-comets.ts`
  * (build-time entry discovery, for `buildSpaceClient`) so both ever recognize the exact same set
- * of files — never two independently-maintained regexes that could silently drift apart.
+ * of files — never two independently-maintained regexes that could silently drift apart. The
+ * leading-comments prefix itself comes from `directive-prologue.ts`, shared with the `'server-only'`
+ * regex and written to reject a comment-heavy source in linear time.
  */
-export const USE_COMET_DIRECTIVE = /^(?:\s*\/\/[^\n]*\n|\s*\/\*[\s\S]*?\*\/)*\s*(['"])use comet\1;?/
+export const USE_COMET_DIRECTIVE: RegExp = directivePrologueRegex('use comet')

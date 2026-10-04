@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.17.1] - 2026-10-03
+
+### Fixed
+
+- **`space build` no longer hangs on a `globalCss` whose imported CSS holds many comments.** The
+  `'use comet'` and `'server-only'` directive checks that `cometPlugin` runs on every module,
+  stylesheets included, used a comment-skipping prefix with exponential backtracking: on a source
+  with no directive, the time doubled with each adjacent `/* ... */` comment (about 0.1 s for 22
+  comments, 0.4 s for 24, 29 s for 26). A `globalCss` entry that `@import`s a theme's stylesheets
+  reaches the hook as ONE concatenated stylesheet, so 14 to 25 sheets with a few comments each left
+  `zanix space build` running at full CPU without ever finishing, while the same sheets listed flat
+  in `globalCss` built normally. Both checks now skip a block comment by the standard C-comment
+  pattern, which has a single way to match each comment, so a rejection is linear in the source
+  length. They share one prefix (`directive-prologue.ts`), `cometPlugin` skips the regex for a
+  module whose code lacks the literal `use comet` / `server-only`, and the directives are recognized
+  exactly as before.
+
 ## [1.17.0] - 2026-10-03
 
 ### Changed

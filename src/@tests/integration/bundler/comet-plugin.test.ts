@@ -1,4 +1,4 @@
-import { assert, assertEquals } from '@std/assert'
+import { assert, assertEquals, assertThrows } from '@std/assert'
 import { build } from 'vite'
 import type { Rollup } from 'vite'
 import deno from '@deno/vite-plugin'
@@ -171,7 +171,12 @@ Deno.test(
         build: {
           write: false,
           minify: false,
-          rollupOptions: { input: { comet: REMOTE_COMET_URL } },
+          // `buildSpaceClient`'s own setting: the default drops an entry's exports, which
+          // `cometPlugin` rejects.
+          rollupOptions: {
+            input: { comet: REMOTE_COMET_URL },
+            preserveEntrySignatures: 'exports-only',
+          },
         },
         plugins: [deno(), cometPlugin({ knownEntryPaths: [REMOTE_COMET_URL] })],
       })
@@ -280,6 +285,7 @@ Deno.test(
         type: 'chunk',
         facadeModuleId: wrappedId,
         fileName: 'assets/example.js',
+        exports: ['default'],
       },
     }
     ;(plugin.generateBundle as PluginHook).call(fakeGenerateBundleContext, {}, fakeBundle)
@@ -287,5 +293,41 @@ Deno.test(
     assert(manifestSource, 'expected comets-manifest.json to have been emitted')
     const manifest = JSON.parse(manifestSource)
     assertEquals(manifest[resolvedWithEmbeddedSeparator], '/assets/example.js')
+  },
+)
+
+Deno.test(
+  'cometPlugin: the build fails, naming the comet and the emitted file, when a comet entry chunk ' +
+    'exports nothing — hydration would otherwise import it and find no component',
+  () => {
+    // deno-lint-ignore no-explicit-any
+    type PluginHook = (this: any, ...args: any[]) => unknown
+    const comet = 'https://jsr.io/@example/pkg/submit-guard.tsx'
+    const plugin = cometPlugin({ knownEntryPaths: [comet] })
+    const errors: string[] = []
+    const context = {
+      emitFile: () => {},
+      error: (message: string) => {
+        errors.push(message)
+        throw new Error(message)
+      },
+    }
+    const emptyEntry = {
+      type: 'chunk',
+      facadeModuleId: comet,
+      fileName: 'assets/submit-guard-CFBYYZ85.js',
+      exports: [],
+    }
+
+    assertThrows(
+      () =>
+        (plugin.generateBundle as PluginHook).call(context, {}, {
+          'assets/submit-guard-CFBYYZ85.js': emptyEntry,
+        }),
+      Error,
+      'submit-guard.tsx',
+    )
+    assert(errors[0].includes('assets/submit-guard-CFBYYZ85.js'), errors[0])
+    assert(errors[0].includes(comet), errors[0])
   },
 )

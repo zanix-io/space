@@ -65,6 +65,16 @@ async function hydrateBoundary(boundary: HTMLElement): Promise<void> {
     any
   >
   const Component = module[exportName]
+  // A module that does not export what the SSR markup names (a bundler that dropped the export, a
+  // stale markup/asset pair) must not reach `createElement`: an `undefined` type renders as the
+  // literal text "[object Object]". Returning leaves the server-rendered markup untouched.
+  if (typeof Component !== 'function' && (typeof Component !== 'object' || Component === null)) {
+    logger.error(
+      `Comet "${exportName}" is not exported by its module (${moduleUrl}); ` +
+        'its server-rendered markup stays as is and nothing is hydrated.',
+    )
+    return
+  }
   const element = createElement(
     CometIdScopeProvider,
     { value: instanceScope },

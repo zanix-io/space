@@ -347,6 +347,17 @@ This is deliberately explicit, never inferred from the request (e.g. from `Sec-F
 `handlePost` alone, and a request header that can be silently absent (older browsers, and every unit
 test that builds its own request context by hand) is not a safe thing to brand this decision on.
 
+### A `POST` to a page with no `action`
+
+A page that declares no `action` is GET-only. A `POST` to it answers `405` with `Allow: GET, HEAD`.
+When the request is a document navigation (`Accept` includes `text/html`, which every browser form
+submission sends) the body is the rendered error view — the route's nearest `error.tsx`, or the
+built-in `DefaultErrorView` — so a browser never lands on raw JSON. Any other request (`fetch()`
+with the default `Accept: */*`, `application/json`, an API client) keeps `@zanix/server`'s JSON
+error response. `defineSpaceApp({ errorResponse: 'json' })` applies as for a `loader` error.
+`PUT`/`PATCH`/`DELETE` are rejected by `@zanix/server`'s router before the page runs and are
+unaffected.
+
 ### Serving JSON instead of a document — `defineSpaceApp({ errorResponse: 'json' })`
 
 `errorResponse` decides what this package's own BUILT-IN not-found/error fallback renders when a

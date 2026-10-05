@@ -2,7 +2,6 @@
 // test that renders must import the entry point it is testing against.
 import '../../../../mod-react.ts'
 import { assert, assertEquals, assertMatch, assertRejects } from '@std/assert'
-import { HttpError } from '@zanix/errors'
 import type { Session } from '@zanix/server'
 import { SpacePageController } from 'modules/router/mod.ts'
 import { mockHandlerContext } from 'modules/testing/mod.ts'
@@ -183,12 +182,14 @@ Deno.test(
   },
 )
 
-Deno.test('SpacePageController.handlePost: throws METHOD_NOT_ALLOWED with no action', async () => {
+Deno.test('SpacePageController.handlePost: a page with no action answers 405 + Allow', async () => {
   const ctx = mockHandlerContext()
   const page = new NoLoaderPage(ctx)
 
-  const error = await assertRejects(() => page.handlePost(ctx), HttpError)
-  assertEquals((error as HttpError).status.code, 'METHOD_NOT_ALLOWED')
+  const response = await page.handlePost(ctx)
+  assertEquals(response.status, 405)
+  assertEquals(response.headers.get('allow'), 'GET, HEAD')
+  assertEquals((await response.json()).message, 'METHOD_NOT_ALLOWED')
 })
 
 Deno.test('SpacePageController.handlePost: invokes action with formData access', async () => {

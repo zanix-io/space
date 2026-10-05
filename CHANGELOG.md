@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.18.3] - 2026-10-05
+
+### Fixed
+
+- **A comet reached only through another comet is built with its exports.** `cometPlugin` forced
+  such a comet's chunk with `preserveSignature: false`, so the file in `comets-manifest.json` could
+  be an entry holding only `import"./<name>-<hash>.js"` while the real code, and the export, lived
+  in a sibling chunk. Hydration read `module[exportName]` off that entry, got `undefined`, and
+  Preact rendered the text `[object Object]` (React failed to hydrate) while the comet stayed inert.
+  This hit the ready-made `SubmitGuard`, `FormDraftPersistence`, `NetworkStatus`,
+  `ScrollRestoration` and `UnsavedChangesGuard` whenever an app's own comet or a dependency's comet
+  renders them. The chunk is now emitted with `preserveSignature: 'exports-only'`; asset names are
+  unchanged.
+- **A browser `POST` to a page with no `action` gets an error page, not JSON.** `handlePost` used to
+  throw `METHOD_NOT_ALLOWED`, which `@zanix/server` turned into a JSON response without going
+  through the app's error handling, so a form posted to a GET-only page showed
+  `{"name":"HttpError",...}`. It now answers `405` with `Allow: GET, HEAD`; when `Accept` includes
+  `text/html` the body is the rendered `error.tsx` / `DefaultErrorView`, otherwise the JSON error as
+  before. `PUT`/`PATCH`/`DELETE`, pages with an `action`, 404 and CSRF errors are unchanged.
+
+### Added
+
+- **`zanix space build` fails when a comet entry exports nothing.** `cometPlugin` checks every chunk
+  it lists in `comets-manifest.json` and stops the build with an error naming the comet's source and
+  the emitted file.
+
+### Changed
+
+- **`hydrateComets` (React and Preact) no longer mounts a missing export.** When the imported module
+  has no export named by `data-comet-export` (or `default`), it logs
+  `Comet "<Name>" is not exported by its module (<url>)` and leaves the server-rendered markup
+  untouched instead of calling `createElement(undefined, props)`.
+
 ## [1.18.2] - 2026-10-04
 
 ### Fixed

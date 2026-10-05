@@ -182,6 +182,17 @@ async function findChainToComet(
 }
 
 /**
+ * The build error for a Comet whose built entry chunk exports nothing. `source` is the comet's
+ * source key (path or URL) and `fileName` the emitted chunk.
+ */
+export function formatCometWithoutExports(source: string, fileName: string): string {
+  const name = source.split(/[\\/]/).pop() ?? source
+  return `Comet "${name}" (${source}) was built to "${fileName}" without any export. ` +
+    'Client hydration imports the comet from that file and reads its export, so the chunk must ' +
+    'export it (preserveSignature: "exports-only").'
+}
+
+/**
  * Finds every file marked `'use comet'` and forces it into its own build output chunk, then writes
  * a manifest (`comets-manifest.json`, in the client build's output directory) correlating each
  * comet's own source file to that chunk's real, hashed URL — read back at request time via
@@ -254,8 +265,12 @@ export function cometPlugin(options: CometPluginOptions = {}): Plugin {
         // local file in practice — `realId`'s realpath'd form is what keeps it matching
         // `generateBundle`'s own lookup on a filesystem where `id` itself isn't already the real
         // path (e.g. a temp dir under macOS's symlinked `/tmp`/`/var`).
+        // `preserveSignature: 'exports-only'` is required: with `false`, the entry file the
+        // manifest points at is a bare `import "./real-chunk.js"` with no export whenever another
+        // module (a comet that renders this one) shares the code, and hydration finds nothing to
+        // render.
         if (!knownEntryPaths.has(realId)) {
-          this.emitFile({ type: 'chunk', id: realId, preserveSignature: false })
+          this.emitFile({ type: 'chunk', id: realId, preserveSignature: 'exports-only' })
         }
         return null
       }
@@ -288,7 +303,13 @@ export function cometPlugin(options: CometPluginOptions = {}): Plugin {
         // by `@deno/vite-plugin`'s own resolver, never the plain URL `cometSourceIds` holds for it
         // (an ordinary local file's `facadeModuleId` is already plain, so this is a no-op there).
         const sourceKey = unwrapDenoModuleId(chunk.facadeModuleId)
-        if (cometSourceIds.has(sourceKey)) manifest[sourceKey] = `/${chunk.fileName}`
+        if (!cometSourceIds.has(sourceKey)) continue
+        // Hydration reads the comet's export off this exact file, so an entry that exports nothing
+        // would hydrate nothing at runtime while the build looked fine.
+        if (chunk.exports.length === 0) {
+          this.error(formatCometWithoutExports(sourceKey, chunk.fileName))
+        }
+        manifest[sourceKey] = `/${chunk.fileName}`
       }
 
       this.emitFile({

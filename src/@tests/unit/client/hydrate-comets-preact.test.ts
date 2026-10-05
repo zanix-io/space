@@ -386,3 +386,36 @@ Deno.test(
     )
   },
 )
+
+Deno.test(
+  'hydrateBoundary (real import): a module that does not export what the boundary names logs an ' +
+    'error naming the comet and its module and leaves the SSR markup intact — no ' +
+    '"[object Object]" text',
+  async () => {
+    resetDom()
+    const moduleUrl = new URL('./fixtures/hydrate-no-export.ts', import.meta.url).href
+    const boundary = document.createElement('div')
+    boundary.setAttribute(COMET_MODULE_ATTR, moduleUrl)
+    boundary.setAttribute(COMET_EXPORT_ATTR, 'SubmitGuard')
+    boundary.innerHTML = '<p>server markup</p>'
+    document.body.appendChild(boundary)
+
+    const messages: string[] = []
+    const original = logger.error
+    logger.error = ((...args: unknown[]) => {
+      messages.push(String(args[0]))
+    }) as typeof original
+    try {
+      hydrateComets(fakeRoot([boundary]))
+      await waitFor(() => messages.length > 0)
+
+      assertEquals(messages.length, 1, messages.join('\n'))
+      assert(messages[0].includes('"SubmitGuard"'), messages[0])
+      assert(messages[0].includes(moduleUrl), messages[0])
+      assertEquals(boundary.innerHTML, '<p>server markup</p>')
+      assertFalse(boundary.innerHTML.includes('[object Object]'))
+    } finally {
+      logger.error = original
+    }
+  },
+)

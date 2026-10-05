@@ -73,6 +73,13 @@ When a Comet does not hydrate in production (`Failed to hydrate a Comet boundary
 the package's own `https://jsr.io/...` URL blocked by a strict `script-src`), check that its module
 appears in `comets-manifest.json`: a Comet missing from it was not in any source above.
 
+Every manifest entry must be a file that exports the Comet, under its own name and as `default`:
+client hydration imports that file and reads the export. `zanix space build` fails, naming the Comet
+and the emitted file, when an entry chunk exports nothing. At runtime, a module that lacks the
+export the markup names makes `hydrateComets` log
+`Comet "<Name>" is not exported by its module
+(<url>)` and leave the server-rendered markup as is.
+
 ```ts
 // main.ts — load the manifests cometPlugin/clientEntryPlugin wrote during the client build,
 // before serving anything

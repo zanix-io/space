@@ -195,3 +195,36 @@ Deno.test('hydrateComets: multiple boundaries under root are each visited indepe
   assert(skippedBoundary.calls.includes(`get:${COMET_STRATEGY_ATTR}`))
   assertFalse(skippedBoundary.calls.includes(`remove:${COMET_REUSED_ATTR}`))
 })
+
+Deno.test(
+  'hydrateComets: a module that does not export what the boundary names logs an error naming the ' +
+    'comet and its module, and mounts nothing (no createElement(undefined), no "[object Object]")',
+  async () => {
+    const moduleUrl = new URL('./fixtures/hydrate-no-export.ts', import.meta.url).href
+    const boundary = fakeBoundary({
+      [COMET_MODULE_ATTR]: moduleUrl,
+      [COMET_EXPORT_ATTR]: 'SubmitGuard',
+    })
+    const messages: string[] = []
+    const original = logger.error
+    logger.error = ((...args: unknown[]) => {
+      messages.push(String(args[0]))
+    }) as typeof original
+    try {
+      hydrateComets(fakeRoot([boundary]))
+      await sleep(200)
+
+      assertEquals(messages.length, 1, messages.join('\n'))
+      assert(messages[0].includes('"SubmitGuard"'), messages[0])
+      assert(messages[0].includes(moduleUrl), messages[0])
+      assertFalse(
+        boundary.calls.some((call) =>
+          call.startsWith('remove:') && call !== `remove:${COMET_REUSED_ATTR}`
+        ),
+        'the boundary markup must stay untouched',
+      )
+    } finally {
+      logger.error = original
+    }
+  },
+)

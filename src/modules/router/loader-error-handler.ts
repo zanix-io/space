@@ -132,12 +132,45 @@ export function renderActionErrorPage(
   return renderThrownPageError(Target, pageCtx, fragmentOnly, error, 'action')
 }
 
+/**
+ * Whether `request` is a document navigation (a browser following a link or submitting a
+ * `<form>`) rather than a data call (`fetch()`/`XMLHttpRequest`/an API client). Browsers always
+ * list `text/html` in `Accept` for a navigation; `fetch()` defaults to `*\/*` and API clients send
+ * `application/json`, so neither matches.
+ */
+export function wantsDocument(request: Request): boolean {
+  return (request.headers.get('accept') ?? '').toLowerCase().includes('text/html')
+}
+
+/**
+ * The `405` a page with no `action` answers a `POST` with. A document request (see
+ * {@linkcode wantsDocument}) gets the same recovery as a thrown `action` — the route's nearest
+ * `error.tsx`, or the built-in `DefaultErrorView` — so a browser never lands on raw JSON; any
+ * other request gets `@zanix/server`'s JSON error response, as before. Both carry
+ * `Allow: GET, HEAD`.
+ *
+ * @param Target - See {@linkcode renderLoaderErrorPage}.
+ * @param pageCtx - See {@linkcode renderLoaderErrorPage}.
+ * @param error - The `HttpError('METHOD_NOT_ALLOWED')` `handlePost` built.
+ */
+export async function renderMethodNotAllowedPage(
+  Target: ClassConstructor<SpacePageController<never>>,
+  pageCtx: PageContext<unknown>,
+  error: HttpError,
+): Promise<Response> {
+  const response = wantsDocument(pageCtx.request)
+    ? await renderThrownPageError(Target, pageCtx, false, error, 'method')
+    : httpErrorResponse(error)
+  response.headers.set('allow', 'GET, HEAD')
+  return response
+}
+
 async function renderThrownPageError(
   Target: ClassConstructor<SpacePageController<never>>,
   pageCtx: PageContext<unknown>,
   fragmentOnly: boolean,
   error: unknown,
-  phase: 'loader' | 'action',
+  phase: 'loader' | 'action' | 'method',
 ): Promise<Response> {
   if (error instanceof HttpError && error.status.code === 'NOT_FOUND') {
     // Unlike `createNotFoundHandler`'s own `onError` path, this request DOES have a matched
@@ -146,12 +179,16 @@ async function renderThrownPageError(
     return renderNotFoundResponse(fragmentOnly, resolveRequestLang(pageCtx.request))
   }
 
-  logger.error(
-    phase === 'loader'
-      ? `Uncaught error resolving loader data for "${pageCtx.url.pathname}"`
-      : `Uncaught error running action for "${pageCtx.url.pathname}"`,
-    error,
-  )
+  if (phase === 'method') {
+    logger.warn(`POST to "${pageCtx.url.pathname}", a page with no action`)
+  } else {
+    logger.error(
+      phase === 'loader'
+        ? `Uncaught error resolving loader data for "${pageCtx.url.pathname}"`
+        : `Uncaught error running action for "${pageCtx.url.pathname}"`,
+      error,
+    )
+  }
 
   const segments = getPageTree(Target)?.segments ?? []
   const status = error instanceof HttpError ? error.status.value : 500

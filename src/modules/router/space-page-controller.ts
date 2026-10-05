@@ -19,7 +19,11 @@ import { CSRF_TOKEN_LOCALS_KEY } from '../middleware/csrf-guard.ts'
 import { POPULATION_LOCALS_KEY } from '../middleware/population-guard.ts'
 import { getThemeResolver } from '../theme/theme-registry.ts'
 import { createDedupeCache } from './request-dedupe.ts'
-import { renderActionErrorPage, renderLoaderErrorPage } from './loader-error-handler.ts'
+import {
+  renderActionErrorPage,
+  renderLoaderErrorPage,
+  renderMethodNotAllowedPage,
+} from './loader-error-handler.ts'
 
 /** `Page()`'s combined header options — `SecurityHeadersOptions`'s own flat fields (`frameOptions`,
  * `referrerPolicy`, ...) plus `csp`, all under one `headers` option. `csp` is kept as its own field
@@ -499,17 +503,26 @@ export abstract class SpacePageController<
    * `<form>` submission. See `PageOptions.action.onError`'s own doc (`page-decorator.ts`) for why
    * this is opt-in rather than inferred from the request.
    *
-   * @throws {HttpError} `'METHOD_NOT_ALLOWED'` if the page declares no `action`.
+   * **A page with no `action`** answers `405` with `Allow: GET, HEAD`. For a document request
+   * (`Accept` includes `text/html`, i.e. a browser form submission) the body is the rendered
+   * `error.tsx`/`DefaultErrorView`, never raw JSON; any other request gets `@zanix/server`'s JSON
+   * error response.
    */
   public async handlePost(ctx: HandlerContext): Promise<Response> {
     const { action } = this
+    const Ctor = this.constructor as typeof SpacePageController
     if (!action) {
-      throw new HttpError('METHOD_NOT_ALLOWED', {
+      const error = new HttpError('METHOD_NOT_ALLOWED', {
         id: ctx.id,
         meta: { target: this.constructor.name },
       })
+      const Target = Ctor as unknown as ClassConstructor<SpacePageController>
+      const pageCtx = toPageContext<Params>(ctx)
+      const { applySecurity } = await resolvePageChrome(ctx, Ctor.headers, pageCtx)
+      return applySecurity(
+        await renderMethodNotAllowedPage(Target, pageCtx as PageContext<unknown>, error),
+      )
     }
-    const Ctor = this.constructor as typeof SpacePageController
     const pageCtx: PageActionContext<Params> = {
       ...toPageContext<Params>(ctx),
       // `@zanix/server` already consumed the request body while parsing it, so calling

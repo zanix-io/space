@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.18.1] - 2026-10-04
+
+### Added
+
+- **`not-found.tsx`'s `head` may be a function.**
+  `export const head = ({ lang, messages }) => ({
+  title: ... })` receives the same `lang` and
+  `messages` as the component (`NotFoundHeadProps`, an alias of `NotFoundProps`) and returns a
+  `HeadDescriptor`, so the 404 `<title>` follows the request's language. The function runs once per
+  404, for the full document, the Orbit fragment and a 404 thrown by a page `loader`, under both
+  renderers. `lang` is `undefined` without `langPreHandler(...)`. If it throws, the 404 is served
+  with `DEFAULT_NOT_FOUND_HEAD` and the error is logged. A static object works exactly as before.
+  New exported types: `NotFoundHead`, `NotFoundHeadProps`.
+
 ## [1.18.0] - 2026-10-04
 
 ### Added

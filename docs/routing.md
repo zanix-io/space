@@ -206,6 +206,23 @@ export default function NotFound({ lang, messages }: NotFoundProps) {
 export const head = { title: 'Page not found', meta: [{ name: 'robots', content: 'noindex' }] }
 ```
 
+`head` may also be a function of `{ lang, messages }` (`NotFoundHead`), the same two values the
+component receives, so the `<title>` follows the request's language:
+
+```tsx
+import type { NotFoundHead } from '@zanix/space'
+
+export const head: NotFoundHead = ({ lang, messages }) => ({
+  title: messages?.['not-found/heading'] ??
+    (lang === 'es' ? 'Página no encontrada' : 'Page not found'),
+})
+```
+
+The function runs once per 404, after `lang` and `messages` are resolved, for the full document and
+the Orbit fragment alike, and for a 404 raised by a page `loader`. `lang` is `undefined` without
+`langPreHandler(...)` (or without `attachRequestToErrors`), and `messages` is `undefined` without
+`messagesDir`. If it throws, the 404 is served with the default head and the error is logged.
+
 `NotFoundProps` is entirely optional to declare — a `NotFound` that takes no props at all, as the
 plain example above, works exactly the same way. `messages`, when the app declares `messagesDir`, is
 a pre-resolved catalog for the request's own `lang` — see

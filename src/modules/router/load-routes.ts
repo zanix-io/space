@@ -9,7 +9,7 @@ import { resolvePendingPage, withPendingReplacement } from './page-decorator.ts'
 import { setPageTree } from './page-tree-registry.ts'
 import type { ResolvedSegment } from './page-tree-registry.ts'
 import type { SpacePageController } from './space-page-controller.ts'
-import type { HeadDescriptor } from './head-descriptor.ts'
+import type { NotFoundHead } from 'typings/page.ts'
 import {
   setNotFoundComponent,
   setNotFoundHead,
@@ -246,7 +246,7 @@ async function loadRoutesOnce(
   // A `not-found.tsx` may export a named `head` exactly like a `layout.tsx` may — same discovery,
   // same single import, no separate file scan. `createNotFoundHandler` falls back to this package's
   // own default when it declares none.
-  setNotFoundHead(notFound.module.head as HeadDescriptor | undefined)
+  setNotFoundHead(notFound.module.head as NotFoundHead | undefined)
 
   // Deregisters a page whose file no longer exists under `routesDir` at all — a rename or delete,
   // never a plain edit (an edited-but-still-present file goes through the per-page comparison

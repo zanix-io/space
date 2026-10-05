@@ -18,7 +18,7 @@ export type NotFoundRenderContext = {
   /** The app's own root `layout.tsx`, if `loadRoutes()` found one. */
   RootLayout: unknown
   /** The head to resolve for this document — the app's own `not-found.tsx` named `head` export when
-   * it declares one, otherwise this package's own default. Resolved by the renderer through the
+   * it declares one (already evaluated when it is a function), otherwise this package's own default. Resolved by the renderer through the
    * SAME `resolveHead` every page uses; there is no not-found-specific head mechanism. */
   head: HeadDescriptor | undefined
   /** `true` for an Orbit navigation that hit a 404 — returns just the outlet fragment. */
@@ -85,5 +85,7 @@ export function getNotFoundRenderer(): NotFoundRenderer {
  * A plain default value, not a rule: nothing in this framework requires a 404 document to carry a
  * title, and no validation treats it differently from any other document. This exists only so the
  * built-in fallback produces a complete document rather than an untitled one, and any app can
- * replace it by exporting `head` from its own `not-found.tsx`. */
+ * replace it by exporting `head` from its own `not-found.tsx` — a static descriptor, or a function
+ * of `{ lang, messages }` (`NotFoundHead`) for a title that follows the request's language. It is
+ * also the head served when that function throws. */
 export const DEFAULT_NOT_FOUND_HEAD: HeadDescriptor = { title: 'Page not found' }

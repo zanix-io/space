@@ -1,3 +1,4 @@
+import logger from '@zanix/logger'
 import { HttpError } from '@zanix/errors'
 import { getRequestFromError, httpErrorResponse } from '@zanix/server'
 import { resolveRequestLang } from 'modules/middleware/lang-pre-handler.ts'
@@ -10,6 +11,8 @@ import {
   DEFAULT_NOT_FOUND_VIEW_REACT_SPECIFIER,
 } from './default-view-specifiers.ts'
 import { getErrorResponseFormat } from './error-response-format-registry.ts'
+import type { HeadDescriptor } from './head-descriptor.ts'
+import type { NotFoundHeadProps } from 'typings/page.ts'
 import { loadMessages } from '../i18n/load-messages.ts'
 import { DEFAULT_IMPLICIT_LANG, getMessagesDir } from '../i18n/messages-registry.ts'
 
@@ -31,6 +34,22 @@ import { DEFAULT_IMPLICIT_LANG, getMessagesDir } from '../i18n/messages-registry
  * `ServerOptions<K>['onError']` inherits this unchanged, so this is what `bootstrapServers`'s own
  * `ssr` option slot requires too. */
 export type OnErrorHandler = NonNullable<Deno.ServeOptions['onError']>
+
+/**
+ * The head of this 404: the app's `not-found.tsx` `head` export (a function is called with the
+ * request's `{ lang, messages }`), or `DEFAULT_NOT_FOUND_HEAD` when it declares none or the
+ * function throws. A throwing head never turns a 404 into a 500; the error is logged instead.
+ */
+function resolveNotFoundHead(props: NotFoundHeadProps): HeadDescriptor {
+  const head = getNotFoundHead()
+  if (typeof head !== 'function') return head ?? DEFAULT_NOT_FOUND_HEAD
+  try {
+    return head(props)
+  } catch (error) {
+    logger.error('The `head` function of not-found.tsx threw; serving the default head', error)
+    return DEFAULT_NOT_FOUND_HEAD
+  }
+}
 
 /**
  * Renders this app's own not-found document — the app's `not-found.tsx` (if `loadRoutes()` found
@@ -100,7 +119,7 @@ export async function renderNotFoundResponse(
     // The app's own `not-found.tsx` `head` export when it declares one, this package's default
     // otherwise — resolved through the same `resolveHead` a page's head goes through, with no
     // not-found-specific mechanism anywhere.
-    head: getNotFoundHead() ?? DEFAULT_NOT_FOUND_HEAD,
+    head: resolveNotFoundHead({ lang, messages }),
     fragmentOnly,
     lang,
     messages,

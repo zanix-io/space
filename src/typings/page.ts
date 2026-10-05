@@ -8,6 +8,7 @@
 import type { SpaceChildren } from './renderable.ts'
 import type { serializeError } from '@zanix/errors'
 import type { Session } from '@zanix/server'
+import type { HeadDescriptor } from '../modules/router/head-descriptor.ts'
 import type { Messages } from '../modules/i18n/load-messages.ts'
 
 /**
@@ -395,3 +396,28 @@ export type NotFoundProps = {
    */
   messages?: Messages
 }
+
+/**
+ * The props a `not-found.tsx` `head` function receives: the same `lang` and `messages`
+ * {@linkcode NotFoundProps} hands the page component, resolved once per 404 and shared by both.
+ */
+export type NotFoundHeadProps = NotFoundProps
+
+/**
+ * What a `not-found.tsx` may export as `head`: a static {@linkcode HeadDescriptor}, or a function
+ * of {@linkcode NotFoundHeadProps} returning one, for a title that follows the request's language.
+ * A function is evaluated once per 404, after `lang` and `messages` are resolved, and its result
+ * goes through the same `resolveHead` as any page's head. When it throws, the 404 is still served
+ * with this package's default head and the error is logged.
+ *
+ * @example
+ * ```tsx
+ * // routes/not-found.tsx
+ * import type { NotFoundHead } from '@zanix/space'
+ *
+ * export const head: NotFoundHead = ({ lang, messages }) => ({
+ *   title: messages?.['not-found/heading'] ?? (lang === 'es' ? 'Página no encontrada' : 'Page not found'),
+ * })
+ * ```
+ */
+export type NotFoundHead = HeadDescriptor | ((props: NotFoundHeadProps) => HeadDescriptor)

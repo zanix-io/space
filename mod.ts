@@ -189,6 +189,8 @@ export type { RtoTypes } from '@zanix/types'
 export type {
   ErrorBoundaryProps,
   LayoutProps,
+  NotFoundHead,
+  NotFoundHeadProps,
   NotFoundProps,
   PageActionContext,
   PageContext,

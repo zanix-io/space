@@ -317,3 +317,30 @@ Deno.test('resolveRequestLang: a custom cookieName is respected', () => {
     setLangRegistration(undefined)
   }
 })
+
+Deno.test('resolveRequestLang: a valid language prefix wins over the cookie and Accept-Language', () => {
+  langPreHandler({ availableLangs: ['en', 'es'], defaultLang: 'en' })
+  try {
+    const result = resolveRequestLang(
+      new Request('http://localhost/en/nope', {
+        headers: { cookie: 'X-Znx-Lang=es', 'accept-language': 'es' },
+      }),
+    )
+    assertEquals(result, 'en')
+  } finally {
+    setLangRegistration(undefined)
+  }
+})
+
+Deno.test('resolveRequestLang: an invalid prefix falls through to cookie, Accept-Language, default', () => {
+  langPreHandler({ availableLangs: ['en', 'es'], defaultLang: 'en' })
+  try {
+    const at = (headers: Record<string, string>) =>
+      resolveRequestLang(new Request('http://localhost/fr/nope', { headers }))
+    assertEquals(at({ cookie: 'X-Znx-Lang=es', 'accept-language': 'en' }), 'es')
+    assertEquals(at({ 'accept-language': 'es' }), 'es')
+    assertEquals(at({}), 'en')
+  } finally {
+    setLangRegistration(undefined)
+  }
+})

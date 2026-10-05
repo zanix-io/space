@@ -80,7 +80,8 @@ export function renderNotFoundResponse(
       applyDocumentShell(
         RootLayout as ComponentType<LayoutProps<ComponentChildren>> | undefined,
         outlet,
-        {},
+        // The resolved language as the root layout's `params.lang`; `{}` without `langPreHandler`.
+        lang ? { lang } : {},
       ),
       {
         doctype: true,

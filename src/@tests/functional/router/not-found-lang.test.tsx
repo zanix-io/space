@@ -39,7 +39,7 @@ async function cleanup(dir: string): Promise<void> {
 
 Deno.test(
   "not-found.tsx: receives this request's resolved lang (NotFoundProps) when this app calls " +
-    'langPreHandler AND attachRequestToErrors is enabled — resolved from Accept-Language, since ' +
+    'langPreHandler AND attachRequestToErrors is enabled — resolved from the URL prefix, since ' +
     'a 404 has no matched route to read a :lang param from',
   async () => {
     const routesDir = await Deno.makeTempDir({ dir: TMP_ROOT })
@@ -68,13 +68,13 @@ Deno.test(
       })
       try {
         const res = await fetch('http://localhost:22211/en/does-not-exist', {
-          headers: { 'accept-language': 'es' },
+          headers: { 'accept-language': 'es', cookie: 'X-Znx-Lang=es' },
         })
         assertEquals(res.status, 404)
         const html = stripHydrationComments(await res.text())
         assert(html.includes('data-testid="lang"'), html)
-        // No cookie set on this request — Accept-Language wins over defaultLang ('en').
-        assert(html.includes('>es<'), html)
+        // The `/en` prefix wins over both Accept-Language (`es`) and `defaultLang`.
+        assert(html.includes('>en<'), html)
       } finally {
         await webServerManager.stop(servers)
       }
@@ -119,6 +119,62 @@ Deno.test(
         assertEquals(res.status, 404)
         const html = stripHydrationComments(await res.text())
         assert(html.includes('>none<'), html)
+      } finally {
+        await webServerManager.stop(servers)
+      }
+    } finally {
+      setLangRegistration(undefined)
+      await cleanup(routesDir)
+    }
+  },
+)
+
+Deno.test(
+  'not-found.tsx: an invalid first path segment is not a language — falls through to the ' +
+    'cookie, then Accept-Language, then defaultLang',
+  async () => {
+    const routesDir = await Deno.makeTempDir({ dir: TMP_ROOT })
+    try {
+      await touch(join(routesDir, '[lang]', 'page.tsx'), HOME_PAGE_SOURCE)
+      await touch(
+        join(routesDir, 'not-found.tsx'),
+        `export default function NotFound({ lang }: { lang?: string }) {
+  return <h1 data-testid="lang">{lang ?? 'none'}</h1>
+}
+`,
+      )
+
+      // `/xx/nope` is not redirected by langPreHandler when `xx` is ignored, so it reaches the 404.
+      definePreHandler(
+        langPreHandler({
+          availableLangs: ['en', 'es'],
+          defaultLang: 'en',
+          ignorePrefixes: ['/xx'],
+        }),
+      )
+      const app = defineSpaceApp({ name: 'not-found-lang-invalid-e2e', routesDir })
+      await activateApps([app])
+
+      const servers = await bootstrapServers({
+        ssr: {
+          port: 22213,
+          application: 'not-found-lang-invalid-e2e',
+          preHandler: getUserPreHandler(),
+          onError: createNotFoundHandler(),
+          attachRequestToErrors: true,
+        },
+      })
+      try {
+        const lang = async (headers: Record<string, string>) => {
+          const res = await fetch('http://localhost:22213/xx/nope', { headers })
+          assertEquals(res.status, 404)
+          return /data-testid="lang"[^>]*>([^<]*)</.exec(
+            stripHydrationComments(await res.text()),
+          )?.[1]
+        }
+        assertEquals(await lang({ cookie: 'X-Znx-Lang=es', 'accept-language': 'en' }), 'es')
+        assertEquals(await lang({ 'accept-language': 'es' }), 'es')
+        assertEquals(await lang({}), 'en')
       } finally {
         await webServerManager.stop(servers)
       }

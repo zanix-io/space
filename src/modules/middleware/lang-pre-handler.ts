@@ -1,6 +1,6 @@
 import type { PreHandler } from '@zanix/server'
 import { assertZnxCookieName, PUBLIC_COOKIE_ATTRIBUTES } from '@zanix/helpers'
-import { getLangRegistration, setLangRegistration } from './lang-registry.ts'
+import { getLangRegistration, type LangRegistration, setLangRegistration } from './lang-registry.ts'
 
 /** Path prefixes `langPreHandler` never redirects, regardless of `ignorePrefixes` — every
  * framework-internal route `@zanix/space` itself can register. A caller's own `ignorePrefixes`
@@ -83,6 +83,27 @@ function readCookie(request: Request, name: string): string | undefined {
   return undefined
 }
 
+/** The one language resolution both `langPreHandler` (for the redirect) and `resolveRequestLang`
+ * (for a 404) run: a first path segment that is one of `availableLangs`, then the cookie, then
+ * `Accept-Language`, then `defaultLang`. `langPreHandler` only reaches this once the first segment
+ * is known not to be a valid language, so for it the first step never matches. */
+function resolveLang(
+  request: Request,
+  pathname: string,
+  { availableLangs, defaultLang, cookieName }: Pick<
+    LangRegistration,
+    'availableLangs' | 'defaultLang' | 'cookieName'
+  >,
+): string {
+  const first = pathname.split('/').filter(Boolean)[0]
+  if (first && availableLangs.includes(first)) return first
+
+  const existingCookie = readCookie(request, cookieName)
+  return (existingCookie && availableLangs.includes(existingCookie) ? existingCookie : undefined) ??
+    resolveAcceptLanguage(request.headers.get('accept-language'), availableLangs) ??
+    defaultLang
+}
+
 /**
  * Builds a `PreHandler` (`@zanix/server`'s pre-route-matching hook — NOT a guard: guards only
  * ever run AFTER a route has already matched, which is too late for a redirect keyed on the URL
@@ -153,11 +174,7 @@ export function langPreHandler(options: LangPreHandlerOptions): PreHandler {
     // matching, where a guard's returned `headers` DO get merged into the response.
     if (first && availableLangs.includes(first)) return null
 
-    const existingCookie = readCookie(request, cookieName)
-    const lang =
-      (existingCookie && availableLangs.includes(existingCookie) ? existingCookie : undefined) ??
-        resolveAcceptLanguage(request.headers.get('accept-language'), availableLangs) ??
-        defaultLang
+    const lang = resolveLang(request, pathname, { availableLangs, defaultLang, cookieName })
 
     const redirectUrl = new URL(url)
     redirectUrl.pathname = `/${lang}${pathname === '/' ? '' : pathname}`
@@ -176,8 +193,10 @@ export function langPreHandler(options: LangPreHandlerOptions): PreHandler {
  * Resolves a request's language with NO matched route to draw a `:lang` param from — a genuine
  * 404 (`createNotFoundHandler`'s own `onError` path) never reaches route matching at all, unlike a
  * page's own `error.tsx` (which can read `params.lang` directly off `ErrorBoundaryProps`). Same
- * cookie → `Accept-Language` → `defaultLang` priority `langPreHandler` itself already applies —
- * one resolution order, not two independently-maintained ones.
+ * language-prefix → cookie → `Accept-Language` → `defaultLang` priority — the same single
+ * resolution `langPreHandler` runs for its redirect, not a second independently-maintained one. A
+ * first path segment that is one of `availableLangs` wins, so `/en/missing` is a 404 in English
+ * whatever the cookie or `Accept-Language` say.
  *
  * Returns `undefined` when this app never called `langPreHandler(...)` at all (no i18n routing
  * configured) — the same "feature is simply off" contract every other eager registry in this
@@ -187,9 +206,5 @@ export function resolveRequestLang(request: Request): string | undefined {
   const registration = getLangRegistration()
   if (!registration) return undefined
 
-  const { availableLangs, defaultLang, cookieName } = registration
-  const existingCookie = readCookie(request, cookieName)
-  return (existingCookie && availableLangs.includes(existingCookie) ? existingCookie : undefined) ??
-    resolveAcceptLanguage(request.headers.get('accept-language'), availableLangs) ??
-    defaultLang
+  return resolveLang(request, new URL(request.url).pathname, registration)
 }

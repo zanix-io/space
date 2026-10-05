@@ -223,6 +223,13 @@ the Orbit fragment alike, and for a 404 raised by a page `loader`. `lang` is `un
 `langPreHandler(...)` (or without `attachRequestToErrors`), and `messages` is `undefined` without
 `messagesDir`. If it throws, the 404 is served with the default head and the error is logged.
 
+A 404 has no matched route, so its `lang` is resolved from the request, in this order: the URL's
+first path segment when it is one of `availableLangs` (`/en/missing` is English whatever the cookie
+or `Accept-Language` say), then the language cookie, then `Accept-Language`, then `defaultLang`. The
+resolved `lang` is also the root layout's `params.lang` on a 404, so `<html lang={params.lang}>`
+matches the content. Without `langPreHandler(...)` (or without `attachRequestToErrors`) the root
+layout receives `params={}` and `lang` stays `undefined`, as before.
+
 `NotFoundProps` is entirely optional to declare — a `NotFound` that takes no props at all, as the
 plain example above, works exactly the same way. `messages`, when the app declares `messagesDir`, is
 a pre-resolved catalog for the request's own `lang` — see

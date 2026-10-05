@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.18.2] - 2026-10-04
+
+### Fixed
+
+- **A 404 under a language prefix is rendered in that language.** `/en/missing` used to resolve its
+  language from the cookie or `Accept-Language` only, ignoring the URL, so a visitor with an `es`
+  cookie saw a Spanish 404 at an `/en/...` URL. The first path segment now wins when it is one of
+  `availableLangs`; an invalid prefix falls through to cookie, `Accept-Language` and `defaultLang`
+  as before. `langPreHandler` and the 404 share one resolution function.
+- **The root layout receives `params.lang` on a 404.** It used to get `params={}`, so
+  `<html lang={params.lang}>` fell back to the app's default language while the content was in
+  another. Both renderers now pass `{ lang }` when a language is resolved.
+
+### Changed
+
+- Behavior change for consumers with `langPreHandler(...)`: a 404 at a prefixed URL may now render
+  in a different language than before (the prefix's), and a root layout reading `params.lang` now
+  gets a value on a 404 instead of `undefined`. Apps without `langPreHandler(...)` are unaffected:
+  `lang` stays `undefined` and the root layout still receives `params={}`.
+
 ## [1.18.1] - 2026-10-04
 
 ### Added

@@ -64,7 +64,13 @@ export function renderNotFoundResponse(
   }
 
   return renderToResponse(
-    applyDocumentShell(RootLayout as ComponentType<LayoutProps<ReactNode>> | undefined, outlet),
+    applyDocumentShell(
+      RootLayout as ComponentType<LayoutProps<ReactNode>> | undefined,
+      outlet,
+      // The resolved language as the root layout's `params.lang`, so `<html lang>` matches the
+      // content; `{}` (unchanged) when the app registers no `langPreHandler`.
+      lang ? { lang } : {},
+    ),
     {
       cssHrefs: document.cssHrefs,
       pwaHead: document.pwa,

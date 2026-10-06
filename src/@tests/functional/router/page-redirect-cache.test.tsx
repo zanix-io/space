@@ -1,8 +1,9 @@
 // Installs a renderer, exactly as a real app does: `@zanix/space` itself ships none, so a
 // test that renders must import the entry point it is testing against.
 import '../../../../mod-react.ts'
-import { assert, assertEquals } from '@std/assert'
+import { assert, assertEquals, assertNotEquals } from '@std/assert'
 import { SpacePageController } from 'modules/router/mod.ts'
+import { ORBIT_FRAGMENT_HEADER } from 'modules/router/orbit-protocol.ts'
 import { mockHandlerContext } from 'modules/testing/mod.ts'
 
 function View({ value }: { value?: string }) {
@@ -240,5 +241,39 @@ Deno.test(
     assertEquals(second.headers.get('content-security-policy-report-only'), null)
     assertEquals(second.headers.get('etag'), etag)
     assertEquals(second.headers.get('cache-control'), 'private, no-cache')
+  },
+)
+
+Deno.test(
+  'SpacePageController.handleGet: the document and the Orbit fragment never share a validator, and each still revalidates against its own',
+  async () => {
+    class CachedPage extends SpacePageController {
+      public static override cacheControl = 'private, no-cache'
+      public override component = View
+      public override loader = () => ({ value: 'cached' })
+    }
+    const get = async (headers: Record<string, string>) => {
+      const ctx = mockHandlerContext({ req: new Request('http://localhost/', { headers }) })
+      const res = await new CachedPage(ctx).handleGet(ctx)
+      await res.body?.cancel()
+      return res
+    }
+    const fragmentHeader = { [ORBIT_FRAGMENT_HEADER]: '1' }
+
+    const document = await get({})
+    const fragment = await get(fragmentHeader)
+    const documentEtag = document.headers.get('etag')
+    const fragmentEtag = fragment.headers.get('etag')
+    assert(documentEtag && fragmentEtag)
+    assertNotEquals(documentEtag, fragmentEtag)
+    // Stable per variant: the same request yields the same validator again.
+    assertEquals((await get(fragmentHeader)).headers.get('etag'), fragmentEtag)
+
+    // A validator for one variant never short-circuits the other into a `304`.
+    assertEquals((await get({ 'if-none-match': fragmentEtag })).status, 200)
+    assertEquals((await get({ ...fragmentHeader, 'if-none-match': documentEtag })).status, 200)
+    // Its own validator still does.
+    assertEquals((await get({ 'if-none-match': documentEtag })).status, 304)
+    assertEquals((await get({ ...fragmentHeader, 'if-none-match': fragmentEtag })).status, 304)
   },
 )

@@ -443,10 +443,18 @@ export abstract class SpacePageController<
         // theme; explicitly NOT a fix for a shared/CDN cache's own partitioning, which stays the
         // already-documented responsibility this package has never claimed to handle — see
         // `populationGuard`'s own doc).
-        const etag = await computeEtag(data, getThemeResolver() ? pageCtx.population : undefined)
-        // A full document and an Orbit fragment share the same ETag (both derive it from the same
-        // loader data) but never the same body — `Vary` is what keeps a cache (browser or otherwise)
-        // from serving one shape to a request that asked for the other.
+        const documentEtag = await computeEtag(
+          data,
+          getThemeResolver() ? pageCtx.population : undefined,
+        )
+        // The document and the Orbit fragment hash the same loader data but are different bodies,
+        // so each gets its own validator. One shared value lets a validator stored for the
+        // fragment (the browser keeps one entry per URL) match a later full navigation, whose
+        // `304` then renders the stored fragment as the page: no `<html>`, no scripts, no hydration.
+        // `Vary` does not prevent it, Chrome sends the stored validator regardless.
+        const etag = fragmentOnly ? `${documentEtag.slice(0, -1)}-f"` : documentEtag
+        // `Vary` additionally keeps a cache (browser or otherwise) from serving one body shape to a
+        // request that asked for the other.
         const headers = {
           etag,
           'cache-control': cacheControl,

@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.18.5] - 2026-10-06
+
+### Fixed
+
+- **A revisited page no longer renders as its Orbit fragment.** For a page with `cacheControl`, the
+  full document and the fragment Orbit fetches for the same URL hashed the same loader data into the
+  same `ETag`. The browser keeps one entry per URL, so after an Orbit navigation it held the
+  fragment; the next full navigation sent that validator, got a `304`, and displayed the stored
+  fragment as the page (no `<html>`, stylesheets or `client-entry`, so no comet hydrated). `Vary`
+  does not prevent it: Chrome sends the stored validator anyway. The fragment's `ETag` now carries a
+  `-f` suffix, so a validator for one variant never matches the other. Each variant still
+  revalidates against its own.
+
 ## [1.18.4] - 2026-10-06
 
 ### Fixed

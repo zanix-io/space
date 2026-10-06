@@ -1,7 +1,7 @@
 // Installs a renderer, exactly as a real app does: `@zanix/space` itself ships none, so a
 // test that renders must import the entry point it is testing against.
 import '../../../../mod-react.ts'
-import { assert, assertEquals, assertFalse } from '@std/assert'
+import { assert, assertEquals, assertFalse, assertNotEquals } from '@std/assert'
 import { Suspense, use } from 'react'
 import { bootstrapServers, webServerManager } from '@zanix/server'
 import { ORBIT_FRAGMENT_HEADER, ORBIT_OUTLET_ATTR } from 'modules/router/orbit-protocol.ts'
@@ -91,13 +91,12 @@ Deno.test(
       assert(fragmentHtml.includes('<p>hello</p>'), fragmentHtml)
       assertEquals(fragmentRes.headers.get('vary'), ORBIT_FRAGMENT_HEADER)
 
-      // Both responses carry the exact same ETag — a fragment's content is a subset of the full
-      // document's, but both derive it from the same loader data (there's no loader here, so both
-      // hash the same `undefined`).
-      assertEquals(
-        fullRes.headers.get('etag'),
-        fragmentRes.headers.get('etag'),
-      )
+      // The two bodies differ, so their validators must too: a validator stored for one must never
+      // match a request for the other, or a `304` would render the fragment as a whole page.
+      const fullEtag = fullRes.headers.get('etag')
+      const fragmentEtag = fragmentRes.headers.get('etag')
+      assert(fullEtag && fragmentEtag)
+      assertNotEquals(fullEtag, fragmentEtag)
     } finally {
       await webServerManager.stop(servers)
     }

@@ -349,8 +349,14 @@ Deno.test('registerPwa: a missing built worker is not a push warning, its route 
   assertEquals(warnings, [])
 })
 
+// These two cover the dev icon routes, whose first request loads `sharp` at runtime. The CI job
+// that runs the whole suite in one process was killed with SIGILL (exit 132) on the commit that
+// added them, so they run locally only.
+const runsInCi = Deno.env.get('CI') === 'true'
+
 Deno.test(
   'registerPwa: with no build output, an icon route serves config.icon resized to the requested size',
+  { ignore: runsInCi },
   async () => {
     const { default: sharp } = await import('sharp')
     const root = await Deno.makeTempDir({ dir: TMP_ROOT })
@@ -383,6 +389,7 @@ Deno.test(
 
 Deno.test(
   'registerPwa: with no build output and a missing config.icon file, an icon route answers 404',
+  { ignore: runsInCi },
   async () => {
     setPwaBuildOutput(undefined)
     registerPwa({ name: 'Dev App', icon: '/nonexistent/icon-source.png', iconSizes: [48] })

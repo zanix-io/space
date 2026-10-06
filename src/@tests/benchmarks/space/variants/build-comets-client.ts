@@ -21,6 +21,8 @@ import preact from '@preact/preset-vite'
 import { cometPlugin } from 'modules/bundler/comet-plugin.ts'
 import { modulePreloadPlugin } from 'modules/bundler/modulepreload-plugin.ts'
 
+const CLIENT_ENTRY_NAME = 'client-entry'
+
 export type RendererKind = 'react' | 'preact'
 
 export interface BuildCometsClientOptions {
@@ -30,7 +32,7 @@ export interface BuildCometsClientOptions {
   /** Only meaningful for `renderer: 'react'` — Preact has no compiler of its own, so this is
    * ignored (never even referenced) when `renderer === 'preact'`. */
   compiler: boolean
-  /** `entryName -> absolute comet source path` — hand-written, not `discoverComets()`, since this
+  /** `entryName -> absolute source path` (the `client-entry` bootstrap plus every comet) — hand-written, not `discoverComets()`, since this
    * benchmark's own fixture has a small, fixed, known set of comet files (see `../scenario/`). */
   comets: Record<string, string>
 }
@@ -78,7 +80,13 @@ export async function buildCometsClient(options: BuildCometsClientOptions): Prom
     plugins: [
       deno(),
       rendererPlugins(renderer, compiler),
-      cometPlugin({ knownEntryPaths: Object.values(comets) }),
+      // `client-entry` is the hydration bootstrap, not a comet: it exports nothing, which
+      // `cometPlugin` rejects for any known comet entry.
+      cometPlugin({
+        knownEntryPaths: Object.entries(comets)
+          .filter(([name]) => name !== CLIENT_ENTRY_NAME)
+          .map(([, path]) => path),
+      }),
       // The manifest of static chunk dependencies `buildSpaceClient` also writes.
       modulePreloadPlugin(),
     ],

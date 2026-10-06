@@ -1,14 +1,19 @@
-import '../../../../mod-react.ts'
+import '../../../mod-react.ts'
 import { assert, assertFalse } from '@std/assert'
 import { SpacePageController } from 'modules/router/mod.ts'
 import { ORBIT_FRAGMENT_HEADER } from 'modules/router/orbit-protocol.ts'
 import { mockHandlerContext } from 'modules/testing/mod.ts'
 
 /**
- * Gates the test below: it drives a real Chromium, which the CI job does not install. Run it with
- * `RUN_BROWSER_TESTS=true deno test --allow-all <this file>` before publishing a change to
- * `handleGet`, the `ETag`, Orbit or its prefetch. `SPACE_BENCH_CHROMIUM` points at a browser
- * executable (the benchmark's own variable); without it Playwright resolves its own install.
+ * Not named `*.test.tsx`, so `deno test` never discovers it: loading this file in the full suite
+ * run crashes the process with a segmentation fault when it reaches `dev-engine.test.ts`, whether
+ * or not the test below is ignored. Run it by path, with a real Chromium, before publishing a
+ * change to `handleGet`, the `ETag`, Orbit or its prefetch:
+ *
+ * `RUN_BROWSER_TESTS=true deno test --allow-all src/@tests/browser/etag-variants.browser.tsx`
+ *
+ * `SPACE_BENCH_CHROMIUM` points at a browser executable (the benchmark's own variable); without it
+ * Playwright resolves its own install. Without `RUN_BROWSER_TESTS` the test is ignored.
  */
 const shouldRun = Deno.env.get('RUN_BROWSER_TESTS') === 'true'
 

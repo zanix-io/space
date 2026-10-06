@@ -453,7 +453,13 @@ export abstract class SpacePageController<
           vary: ORBIT_FRAGMENT_HEADER,
         }
         if (ctx.req.headers.get('if-none-match') === etag) {
-          return applySecurity(new Response(null, { status: 304, headers }))
+          // A `304` updates the headers of the stored response (RFC 9111 §4.3.4). Its CSP would carry
+          // THIS request's nonce while the stored HTML keeps the nonce of the request that rendered
+          // it, so every nonce'd script/style would be blocked. The stored policy is left alone.
+          const notModified = applySecurity(new Response(null, { status: 304, headers }))
+          notModified.headers.delete('content-security-policy')
+          notModified.headers.delete('content-security-policy-report-only')
+          return notModified
         }
         const response = await getPageRenderer()(
           Target,

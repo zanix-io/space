@@ -8,6 +8,7 @@ import { buildWebManifest, iconRoute, MANIFEST_ROUTE, SW_ROUTE } from './web-man
 import { DEFAULT_ICON_SIZES, iconFileName, SW_FILE_NAME } from './icon-naming.ts'
 import { requestsServiceWorkerLogic, resolvePwaPush } from './push-config.ts'
 import { getPwaBuildOutput } from './pwa-registry.ts'
+import { resizeIcon } from './runtime-icon.ts'
 
 /**
  * Registers a single fixed-path GET route outside `@zanix/space`'s own file-based page
@@ -128,11 +129,38 @@ function registerRuntimeServiceWorkerRoute(config: PwaConfig): void {
 }
 
 /**
+ * Serves each configured icon size resized on each request from `config.icon`, for an app that has
+ * no client build output. The manifest lists these routes whether or not a build wrote the files,
+ * so without them a dev server answers `404` for every icon it advertises. `config.icon` is resolved
+ * against the process's working directory like `serviceWorkerScript`, and is read on each request,
+ * so an edit reaches the next load; the response carries `cache-control: no-cache` for the same
+ * reason. A missing source degrades to a `404`.
+ */
+function registerRuntimeIconRoutes(config: PwaConfig, sizes: number[]): void {
+  for (const size of sizes) {
+    const route = iconRoute(size)
+    registerFixedRoute(route, async () => {
+      const sourcePath = resolve(Deno.cwd(), config.icon)
+      try {
+        const png = await resizeIcon(sourcePath, size)
+        return new Response(png, {
+          headers: { 'content-type': 'image/png', 'cache-control': 'no-cache' },
+        })
+      } catch (error) {
+        if (error instanceof InternalError) throw error
+        return readFailureResponse(route, sourcePath, error)
+      }
+    })
+  }
+}
+
+/**
  * Registers this app's PWA routes: {@linkcode MANIFEST_ROUTE} (the Web App Manifest, computed
  * once from `config` and served as-is on every request) always, and — only when
- * `getPwaBuildOutput()` (`pwa-registry.ts`) already has a build output directory registered — one
- * route per configured icon size (`iconRoute`, reading the file `pwaPlugin` wrote under
- * `<buildOutput>/icons/`) and {@linkcode SW_ROUTE} (reading `<buildOutput>/sw.js`).
+ * `getPwaBuildOutput()` (`pwa-registry.ts`) already has a build output directory registered —
+ * {@linkcode SW_ROUTE} (reading `<buildOutput>/sw.js`) — and one route per configured icon size
+ * (`iconRoute`), reading the file `pwaPlugin` wrote under `<buildOutput>/icons/` or, with no build
+ * output, resizing `config.icon`.
  *
  * Call from `defineSpaceApp`'s own `setup`, same timing as `loadRoutes()` — route registration
  * only works during app composition, never after it's finished. This reads
@@ -142,11 +170,12 @@ function registerRuntimeServiceWorkerRoute(config: PwaConfig): void {
  * why a lazy per-request path lookup isn't needed once that ordering holds).
  *
  * No build output registered at all (dev, or prod before the first real `zanix space build`) is
- * not an error — icon routes are never registered and `/manifest.webmanifest` alone still works,
- * since it needs no built file. The service-worker route is registered only when `config` asks for
- * `push` or a `serviceWorkerScript`: it then serves a worker generated on each request, with the
- * same handlers the built one has and no caching, so those features behave the same with or
- * without a build.
+ * not an error — `/manifest.webmanifest` still works since it needs no built file, and each icon
+ * route serves `config.icon` resized on each request (`registerRuntimeIconRoutes`) so the manifest
+ * never lists an icon that answers `404`. The service-worker route is registered only when `config`
+ * asks for `push` or a `serviceWorkerScript`: it then serves a worker generated on each request,
+ * with the same handlers the built one has and no caching, so those features behave the same with
+ * or without a build.
  *
  * @throws Nothing of its own — a missing file at request time (a real build/deploy skew) degrades
  * to a `404` `Response` for that one route, never crashes the process.
@@ -161,13 +190,14 @@ export function registerPwa(config: PwaConfig): void {
       }),
   )
 
+  const sizes = config.iconSizes ?? DEFAULT_ICON_SIZES
   const buildOutput = getPwaBuildOutput()
   if (!buildOutput) {
+    registerRuntimeIconRoutes(config, sizes)
     if (requestsServiceWorkerLogic(config)) registerRuntimeServiceWorkerRoute(config)
     return
   }
 
-  const sizes = config.iconSizes ?? DEFAULT_ICON_SIZES
   for (const size of sizes) {
     registerFileRoute(
       iconRoute(size),

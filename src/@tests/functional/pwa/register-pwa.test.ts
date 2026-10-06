@@ -160,7 +160,7 @@ Deno.test(
 )
 
 Deno.test(
-  'registerPwa: with no build output registered at all, neither icon nor sw.js routes exist',
+  'registerPwa: with no build output registered at all, no sw.js route exists and a missing icon source answers 404',
   async () => {
     setPwaBuildOutput(undefined)
     registerPwa({ name: 'No Build Yet App', icon: './icon-source.png' })
@@ -200,9 +200,9 @@ Deno.test(
       push: { defaultUrl: '/home' },
     })
 
-    const servers = await bootstrapServers({ ssr: { port: 20905 } })
+    const servers = await bootstrapServers({ ssr: { port: 20961 } })
     try {
-      const res = await fetch(`http://localhost:20905${SW_ROUTE}`)
+      const res = await fetch(`http://localhost:20961${SW_ROUTE}`)
       assertEquals(res.status, 200)
       assertEquals(res.headers.get('content-type'), 'application/javascript')
       assertEquals(res.headers.get('cache-control'), 'no-cache')
@@ -234,18 +234,18 @@ Deno.test(
       setPwaBuildOutput(undefined)
       registerPwa({ name: 'Storefront', icon: './icon-source.png', serviceWorkerScript: script })
 
-      const servers = await bootstrapServers({ ssr: { port: 20906 } })
+      const servers = await bootstrapServers({ ssr: { port: 20962 } })
       try {
-        const first = await (await fetch(`http://localhost:20906${SW_ROUTE}`)).text()
+        const first = await (await fetch(`http://localhost:20962${SW_ROUTE}`)).text()
         assertStringIncludes(first, "const VERSION = 'one'")
 
         await Deno.writeTextFile(script, "const VERSION = 'two'\n")
-        const second = await (await fetch(`http://localhost:20906${SW_ROUTE}`)).text()
+        const second = await (await fetch(`http://localhost:20962${SW_ROUTE}`)).text()
         assertStringIncludes(second, "const VERSION = 'two'")
         assertFalse(second.includes("'one'"))
 
         await Deno.remove(script)
-        const missing = await fetch(`http://localhost:20906${SW_ROUTE}`)
+        const missing = await fetch(`http://localhost:20962${SW_ROUTE}`)
         assertEquals(missing.status, 404)
         await missing.body?.cancel()
       } finally {
@@ -348,3 +348,52 @@ Deno.test('registerPwa: a missing built worker is not a push warning, its route 
   const warnings = await withBuiltWorker(null, { push: {} }, 20915)
   assertEquals(warnings, [])
 })
+
+Deno.test(
+  'registerPwa: with no build output, an icon route serves config.icon resized to the requested size',
+  async () => {
+    const { default: sharp } = await import('sharp')
+    const root = await Deno.makeTempDir({ dir: TMP_ROOT })
+    try {
+      const source = await sharp({
+        create: { width: 64, height: 64, channels: 3, background: '#2563eb' },
+      }).png().toBuffer()
+      const sourcePath = `${root}/icon-source.png`
+      await Deno.writeFile(sourcePath, source)
+      setPwaBuildOutput(undefined)
+
+      registerPwa({ name: 'Dev App', icon: sourcePath, iconSizes: [32] })
+
+      const servers = await bootstrapServers({ ssr: { port: 20971 } })
+      try {
+        const res = await fetch(`http://localhost:20971${iconRoute(32)}`)
+        assertEquals(res.status, 200)
+        assertEquals(res.headers.get('content-type'), 'image/png')
+        assertEquals(res.headers.get('cache-control'), 'no-cache')
+        const meta = await sharp(new Uint8Array(await res.arrayBuffer())).metadata()
+        assertEquals([meta.format, meta.width, meta.height], ['png', 32, 32])
+      } finally {
+        await webServerManager.stop(servers)
+      }
+    } finally {
+      await Deno.remove(root, { recursive: true })
+    }
+  },
+)
+
+Deno.test(
+  'registerPwa: with no build output and a missing config.icon file, an icon route answers 404',
+  async () => {
+    setPwaBuildOutput(undefined)
+    registerPwa({ name: 'Dev App', icon: '/nonexistent/icon-source.png', iconSizes: [48] })
+
+    const servers = await bootstrapServers({ ssr: { port: 20972 } })
+    try {
+      const res = await fetch(`http://localhost:20972${iconRoute(48)}`)
+      assertEquals(res.status, 404)
+      await res.body?.cancel()
+    } finally {
+      await webServerManager.stop(servers)
+    }
+  },
+)

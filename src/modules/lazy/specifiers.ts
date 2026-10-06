@@ -23,3 +23,9 @@
 /** `svgo`'s own real, pinned version range — `svg-optimize.ts`'s `getSvgo` (VALUE,
  * `await import(...)`, gated behind `AssetsOptimizeOptions.svg` actually being configured). */
 export const SVGO_SPECIFIER = 'npm:svgo@^3'
+
+/** `sharp`'s own pinned version range — `pwa/runtime-icon.ts`'s `resizeIcon` (VALUE,
+ * `await import(...)`, reached only when an app registers PWA icon routes with no client build
+ * output, i.e. in dev). Kept in step with the `sharp` entry of `deno.jsonc`'s `imports`, which the
+ * build-time `pwaPlugin`/`image-optimize.ts` resolve statically. */
+export const SHARP_SPECIFIER = 'npm:sharp@^0.35.3'

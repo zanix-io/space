@@ -214,3 +214,31 @@ Deno.test(
     assertEquals(await second.text(), '')
   },
 )
+
+Deno.test(
+  'SpacePageController.handleGet: the 200 carries a CSP, the 304 carries none (the stored policy and its nonce stay valid)',
+  async () => {
+    class CachedPage extends SpacePageController {
+      public static override cacheControl = 'private, no-cache'
+      public override component = View
+      public override loader = () => ({ value: 'cached' })
+    }
+
+    const first = await new CachedPage(mockHandlerContext()).handleGet(mockHandlerContext())
+    const etag = first.headers.get('etag')
+    assert(etag)
+    assert(first.headers.get('content-security-policy'))
+    await first.body?.cancel()
+
+    const secondCtx = mockHandlerContext({
+      req: new Request('http://localhost/', { headers: { 'if-none-match': etag } }),
+    })
+    const second = await new CachedPage(secondCtx).handleGet(secondCtx)
+
+    assertEquals(second.status, 304)
+    assertEquals(second.headers.get('content-security-policy'), null)
+    assertEquals(second.headers.get('content-security-policy-report-only'), null)
+    assertEquals(second.headers.get('etag'), etag)
+    assertEquals(second.headers.get('cache-control'), 'private, no-cache')
+  },
+)

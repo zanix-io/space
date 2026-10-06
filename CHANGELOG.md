@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.18.4] - 2026-10-06
+
+### Fixed
+
+- **A `304` for a page with `cacheControl` no longer carries a `Content-Security-Policy`.** The
+  `304` held a CSP with a new per-request nonce, and the browser applied it to the stored HTML whose
+  scripts and styles hold the old nonce, so they were blocked and no comet hydrated. The `304` now
+  omits `Content-Security-Policy` and `Content-Security-Policy-Report-Only`, so the browser keeps
+  the policy stored with the document. Other security headers and `200` responses are unchanged.
+
+- **`zanix space dev` serves the PWA icons the manifest lists.** `registerPwa` registered the
+  `/icons/icon-<size>.png` routes only when a client build output existed, so in dev the manifest
+  advertised icons that answered `404` and the console reported an error. With no build output each
+  icon route now resizes `pwa.icon` to the requested size on each request (`sharp`, loaded on first
+  use, never in a deployed server that has a build) and answers with `cache-control: no-cache`. A
+  missing source file still answers `404`. With a build output nothing changes.
+
 ## [1.18.3] - 2026-10-05
 
 ### Fixed

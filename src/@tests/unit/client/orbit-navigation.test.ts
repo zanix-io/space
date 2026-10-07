@@ -256,6 +256,23 @@ Deno.test(
 )
 
 Deno.test(
+  'onClick: a click another handler already took (defaultPrevented) is not followed — no fetch, ' +
+    'no history entry',
+  async () => {
+    const { anchor } = setUp()
+    // The element's own handler has already prevented the click when `document`'s listener runs.
+    const event = new view.MouseEvent('click', { bubbles: true, cancelable: true })
+    Object.defineProperty(event, 'target', { value: anchor, enumerable: true, configurable: true })
+    event.preventDefault()
+    view.document.dispatchEvent(event)
+    await flush()
+
+    assertEquals(fetchCalls.length, 0)
+    assertEquals(historyCalls.length, 0)
+  },
+)
+
+Deno.test(
   'onClick: a modified click (e.g. cmd/ctrl-click for a new tab) is never intercepted',
   async () => {
     const { anchor } = setUp()

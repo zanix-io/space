@@ -612,6 +612,10 @@ export function navigate(href: string, options: NavigateOptions = {}): Promise<v
 }
 
 function onClick(event: MouseEvent): void {
+  // Another handler already took this click (a link that goes back in the history, a form-like
+  // control): a plain `<a>` does not navigate then, so neither does Orbit. It listens on `document`,
+  // after every handler of the element itself, so the answer is already there.
+  if (event.defaultPrevented) return
   const anchor = findAnchor(event.target)
   if (!anchor) return
 

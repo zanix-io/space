@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.18.6] - 2026-10-07
+
+### Fixed
+
+- **Orbit no longer follows a click another handler already took.** Its click listener on `document`
+  did not look at `event.defaultPrevented`, so a link whose own `onClick` called `preventDefault()`
+  (to go back in the history, say) was still intercepted: Orbit fetched the link's `href` and pushed
+  it as a new entry, after the handler had done its own navigation. A plain `<a>` does not navigate
+  once its click is prevented; now Orbit does not either.
+
 ## [1.18.5] - 2026-10-06
 
 ### Fixed

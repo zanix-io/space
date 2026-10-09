@@ -927,3 +927,93 @@ Deno.test(
     forgetDraftValues('cv-report')
   },
 )
+
+Deno.test(
+  'attachFormDraftPersistence: an empty required field is not saved, and a restore keeps the rendered value',
+  () => {
+    setUp()
+    const timers = installTimerMock()
+    const form = buildForm('rq1', [
+      { name: 'displayName', value: 'Ismael', attrs: { required: '' } },
+      { name: 'bio', value: 'hello' },
+      { name: 'nickname', value: 'x', attrs: { required: '' } },
+    ])
+    const detach = attachFormDraftPersistence({
+      formId: 'rq1',
+      storageKey: 'rq1',
+      hasServerValues: false,
+      debounceMs: 10,
+    })
+    const displayName = form.elements.namedItem('displayName') as HTMLInputElement
+    displayName.value = ''
+    fireInput(displayName)
+    timers.advance(10)
+
+    assertEquals(
+      JSON.parse(globals.sessionStorage.getItem('zn-space:rq1')),
+      { bio: 'hello', nickname: 'x' },
+    )
+    detach()
+    timers.restore()
+
+    resetDomKeepingStorage()
+    const fresh = buildForm('rq1', [{
+      name: 'displayName',
+      value: 'Ismael',
+      attrs: { required: '' },
+    }])
+    attachFormDraftPersistence({ formId: 'rq1', storageKey: 'rq1', hasServerValues: false })
+    assertEquals((fresh.elements.namedItem('displayName') as HTMLInputElement).value, 'Ismael')
+  },
+)
+
+Deno.test(
+  'attachFormDraftPersistence: an empty field that is not required, and a whitespace-only required one, are still saved',
+  () => {
+    setUp()
+    const timers = installTimerMock()
+    const form = buildForm('rq2', [
+      { name: 'bio', value: 'hello' },
+      { name: 'name', value: 'x', attrs: { required: '' } },
+    ])
+    const detach = attachFormDraftPersistence({
+      formId: 'rq2',
+      storageKey: 'rq2',
+      hasServerValues: false,
+      debounceMs: 10,
+    })
+    const bio = form.elements.namedItem('bio') as HTMLInputElement
+    ;(form.elements.namedItem('name') as HTMLInputElement).value = '   '
+    bio.value = ''
+    fireInput(bio)
+    timers.advance(10)
+
+    assertEquals(JSON.parse(globals.sessionStorage.getItem('zn-space:rq2')), {
+      bio: '',
+      name: '   ',
+    })
+    detach()
+    timers.restore()
+  },
+)
+
+Deno.test(
+  'attachFormDraftPersistence: the snapshot kept for returnedFromFailure still holds an empty required field',
+  () => {
+    setUp()
+    const form = buildForm('rq3', [{ name: 'title', value: '', attrs: { required: '' } }])
+    const detach = attachFormDraftPersistence({
+      formId: 'rq3',
+      storageKey: 'rq3',
+      hasServerValues: false,
+      returnedFromFailure: false,
+    })
+    fireSubmit(form)
+    detach()
+
+    assertEquals(
+      JSON.parse(globals.sessionStorage.getItem('zn-space:rq3:submitted')),
+      { title: '' },
+    )
+  },
+)

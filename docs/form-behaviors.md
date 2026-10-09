@@ -23,6 +23,12 @@ guard only against a second `submit` EVENT (e.g. Enter pressed twice in a text f
 button state to the page itself. Any further `submit` while still in flight is rejected outright,
 never reaching the server a second time.
 
+The controls change one tick after `submit`, once the browser has read the form data, so a form with
+several submit buttons told apart by `name`/`value` (`<button name="next" value="edit">`) still
+sends the pressed one's. `pendingLabel` relabels only the pressed control (every submit control when
+the pressed one is unknown, e.g. `requestSubmit()` with no argument); every control is still
+disabled.
+
 Relies on this framework's own "Real HTTP, not an RPC" contract: a submission that goes through
 always ends in a real navigation — the next page, or a freshly re-rendered `422` — so the whole
 document, including this Comet's own in-flight flag, is torn down and reloaded fresh regardless of
@@ -181,18 +187,20 @@ submit-triggering control itself while `intercept` is pending (the same double-s
 while `intercept` is still pending is rejected outright), then calls `intercept(form)`. `'handled'`
 re-enables the controls and stops there. `'proceed'` — or a REJECTED promise, treated identically,
 the same never-the-authoritative-decision fallback a network-dependent `intercept` should already
-follow — re-enables the controls and calls `form.submit()`, **never** `form.requestSubmit()`.
+follow — re-enables the controls and calls `form.submit()`, **never** `form.requestSubmit()`. The
+pressed control is applied to that call, since `form.submit()` has no submitter of its own: its
+`name`/`value` is sent and its `formaction`/`formmethod`/`formenctype`/`formtarget` override the
+form's own attributes, for the duration of the call only.
 
 **Why `form.submit()`, specifically**: `requestSubmit()` needs a real, enabled submit control to act
 as the submitter and silently no-ops without one; `form.submit()` neither requires nor looks at any
 control's `disabled` state at all. This is the actual fix for a real, confirmed bug — a Comet
 intercepting `submit` with its own raw listener, doing async work, then calling
 `form.requestSubmit()` once it resolved, on a form that also had `SubmitGuard` disabling every
-submit control SYNCHRONOUSLY on that same first `submit`. By the time the async work resolved, the
-only control was already disabled and `requestSubmit()` silently no-oped — the submission never
-fired, the button stuck forever, nothing thrown anywhere. `form.submit()` also never dispatches a
-second, cancelable `submit` event, so there is no re-entrancy into this same handler to guard
-against.
+submit control on that same first `submit`. By the time the async work resolved, the only control
+was already disabled and `requestSubmit()` silently no-oped — the submission never fired, the button
+stuck forever, nothing thrown anywhere. `form.submit()` also never dispatches a second, cancelable
+`submit` event, so there is no re-entrancy into this same handler to guard against.
 
 `useSubmitIntercept` (unlike `SubmitGuard`/`ManagedForm`) is a **plain hook, not a `defineComet`
 boundary** — `intercept` is a real function, and a Comet's own props must cross the server/client
@@ -238,7 +246,7 @@ the same `submit`/`input`/`change` event is safe by construction FOR A LISTENER 
 REACTS to that one event — each is an independent `addEventListener` call; native DOM listeners
 never overwrite each other, and one calling `event.preventDefault()` (`SubmitGuard`, rejecting a
 second submission) doesn't stop the others from also running. It is NOT safe for a listener with a
-synchronous side effect (disabling controls) that breaks another one needing to re-trigger the
+immediate side effect (disabling controls) that breaks another one needing to re-trigger the
 submission LATER, after async work — see "Asynchronous submit interception" above for the real bug
 that surfaced, and why `attachSubmitIntercept` exists to fix it properly.
 

@@ -194,6 +194,13 @@ opt-out for anything else sensitive (an API secret typed into a plain `type="tex
 <input name='webhookSecret' data-no-persist />
 ```
 
+**An empty `required` field is not saved.** A visitor who clears a required field and leaves would
+otherwise have that blank restored over the value the server rendered for it, and a required field
+cannot be submitted empty anyway; without a saved value, the field comes back as the page renders
+it. Only an exactly empty value counts, as in the browser's own validation. The snapshot kept for
+`returnedFromFailure` is the exception: it holds the form as it was sent, so an empty required field
+that made the server refuse it is restored empty.
+
 `storage` defaults to `'session'` (scoped to the tab's lifetime — the safe default for config an
 operator types in, like webhook URLs) and accepts `'local'` as an explicit, visible opt-in for a
 draft genuinely meant to survive a browser restart.

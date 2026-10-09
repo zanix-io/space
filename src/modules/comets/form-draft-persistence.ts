@@ -121,20 +121,27 @@ function eachPersistableField(
   }
 }
 
-/** Every persistable field of `form` and its current value, by `name`. */
+/**
+ * Every persistable field of `form` and its current value, by `name`. With `skipEmptyRequired`, a
+ * `required` field whose value is exactly `''` is left out: restoring it would blank the value the
+ * server rendered for that field, and a required field cannot be submitted empty anyway.
+ */
 function snapshotForm(
   form: HTMLFormElement,
   excludeFields: readonly string[],
+  skipEmptyRequired = false,
 ): Record<string, string> {
   const draft: Record<string, string> = {}
   const excludedNames = new Set<string>()
+  const requiredNames = new Set<string>()
   for (const el of Array.from(form.elements)) {
-    if (isPersistableElement(el) && el.name && isExcludedField(el, excludeFields)) {
-      excludedNames.add(el.name)
-    }
+    if (!isPersistableElement(el) || !el.name) continue
+    if (isExcludedField(el, excludeFields)) excludedNames.add(el.name)
+    else if (el.required) requiredNames.add(el.name)
   }
   for (const [name, value] of new FormData(form).entries()) {
     if (typeof value !== 'string' || excludedNames.has(name)) continue
+    if (skipEmptyRequired && value === '' && requiredNames.has(name)) continue
     draft[name] = value
   }
   return draft
@@ -193,6 +200,10 @@ function restoreForm(
  * generically via `form.elements` — covering a new field added later with zero per-field wiring —
  * rather than a hand-maintained field list.
  *
+ * A `required` field that is empty is not saved, so a restore never blanks the value the server
+ * rendered for it; the draft kept after a failed submit (`returnedFromFailure`) still holds it,
+ * since that one is what the visitor sent.
+ *
  * Always excludes `_csrf`, `type="password"`, and `type="file"` fields, plus any field marked
  * `data-no-persist` on its own markup — none of these are configurable. See
  * {@linkcode FormDraftPersistenceOptions.excludeFields} for the separate, narrower case of a field
@@ -224,7 +235,7 @@ export function attachFormDraftPersistence(options: FormDraftPersistenceOptions)
   const handleChange = () => {
     if (timer !== undefined) clearTimeout(timer)
     timer = setTimeout(
-      () => writeToStorage(backend, key, snapshotForm(form, excludeFields)),
+      () => writeToStorage(backend, key, snapshotForm(form, excludeFields, true)),
       debounceMs,
     )
   }

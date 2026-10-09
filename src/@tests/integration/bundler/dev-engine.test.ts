@@ -1628,9 +1628,10 @@ Deno.test(
             join(root, 'counter.tsx'),
             `export default function Counter() { return 'v2' }\n`,
           )
-          await new Promise((resolve) => setTimeout(resolve, 300))
-          const asset = await engine.transformClientAsset('/counter.tsx')
-          assert(asset?.code.includes('v2'), asset?.code)
+          await waitUntil(async () => {
+            const asset = await engine.transformClientAsset('/counter.tsx')
+            return asset?.code.includes('v2')
+          })
         } finally {
           await engine.close()
         }

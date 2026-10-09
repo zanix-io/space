@@ -237,3 +237,159 @@ Deno.test(
     detachGuard()
   },
 )
+
+/** Fires a `submit` carrying the pressed control the way a real browser's `SubmitEvent` does. */
+function fireSubmitFrom(form: Element, submitter: Element | null): boolean {
+  return form.dispatchEvent(
+    Object.assign(new globals.Event('submit', { bubbles: true, cancelable: true }), { submitter }),
+  )
+}
+
+/** Replaces `form.submit()` with a spy that records what the real submission would carry: the form
+ * data (as the entry list a browser builds, without a submitter) and the form's own attributes. */
+function spyFormSubmit(form: HTMLFormElement): { sent: Array<Record<string, unknown>> } {
+  const sent: Array<Record<string, unknown>> = []
+  form.submit = () => {
+    sent.push({
+      data: Object.fromEntries(new globals.FormData(form).entries()),
+      action: form.getAttribute('action'),
+      method: form.getAttribute('method'),
+      enctype: form.getAttribute('enctype'),
+      target: form.getAttribute('target'),
+    })
+  }
+  return { sent }
+}
+
+const settle = async () => {
+  await Promise.resolve()
+  await Promise.resolve()
+}
+
+Deno.test(
+  "attachSubmitIntercept: 'proceed' sends the pressed control's name/value, and only that control's",
+  async () => {
+    setUp()
+    const form = buildForm('si20', [{}, {}])
+    const [first, second] = Array.from(form.querySelectorAll('button')) as HTMLButtonElement[]
+    first.name = 'next'
+    first.value = 'continue'
+    second.name = 'next'
+    second.value = 'edit'
+    const spy = spyFormSubmit(form)
+    const detach = attachSubmitIntercept({
+      formId: 'si20',
+      intercept: () => Promise.resolve('proceed'),
+    })
+
+    fireSubmitFrom(form, second)
+    await settle()
+
+    assertEquals(spy.sent.length, 1)
+    assertEquals(spy.sent[0].data, { next: 'edit' })
+    // Nothing is left behind on the form once the call returns.
+    assertEquals(form.querySelectorAll('input[type="hidden"]').length, 0)
+    detach()
+  },
+)
+
+Deno.test(
+  "attachSubmitIntercept: 'proceed' applies the pressed control's formaction/formmethod for the call only",
+  async () => {
+    setUp()
+    const form = buildForm('si21', [{}])
+    form.setAttribute('action', '/save')
+    form.setAttribute('method', 'post')
+    const button = form.querySelector('button') as HTMLButtonElement
+    button.setAttribute('formaction', '/delete')
+    button.setAttribute('formmethod', 'get')
+    button.setAttribute('formtarget', '_blank')
+    const spy = spyFormSubmit(form)
+    const detach = attachSubmitIntercept({
+      formId: 'si21',
+      intercept: () => Promise.resolve('proceed'),
+    })
+
+    fireSubmitFrom(form, button)
+    await settle()
+
+    assertEquals(spy.sent[0].action, '/delete')
+    assertEquals(spy.sent[0].method, 'get')
+    assertEquals(spy.sent[0].target, '_blank')
+    assertEquals(form.getAttribute('action'), '/save')
+    assertEquals(form.getAttribute('method'), 'post')
+    assertFalse(form.hasAttribute('target'))
+    detach()
+  },
+)
+
+Deno.test(
+  'attachSubmitIntercept: a REJECTED intercept still submits as the pressed control',
+  async () => {
+    setUp()
+    const form = buildForm('si22', [{}])
+    const button = form.querySelector('button') as HTMLButtonElement
+    button.name = 'next'
+    button.value = 'edit'
+    const spy = spyFormSubmit(form)
+    const detach = attachSubmitIntercept({
+      formId: 'si22',
+      intercept: () => Promise.reject(new Error('network down')),
+    })
+
+    fireSubmitFrom(form, button)
+    await settle()
+
+    assertEquals(spy.sent[0].data, { next: 'edit' })
+    detach()
+  },
+)
+
+Deno.test(
+  'attachSubmitIntercept: an unknown submitter submits the form as is',
+  async () => {
+    setUp()
+    const form = buildForm('si23', [{}])
+    const button = form.querySelector('button') as HTMLButtonElement
+    button.name = 'next'
+    button.value = 'edit'
+    form.setAttribute('action', '/save')
+    button.setAttribute('formaction', '/delete')
+    const spy = spyFormSubmit(form)
+    const detach = attachSubmitIntercept({
+      formId: 'si23',
+      intercept: () => Promise.resolve('proceed'),
+    })
+
+    fireSubmitFrom(form, null)
+    await settle()
+
+    assertEquals(spy.sent[0].data, {})
+    assertEquals(spy.sent[0].action, '/save')
+    detach()
+  },
+)
+
+Deno.test(
+  "attachSubmitIntercept: 'handled' leaves the form untouched whichever control was pressed",
+  async () => {
+    setUp()
+    const form = buildForm('si24', [{}])
+    const button = form.querySelector('button') as HTMLButtonElement
+    button.name = 'next'
+    button.value = 'edit'
+    button.setAttribute('formaction', '/delete')
+    const spy = spyFormSubmit(form)
+    const detach = attachSubmitIntercept({
+      formId: 'si24',
+      intercept: () => Promise.resolve('handled'),
+    })
+
+    fireSubmitFrom(form, button)
+    await settle()
+
+    assertEquals(spy.sent.length, 0)
+    assertFalse(form.hasAttribute('action'))
+    detach()
+  },
+)

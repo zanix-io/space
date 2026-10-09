@@ -28,6 +28,9 @@ function fireSubmit(form: Element): boolean {
   return form.dispatchEvent(new globals.Event('submit', { bubbles: true, cancelable: true }))
 }
 
+/** Waits for the guard's deferred state change (it runs one tick after `submit`). */
+const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
+
 function setUp(): void {
   resetDom()
 }
@@ -83,12 +86,14 @@ Deno.test('attachSubmitGuard: the first submit is let through, unprevented', () 
 
 Deno.test(
   'attachSubmitGuard: a second submit while the first is still in flight is rejected outright',
-  () => {
+  async () => {
     setUp()
     const form = buildForm('g2')
     const detach = attachSubmitGuard({ formId: 'g2' })
 
     fireSubmit(form)
+
+    await tick()
     const secondNotPrevented = fireSubmit(form)
 
     assertFalse(secondNotPrevented)
@@ -98,7 +103,7 @@ Deno.test(
 
 Deno.test(
   'attachSubmitGuard: disables every submit-triggering control on the first submit, by default',
-  () => {
+  async () => {
     setUp()
     const form = buildForm('g3', [
       { tag: 'button' }, // no type — implicit submit
@@ -111,6 +116,7 @@ Deno.test(
 
     fireSubmit(form)
 
+    await tick()
     const controls = Array.from(form.querySelectorAll('button, input')) as Array<
       HTMLButtonElement | HTMLInputElement
     >
@@ -121,12 +127,14 @@ Deno.test(
 
 Deno.test(
   'attachSubmitGuard: disableControls=false leaves every control enabled, still rejects a second submit',
-  () => {
+  async () => {
     setUp()
     const form = buildForm('g4')
     const detach = attachSubmitGuard({ formId: 'g4', disableControls: false })
 
     fireSubmit(form)
+
+    await tick()
     const button = form.querySelector('button') as HTMLButtonElement
     assertFalse(button.disabled)
 
@@ -138,12 +146,14 @@ Deno.test(
 
 Deno.test(
   'attachSubmitGuard: cleanup re-enables every control it disabled and detaches the listener',
-  () => {
+  async () => {
     setUp()
     const form = buildForm('g5')
     const detach = attachSubmitGuard({ formId: 'g5' })
 
     fireSubmit(form)
+
+    await tick()
     const button = form.querySelector('button') as HTMLButtonElement
     assert(button.disabled)
 
@@ -158,7 +168,7 @@ Deno.test(
 
 Deno.test(
   'attachSubmitGuard: cleanup never re-enables a control that was ALREADY disabled before this attached',
-  () => {
+  async () => {
     setUp()
     const form = buildForm('g6')
     const preDisabled = form.querySelector('button') as HTMLButtonElement
@@ -166,6 +176,8 @@ Deno.test(
     const detach = attachSubmitGuard({ formId: 'g6' })
 
     fireSubmit(form)
+
+    await tick()
     detach()
 
     assert(preDisabled.disabled)
@@ -180,12 +192,14 @@ Deno.test('attachSubmitGuard: a formId matching nothing on the page is a safe no
 
 Deno.test(
   'attachSubmitGuard: a bfcache-restore pageshow (persisted: true) re-enables disabled controls',
-  () => {
+  async () => {
     setUp()
     const form = buildForm('g7')
     const pageShow = capturePageShowHandler(() => attachSubmitGuard({ formId: 'g7' }))
 
     fireSubmit(form)
+
+    await tick()
     const button = form.querySelector('button') as HTMLButtonElement
     assert(button.disabled)
 
@@ -198,12 +212,14 @@ Deno.test(
 
 Deno.test(
   'attachSubmitGuard: a bfcache-restore pageshow also lets a real submit through again',
-  () => {
+  async () => {
     setUp()
     const form = buildForm('g8')
     const pageShow = capturePageShowHandler(() => attachSubmitGuard({ formId: 'g8' }))
 
     fireSubmit(form)
+
+    await tick()
     pageShow.fire(true)
 
     const notPrevented = fireSubmit(form)
@@ -215,12 +231,14 @@ Deno.test(
 
 Deno.test(
   'attachSubmitGuard: a fresh-load pageshow (persisted: false) leaves disabled controls disabled',
-  () => {
+  async () => {
     setUp()
     const form = buildForm('g9')
     const pageShow = capturePageShowHandler(() => attachSubmitGuard({ formId: 'g9' }))
 
     fireSubmit(form)
+
+    await tick()
     const button = form.querySelector('button') as HTMLButtonElement
     assert(button.disabled)
 
@@ -243,7 +261,7 @@ Deno.test('attachSubmitGuard: cleanup also detaches the pageshow listener', () =
 
 Deno.test(
   "attachSubmitGuard: pendingLabel swaps a <button>'s textContent and an <input type=submit>'s value",
-  () => {
+  async () => {
     setUp()
     const form = buildForm('g11', [
       { tag: 'button', label: 'Save' },
@@ -253,6 +271,7 @@ Deno.test(
 
     fireSubmit(form)
 
+    await tick()
     const [button, input] = Array.from(form.querySelectorAll('button, input')) as [
       HTMLButtonElement,
       HTMLInputElement,
@@ -265,7 +284,7 @@ Deno.test(
 
 Deno.test(
   'attachSubmitGuard: pendingLabel applies even when disableControls is false',
-  () => {
+  async () => {
     setUp()
     const form = buildForm('g12', [{ tag: 'button', label: 'Save' }])
     const detach = attachSubmitGuard({
@@ -276,6 +295,7 @@ Deno.test(
 
     fireSubmit(form)
 
+    await tick()
     const button = form.querySelector('button') as HTMLButtonElement
     assertEquals(button.textContent, 'Saving…')
     assertFalse(button.disabled)
@@ -285,12 +305,14 @@ Deno.test(
 
 Deno.test(
   'attachSubmitGuard: cleanup restores the original label alongside re-enabling the control',
-  () => {
+  async () => {
     setUp()
     const form = buildForm('g13', [{ tag: 'button', label: 'Save' }])
     const detach = attachSubmitGuard({ formId: 'g13', pendingLabel: 'Saving…' })
 
     fireSubmit(form)
+
+    await tick()
     const button = form.querySelector('button') as HTMLButtonElement
     assertEquals(button.textContent, 'Saving…')
 
@@ -302,7 +324,7 @@ Deno.test(
 
 Deno.test(
   'attachSubmitGuard: a bfcache-restore pageshow restores the original label, not just control state',
-  () => {
+  async () => {
     setUp()
     const form = buildForm('g14', [{ tag: 'button', label: 'Save' }])
     const pageShow = capturePageShowHandler(() =>
@@ -310,6 +332,8 @@ Deno.test(
     )
 
     fireSubmit(form)
+
+    await tick()
     const button = form.querySelector('button') as HTMLButtonElement
     assertEquals(button.textContent, 'Saving…')
 
@@ -322,15 +346,99 @@ Deno.test(
 
 Deno.test(
   'attachSubmitGuard: no pendingLabel means no label swap at all',
-  () => {
+  async () => {
     setUp()
     const form = buildForm('g15', [{ tag: 'button', label: 'Save' }])
     const detach = attachSubmitGuard({ formId: 'g15' })
 
     fireSubmit(form)
 
+    await tick()
     const button = form.querySelector('button') as HTMLButtonElement
     assertEquals(button.textContent, 'Save')
     detach()
+  },
+)
+
+function fireSubmitFrom(form: Element, submitter: Element | null): boolean {
+  return form.dispatchEvent(
+    Object.assign(new globals.Event('submit', { bubbles: true, cancelable: true }), { submitter }),
+  )
+}
+
+Deno.test(
+  "attachSubmitGuard: the pressed control's name/value is still intact while the submit event is dispatched",
+  () => {
+    setUp()
+    const form = buildForm('g20', [{}, { tag: 'input', type: 'submit', label: 'edit' }])
+    const pressed = form.querySelector('input') as HTMLInputElement
+    pressed.name = 'next'
+    const detach = attachSubmitGuard({ formId: 'g20', pendingLabel: 'Saving…' })
+
+    fireSubmitFrom(form, pressed)
+
+    // The browser reads the form data right after the event: nothing may have changed by then.
+    assertFalse(pressed.disabled)
+    assertEquals(pressed.value, 'edit')
+    assertEquals(new globals.FormData(form, pressed).get('next'), 'edit')
+    detach()
+  },
+)
+
+Deno.test(
+  'attachSubmitGuard: pendingLabel relabels only the pressed control, every control is still disabled',
+  async () => {
+    setUp()
+    const form = buildForm('g21', [
+      { label: 'Continue' },
+      { tag: 'input', type: 'submit', label: 'Complete now' },
+    ])
+    const [first, second] = Array.from(form.querySelectorAll('button, input')) as Array<
+      HTMLButtonElement | HTMLInputElement
+    >
+    const detach = attachSubmitGuard({ formId: 'g21', pendingLabel: 'Saving…' })
+
+    fireSubmitFrom(form, second)
+    await tick()
+
+    assertEquals(first.textContent, 'Continue')
+    assertEquals((second as HTMLInputElement).value, 'Saving…')
+    assert(first.disabled && second.disabled)
+
+    detach()
+    assertEquals((second as HTMLInputElement).value, 'Complete now')
+  },
+)
+
+Deno.test(
+  'attachSubmitGuard: pendingLabel relabels every control when the submitter is unknown',
+  async () => {
+    setUp()
+    const form = buildForm('g22', [{ label: 'Continue' }, { label: 'Complete now' }])
+    const detach = attachSubmitGuard({ formId: 'g22', pendingLabel: 'Saving…' })
+
+    fireSubmitFrom(form, null)
+    await tick()
+
+    const labels = Array.from(form.querySelectorAll('button')).map((b) => b.textContent)
+    assertEquals(labels, ['Saving…', 'Saving…'])
+    detach()
+  },
+)
+
+Deno.test(
+  'attachSubmitGuard: a cleanup before the deferred change leaves every control untouched',
+  async () => {
+    setUp()
+    const form = buildForm('g23', [{ label: 'Continue' }])
+    const button = form.querySelector('button') as HTMLButtonElement
+    const detach = attachSubmitGuard({ formId: 'g23', pendingLabel: 'Saving…' })
+
+    fireSubmit(form)
+    detach()
+    await tick()
+
+    assertFalse(button.disabled)
+    assertEquals(button.textContent, 'Continue')
   },
 )

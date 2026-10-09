@@ -20,18 +20,19 @@ export type SubmitGuardOptions = {
   /** The real `id` of the `<form>` to guard. */
   formId: string
   /** Disables every submit-triggering control inside the form (a `<button>` with no `type` or
-   * `type="submit"`, an `<input type="submit">`) the moment the first real submission fires — the
+   * `type="submit"`, an `<input type="submit">`) right after the first real submission fires — the
    * same visual "in flight, don't click again" feedback a page author would otherwise have to wire
    * by hand. `false` to guard only against a second `submit` EVENT (e.g. Enter pressed twice in a
    * text field), leaving button state to the page itself.
    * @default true
    */
   disableControls?: boolean
-  /** Text to show on every submit-triggering control the moment the first real submission fires —
-   * a `<button>`'s `textContent`, an `<input type="submit">`'s `value` — restored automatically
-   * alongside a bfcache restore (or an early cleanup) exactly like `disableControls`' own restore.
-   * Independent of `disableControls`: applies even when that option is `false`. Omit for no label
-   * swap. */
+  /** Text to show on the submit-triggering control that was pressed (every one when the pressed
+   * control is unknown, e.g. `requestSubmit()` with no argument) right after the first real
+   * submission fires — a `<button>`'s `textContent`, an `<input type="submit">`'s `value` —
+   * restored automatically alongside a bfcache restore (or an early cleanup) exactly like
+   * `disableControls`' own restore. Independent of `disableControls`: applies even when that option
+   * is `false`. Omit for no label swap. */
   pendingLabel?: string
 }
 
@@ -42,7 +43,8 @@ const SUBMIT_CONTROL_SELECTOR = 'button:not([type="button"]):not([type="reset"])
  * Attaches double-submit prevention to one `<form>` — the primitive a `useEffect` (React/Preact,
  * see `@zanix/space/comet/react` and `@zanix/space/comet/preact`) calls into. On the form's first
  * real `submit`, disables its own submit-triggering controls (unless `disableControls` is
- * `false`) and lets the submission proceed; any FURTHER `submit` while still in flight is
+ * `false`) and lets the submission proceed. Controls change one tick after the event, once the
+ * browser has read the form data, so the pressed button's `name`/`value` is still submitted; any FURTHER `submit` while still in flight is
  * rejected outright (`event.preventDefault()`), never reaching the server a second time.
  *
  * **Resets on a real bfcache restore, not just on unmount**: a submission always ends in a real
@@ -69,6 +71,7 @@ export function attachSubmitGuard(options: SubmitGuardOptions): () => void {
   if (!(form instanceof HTMLFormElement)) return () => {}
 
   let submitting = false
+  let timer: ReturnType<typeof setTimeout> | undefined
   let disabled: Array<HTMLButtonElement | HTMLInputElement> = []
   // Only ever populated when `pendingLabel` is given — a control's original label, keyed by the
   // control itself, so it can be restored verbatim regardless of what the swap overwrote it with.
@@ -85,13 +88,10 @@ export function attachSubmitGuard(options: SubmitGuardOptions): () => void {
     else control.textContent = label
   }
 
-  const handleSubmit = (event: Event) => {
-    if (submitting) {
-      event.preventDefault()
-      return
-    }
-    submitting = true
-    if (!disableControls && !pendingLabel) return
+  // Runs one tick after `submit`: the browser reads the form data after the event is dispatched, so
+  // disabling a control or rewriting an `<input type="submit">`'s `value` inside the listener would
+  // drop the pressed button's `name`/`value` from the request.
+  const applyPendingState = (submitter: unknown) => {
     const controls = Array.from(
       form.querySelectorAll<HTMLButtonElement | HTMLInputElement>(SUBMIT_CONTROL_SELECTOR),
     ).filter((control) => !control.disabled)
@@ -100,8 +100,11 @@ export function attachSubmitGuard(options: SubmitGuardOptions): () => void {
       for (const control of disabled) control.disabled = true
     }
     if (pendingLabel) {
+      // Only the pressed control is relabeled; without a known submitter (`requestSubmit()` with
+      // no argument) every submit control is.
+      const labeled = controls.filter((control) => control === submitter)
       originalLabels = new Map()
-      for (const control of controls) {
+      for (const control of labeled.length ? labeled : controls) {
         originalLabels.set(
           control,
           control instanceof HTMLInputElement ? control.value : control.textContent ?? '',
@@ -109,6 +112,17 @@ export function attachSubmitGuard(options: SubmitGuardOptions): () => void {
         swapLabel(control, pendingLabel)
       }
     }
+  }
+
+  const handleSubmit = (event: Event) => {
+    if (submitting) {
+      event.preventDefault()
+      return
+    }
+    submitting = true
+    if (!disableControls && !pendingLabel) return
+    const submitter = (event as SubmitEvent).submitter
+    timer = setTimeout(() => applyPendingState(submitter), 0)
   }
 
   const handlePageShow = (event: Event) => {
@@ -128,6 +142,7 @@ export function attachSubmitGuard(options: SubmitGuardOptions): () => void {
   return () => {
     form.removeEventListener('submit', handleSubmit)
     globalThis.removeEventListener('pageshow', handlePageShow)
+    clearTimeout(timer)
     for (const control of disabled) control.disabled = false
     if (originalLabels) {
       for (const [control, label] of originalLabels) swapLabel(control, label)

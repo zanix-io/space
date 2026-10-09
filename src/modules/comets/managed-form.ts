@@ -28,10 +28,10 @@ import type { UnsavedChangesGuardOptions } from './unsaved-changes-guard.ts'
  * independent `addEventListener` call — native DOM listeners never overwrite each other, and one
  * calling `event.preventDefault()` (`SubmitGuard`, rejecting a second submission) doesn't stop the
  * others from also running. **This is true but incomplete** — it does not cover a listener with a
- * SYNCHRONOUS side effect that breaks another listener needing to re-trigger the submission LATER,
+ * IMMEDIATE side effect that breaks another listener needing to re-trigger the submission LATER,
  * after async work. Real, confirmed case: a Comet intercepting `submit` to run an async `fetch()`
  * before deciding whether to let the submission through, on the same form as `SubmitGuard` (which
- * disables every submit control synchronously, on that same first `submit`, before the fetch even
+ * disables every submit control right after that same first `submit`, before the fetch even
  * starts). By the time the fetch resolved and the Comet tried `form.requestSubmit()`, the only
  * submit control was already disabled — `requestSubmit()` needs a real, enabled submitter and
  * silently no-ops without one, so the submission never fired, with nothing thrown anywhere. See

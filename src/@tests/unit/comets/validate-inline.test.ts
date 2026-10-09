@@ -372,7 +372,7 @@ Deno.test('validateInline: no summary event when the submit goes through', () =>
   detach()
 })
 
-Deno.test('validateInline: a cancelled submit never reaches the submit guard, which stays usable', () => {
+Deno.test('validateInline: a cancelled submit never reaches the submit guard, which stays usable', async () => {
   const form = mount('v24', REQUIRED('a') + '<button id="go">Send</button>')
   const detachGuard = attachManagedForm({ formId: 'v24', validateInline: true, submitGuard: true })
   assertFalse(submit(form))
@@ -380,6 +380,7 @@ Deno.test('validateInline: a cancelled submit never reaches the submit guard, wh
   const input = form.querySelector('input') as HTMLInputElement
   input.value = 'ok'
   assert(submit(form), 'the corrected form is let through')
+  await new Promise<void>((resolve) => setTimeout(resolve, 0)) // the guard acts one tick after `submit`
   assert(
     ($(form, '#go') as unknown as HTMLButtonElement).disabled,
     'the guard acts on the real submit',

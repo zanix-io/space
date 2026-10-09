@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.18.7] - 2026-10-09
+
+### Fixed
+
+- **`attachSubmitGuard` no longer drops the pressed button's `name`/`value`.** With
+  `disableControls` on (the default), the guard disabled every submit control inside the `submit`
+  listener, and `pendingLabel` rewrote an `<input type="submit">`'s `value` there. The browser
+  builds the form data after the event is dispatched and leaves a disabled control out, so a form
+  with several submit buttons told apart by `name`/`value` (`<button name="next" value="edit">`)
+  reached the server as if no button had been pressed, or with `value="Saving…"`. The guard now
+  changes the controls one tick after `submit`, once the form data has been read; a second `submit`
+  is still refused from the first one.
+- **`attachSubmitIntercept` no longer drops the pressed button's `name`/`value` on `'proceed'`.** It
+  finishes with `form.submit()`, which has no submitter, so a form with several submit buttons told
+  apart by `name`/`value` reached the server as if no button had been pressed, and a button's
+  `formaction`/`formmethod`/`formenctype`/`formtarget` were ignored. The pressed control (taken from
+  the `submit` event) is now applied to the call: its `name`/`value` is sent and its `form*`
+  attributes override the form's own, for the duration of the call only. Without a known submitter
+  (`requestSubmit()` with no argument) the form is submitted as before.
+
+### Changed
+
+- **A form draft no longer saves an empty `required` field.** `attachFormDraftPersistence` saved
+  every field, empty strings included, so a visitor who cleared a required field (say the display
+  name a profile form came pre-filled with) and left found it blank on return: the restore overwrote
+  the value the server rendered. An exactly empty `required` field is now left out of the saved
+  draft, so the field comes back as the page renders it. The snapshot kept for `returnedFromFailure`
+  still holds the form as it was sent, empty required fields included.
+- **`pendingLabel` relabels only the pressed submit control.** Every submit control is still
+  disabled, but only the pressed one (`event.submitter`) shows the pending label. When the pressed
+  control is unknown (`requestSubmit()` with no argument), every submit control is relabeled as
+  before.
+
 ## [1.18.6] - 2026-10-07
 
 ### Fixed

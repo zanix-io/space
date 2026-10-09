@@ -9,14 +9,14 @@
  * this primitive existed): a Comet intercepted `submit` with its own raw `addEventListener`, ran an
  * async `fetch()` to decide whether a second step was needed, then re-triggered the real submission
  * once that fetch resolved. `SubmitGuard`/`ManagedForm({ submitGuard: true })`, also attached to the
- * SAME form, disables every submit-triggering control SYNCHRONOUSLY on the very first `submit`
+ * SAME form, disables every submit-triggering control one tick after the very first `submit`
  * event — before the Comet's own async work had even started. By the time the Comet's fetch
  * resolved and called `form.requestSubmit()`, the only submit control was already disabled;
  * `requestSubmit()` needs a real, enabled submitter (an explicit one, or the form's own first one
  * when none is passed) and silently no-ops without it — the submission never fired, nothing thrown
  * anywhere, the button stuck forever. `managed-form.ts`'s own module doc covers why "more than one
  * behavior on the same `submit` event is safe by construction" is true but incomplete — safe for
- * listeners that only ever REACT to one `submit` event, not for one with a synchronous side effect
+ * listeners that only ever REACT to one `submit` event, not for one with an immediate side effect
  * (disabling controls) that breaks another needing to re-trigger the submission later, after async
  * work finishes. `attachSubmitIntercept` below is the correct fix for that case, coordinating its
  * own double-submit protection with the async decision instead of racing it.
@@ -45,6 +45,51 @@ export type SubmitInterceptOptions = {
 const SUBMIT_CONTROL_SELECTOR = 'button:not([type="button"]):not([type="reset"]), ' +
   'input[type="submit"]'
 
+/** A submit control's own `form*` attributes and the `<form>` attribute each one overrides. */
+const SUBMITTER_OVERRIDES = [
+  ['formaction', 'action'],
+  ['formmethod', 'method'],
+  ['formenctype', 'enctype'],
+  ['formtarget', 'target'],
+] as const
+
+/**
+ * `form.submit()` with the pressed control's contribution: `form.submit()` has no submitter, so on
+ * its own it would send neither the control's `name`/`value` nor honor its `formaction`/
+ * `formmethod`/`formenctype`/`formtarget`. Both are applied for the duration of the call only —
+ * the navigation reads them synchronously inside `submit()`.
+ */
+function submitAs(form: HTMLFormElement, submitter: Element | null | undefined): void {
+  if (!submitter?.matches(SUBMIT_CONTROL_SELECTOR) || submitter.closest('form') !== form) {
+    form.submit()
+    return
+  }
+  const control = submitter as HTMLButtonElement | HTMLInputElement
+  const field = control.name ? form.ownerDocument.createElement('input') : undefined
+  if (field) {
+    field.type = 'hidden'
+    field.name = control.name
+    field.value = control.value
+    form.append(field)
+  }
+  const overridden: Array<[string, string | null]> = []
+  for (const [submitterAttr, formAttr] of SUBMITTER_OVERRIDES) {
+    const value = control.getAttribute(submitterAttr)
+    if (value === null) continue
+    overridden.push([formAttr, form.getAttribute(formAttr)])
+    form.setAttribute(formAttr, value)
+  }
+  try {
+    form.submit()
+  } finally {
+    field?.remove()
+    for (const [attr, previous] of overridden) {
+      if (previous === null) form.removeAttribute(attr)
+      else form.setAttribute(attr, previous)
+    }
+  }
+}
+
 /**
  * Attaches asynchronous submit interception to one `<form>` — the primitive a `useEffect`
  * (React/Preact, see `useSubmitIntercept` in `@zanix/space/comet/react` and
@@ -70,7 +115,11 @@ const SUBMIT_CONTROL_SELECTOR = 'button:not([type="button"]):not([type="reset"])
  *   the submitter), so it succeeds regardless of what any OTHER behavior attached to this same form
  *   already did to those controls — see this module's own doc for the real bug this fixes.
  *   `form.submit()` also never dispatches a second, cancelable `submit` event, so there is no
- *   re-entrancy into this same handler to guard against.
+ *   re-entrancy into this same handler to guard against. Because it has no submitter of its own,
+ *   the control that was pressed is applied to the call: its `name`/`value` is sent (as a temporary
+ *   hidden field) and its `formaction`/`formmethod`/`formenctype`/`formtarget` override the form's
+ *   own attributes, both for the duration of the call only. When the pressed control is unknown
+ *   (`requestSubmit()` with no argument), the form is submitted as is.
  *
  * **Compatible with `SubmitGuard`/`ManagedForm({ submitGuard: true })` on the SAME form, but usually
  * redundant with it.** Both attach their own, independent `submit` listener (see `managed-form.ts`'s
@@ -110,6 +159,7 @@ export function attachSubmitIntercept(options: SubmitInterceptOptions): () => vo
     event.preventDefault()
     if (pending) return
     pending = true
+    const submitter = (event as SubmitEvent).submitter
     disableSubmitControls()
 
     intercept(form)
@@ -117,7 +167,7 @@ export function attachSubmitIntercept(options: SubmitInterceptOptions): () => vo
       .then((outcome) => {
         pending = false
         restoreSubmitControls()
-        if (outcome === 'proceed') form.submit()
+        if (outcome === 'proceed') submitAs(form, submitter)
       })
   }
 

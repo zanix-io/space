@@ -25,7 +25,7 @@ import type { CssSource } from 'modules/render/css-sources.ts'
 import type { SpaceRobotsConfig } from 'modules/seo/robots.ts'
 import type { ThemeResolver } from 'modules/theme/theme-registry.ts'
 import type { StylesheetRef } from 'modules/render/css-manifest.ts'
-import type { PwaConfig } from './pwa.ts'
+import type { PwaConfig, SiteIconsConfig } from './pwa.ts'
 import type { ValidationConfig } from 'modules/validation/engine.ts'
 import type { AssetsOptimizeOptions } from 'modules/bundler/assets-plugin-types.ts'
 import type { MediaOptimizeOptions } from 'modules/bundler/media-plugin-types.ts'
@@ -549,6 +549,19 @@ export interface SpaceAppConfig {
    * route registered, at zero cost.** See `buildRobotsTxt`'s own doc (`modules/seo/robots.ts`).
    */
   robots?: SpaceRobotsConfig
+  /**
+   * The icons a browser requests at the site root without reading any `<link>`: `favicon` (a
+   * `.ico`) is served at `/favicon.ico` and `appleTouchIcon` (a 180×180 PNG) at
+   * `/apple-touch-icon.png`. Paths are relative to the project root and read on each request; an
+   * icon left unset, or a file that does not exist, answers `404`. **Omitted entirely by default —
+   * no route registered.**
+   *
+   * Independent of `pwa`: it registers nothing else (no web manifest, icon routes or service
+   * worker), which makes it the way to serve these two files from an app that is not a PWA.
+   * `pwa.favicon` / `pwa.appleTouchIcon` are the shortcut for an app that already has `pwa`; when
+   * both name the same icon, `siteIcons` wins and the route is registered once.
+   */
+  siteIcons?: SiteIconsConfig
   /**
    * Activates the Asset API (`POST /assets/audio|image|video`, `GET /assets/:id[/status|/download]`)
    * — registered as a real `ZanixController` (`createAssetsController`, `modules/assets-api/`), as

@@ -97,13 +97,27 @@ export interface PwaConfig {
    * Path to the site's `.ico` favicon, relative to the project root, served at `/favicon.ico` —
    * the URL a browser requests by convention when a response names no icon (a non-HTML response,
    * an error page without the app layout). Read on each request. Omit it and `/favicon.ico`
-   * answers `404`.
+   * answers `404`. The shortcut for an app that is already a PWA: `defineSpaceApp({ siteIcons })`
+   * serves the same route without a PWA, and wins over this field when both name a favicon.
    */
   favicon?: string
   /**
    * Path to the site's Apple touch icon (a PNG, 180×180), relative to the project root, served at
    * `/apple-touch-icon.png`, the URL iOS requests by convention. Read on each request. Omit it and
-   * `/apple-touch-icon.png` answers `404`.
+   * `/apple-touch-icon.png` answers `404`. Like `favicon`, `defineSpaceApp({ siteIcons })` serves
+   * it without a PWA and wins over this field.
    */
+  appleTouchIcon?: string
+}
+
+/**
+ * The site-root icons a browser requests by convention, served without a PWA. Paths are relative to
+ * the project root and read on each request; an icon left unset, or a file that does not exist,
+ * answers `404`.
+ */
+export type SiteIconsConfig = {
+  /** Path to the site's `.ico` favicon, served at `/favicon.ico` as `image/x-icon`. */
+  favicon?: string
+  /** Path to the site's Apple touch icon (a PNG, 180×180), served at `/apple-touch-icon.png`. */
   appleTouchIcon?: string
 }

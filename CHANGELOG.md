@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.19.1] - 2026-10-12
+
+### Added
+
+- **`defineSpaceApp({ siteIcons })`.** `siteIcons.favicon` (a `.ico`) and `siteIcons.appleTouchIcon`
+  (a 180×180 PNG) serve `/favicon.ico` and `/apple-touch-icon.png` without `pwa`, so an app that is
+  not a PWA gets neither a web manifest, icon routes nor a service worker. Paths, per-request reads
+  and the `404` for an unset option or a missing file are the same as for `pwa.favicon` and
+  `pwa.appleTouchIcon`, which keep working; when both name the same icon, `siteIcons` wins and the
+  route is registered once. `registerSiteIcons`, `resolveSiteIcons` and the `SiteIconsConfig` type
+  are exported.
+
 ## [1.19.0] - 2026-10-12
 
 ### Added

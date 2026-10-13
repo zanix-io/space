@@ -5,7 +5,7 @@
  *
  * @module
  */
-export { registerPwa } from './register-pwa.ts'
+export { registerPwa, registerSiteIcons, resolveSiteIcons } from './register-pwa.ts'
 export { buildWebManifest, iconRoute, MANIFEST_ROUTE, SW_ROUTE } from './web-manifest.ts'
 export {
   getPwaBuildOutput,

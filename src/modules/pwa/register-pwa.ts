@@ -2,7 +2,7 @@ import type { HandlerContext } from '@zanix/server'
 import { Get, SsrController, ZanixSsrController } from '@zanix/server'
 import { InternalError } from '@zanix/errors'
 import { resolve } from '@std/path'
-import type { PwaConfig } from 'typings/pwa.ts'
+import type { PwaConfig, SiteIconsConfig } from 'typings/pwa.ts'
 import { buildServiceWorkerSource } from '../bundler/service-worker-source.ts'
 import {
   APPLE_TOUCH_ICON_ROUTE,
@@ -162,6 +162,43 @@ function registerRuntimeIconRoutes(config: PwaConfig, sizes: number[]): void {
 }
 
 /**
+ * Registers the site-root icon routes: the `.ico` favicon at {@linkcode FAVICON_ROUTE} and the
+ * Apple touch icon at {@linkcode APPLE_TOUCH_ICON_ROUTE}, each only when `icons` names it, read
+ * from the project root on each request. Independent of the PWA routes: an app that is not a PWA
+ * calls it through `defineSpaceApp({ siteIcons })`.
+ *
+ * Call from `defineSpaceApp`'s own `setup`, same timing as `registerPwa`. Calling it twice for the
+ * same icon registers the route twice, so a caller that holds both a `siteIcons` and a `pwa`
+ * config merges them first with {@linkcode resolveSiteIcons}.
+ */
+export function registerSiteIcons(icons: SiteIconsConfig): void {
+  if (icons.favicon) {
+    registerFileRoute(FAVICON_ROUTE, resolve(Deno.cwd(), icons.favicon), 'image/x-icon')
+  }
+  if (icons.appleTouchIcon) {
+    registerFileRoute(
+      APPLE_TOUCH_ICON_ROUTE,
+      resolve(Deno.cwd(), icons.appleTouchIcon),
+      'image/png',
+    )
+  }
+}
+
+/**
+ * The icons to serve for an app's `siteIcons` and `pwa` options: each icon comes from `siteIcons`
+ * when it names one, else from the `pwa` shortcut, so a single route per icon is registered.
+ */
+export function resolveSiteIcons(
+  siteIcons: SiteIconsConfig | undefined,
+  pwa: PwaConfig | false | undefined,
+): SiteIconsConfig {
+  return {
+    favicon: siteIcons?.favicon || (pwa ? pwa.favicon : undefined),
+    appleTouchIcon: siteIcons?.appleTouchIcon || (pwa ? pwa.appleTouchIcon : undefined),
+  }
+}
+
+/**
  * Registers this app's PWA routes: {@linkcode MANIFEST_ROUTE} (the Web App Manifest, computed
  * once from `config` and served as-is on every request) always, and — only when
  * `getPwaBuildOutput()` (`pwa-registry.ts`) already has a build output directory registered —
@@ -169,8 +206,9 @@ function registerRuntimeIconRoutes(config: PwaConfig, sizes: number[]): void {
  * (`iconRoute`), reading the file `pwaPlugin` wrote under `<buildOutput>/icons/` or, with no build
  * output, resizing `config.icon`. The site's `.ico` favicon and Apple touch icon, when `config`
  * names them (`favicon`, `appleTouchIcon`), are served at {@linkcode FAVICON_ROUTE} and
- * {@linkcode APPLE_TOUCH_ICON_ROUTE}, with or without a build, read from the project root on each
- * request.
+ * {@linkcode APPLE_TOUCH_ICON_ROUTE} through {@linkcode registerSiteIcons}, with or without a
+ * build. `defineSpaceApp` registers those two itself (merged with its `siteIcons` option) and
+ * passes this function a config without them.
  *
  * Call from `defineSpaceApp`'s own `setup`, same timing as `loadRoutes()` — route registration
  * only works during app composition, never after it's finished. This reads
@@ -200,16 +238,7 @@ export function registerPwa(config: PwaConfig): void {
       }),
   )
 
-  if (config.favicon) {
-    registerFileRoute(FAVICON_ROUTE, resolve(Deno.cwd(), config.favicon), 'image/x-icon')
-  }
-  if (config.appleTouchIcon) {
-    registerFileRoute(
-      APPLE_TOUCH_ICON_ROUTE,
-      resolve(Deno.cwd(), config.appleTouchIcon),
-      'image/png',
-    )
-  }
+  registerSiteIcons(config)
 
   const sizes = config.iconSizes ?? DEFAULT_ICON_SIZES
   const buildOutput = getPwaBuildOutput()

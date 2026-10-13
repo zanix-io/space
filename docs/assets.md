@@ -241,8 +241,9 @@ deliberately not built here.
 **Case-sensitive, like a real filesystem**: `/assets/Logo.svg` and `/assets/logo.svg` resolve to
 different files if both genuinely exist on disk — the catch-all preserves the request's own casing.
 
-**Not this mechanism**: PWA icons/favicon — those stay under `pwaPlugin`/`registerPwa` (see the
-README's own [PWA](../README.md#pwa) section), a separate, already-working pipeline for site
+**Not this mechanism**: PWA icons stay under `pwaPlugin`/`registerPwa` (see the README's own
+[PWA](../README.md#pwa) section) and the root favicon under `defineSpaceApp({ siteIcons })` (see
+[`pwa.md`](./pwa.md#favicon-and-apple-touch-icon)), a separate, already-working pipeline for site
 identity, not general component-referenced content. Module-aliasing for the `import`-based case
 above is deliberately deferred — separate, future work if a real need appears, never assumed to
 already work. Hashing/manifest for production caching is no longer deferred — see

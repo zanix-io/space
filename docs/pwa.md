@@ -73,9 +73,22 @@ unreliable disk cache.
 ### Favicon and Apple touch icon
 
 Browsers request `/favicon.ico` and iOS requests `/apple-touch-icon.png` at the site root without
-reading any `<link>`. `pwa.favicon` (a `.ico`) and `pwa.appleTouchIcon` (a 180×180 PNG) are paths
-relative to the project root; `registerPwa` serves each at its fixed URL with or without a build
-output, reading the file on each request.
+reading any `<link>`. `defineSpaceApp({ siteIcons })` serves them with or without `pwa`:
+`siteIcons.favicon` (a `.ico`) and `siteIcons.appleTouchIcon` (a 180×180 PNG) are paths relative to
+the project root, read on each request. It registers nothing else, so an app that is not a PWA gets
+no web manifest, icon routes or service worker.
+
+```ts
+defineSpaceApp({
+  name: 'portal',
+  siteIcons: {
+    favicon: './public/favicon.ico',
+    appleTouchIcon: './public/apple-touch-icon.png',
+  },
+})
+```
+
+An app that already has `pwa` can name the same two files there instead, as a shortcut:
 
 ```ts
 pwa: {
@@ -86,8 +99,9 @@ pwa: {
 }
 ```
 
-An option left unset, or a file that does not exist, answers `404`. `langPreHandler` never redirects
-either URL to a language prefix.
+When `siteIcons` and `pwa` both name the same icon, `siteIcons` wins and the route is registered
+once. An option left unset, or a file that does not exist, answers `404`. `langPreHandler` never
+redirects either URL to a language prefix.
 
 ### Web Push and a worker script of your own
 

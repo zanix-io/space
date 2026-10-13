@@ -9,7 +9,13 @@ import {
   setInitialStatePolicy,
 } from 'modules/render/serialization-registry.ts'
 import { parseStateOption } from 'modules/render/initial-state-policy.ts'
-import { loadPwaBuildOutput, registerPwa, setPwaConfig } from 'modules/pwa/mod.ts'
+import {
+  loadPwaBuildOutput,
+  registerPwa,
+  registerSiteIcons,
+  resolveSiteIcons,
+  setPwaConfig,
+} from 'modules/pwa/mod.ts'
 import { addGlobalCssPaths, getCssManifest, loadCssManifest } from 'modules/render/css-manifest.ts'
 import {
   loadModulePreloadManifest,
@@ -170,6 +176,7 @@ export function defineSpaceApp(config: SpaceAppConfig): ZanixAppDefinition {
     headers,
     theme,
     pwa,
+    siteIcons,
     sitemap,
     robots,
     renderer,
@@ -359,7 +366,10 @@ export function defineSpaceApp(config: SpaceAppConfig): ZanixAppDefinition {
       // Route registration (like `loadRoutes()` above) only works inside this composition scope —
       // never called eagerly from `defineSpaceApp` itself, same reasoning `registerPwa`'s own doc
       // gives for why it must run here, not from the app's `main.ts` directly.
-      if (pwa) registerPwa(pwa)
+      // The site icons are registered here, once, from `siteIcons` merged with the `pwa` shortcut;
+      // `registerPwa` gets `pwa` without them so no route is registered twice.
+      registerSiteIcons(resolveSiteIcons(siteIcons, pwa))
+      if (pwa) registerPwa({ ...pwa, favicon: undefined, appleTouchIcon: undefined })
       // Omitted entirely (the default) is a genuine no-op — no directory scanned, no route
       // registered, no state touched, at zero cost (see `SpaceAppConfig.assetsDir`'s own doc for
       // why this differs from `routesDir`'s own always-scanned default).

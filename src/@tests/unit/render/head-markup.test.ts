@@ -308,3 +308,31 @@ Deno.test(
     assert(markup.indexOf('<title>') < markup.indexOf('name="b"'), markup)
   },
 )
+
+Deno.test(
+  'serializeHeadMarkup: quotes, apostrophes and ampersands in the title, description and og ' +
+    'tags are entity-escaped, in text content and in attribute values alike',
+  () => {
+    const markup = serializeHeadMarkup(
+      model({
+        head: {
+          title: `O'Neil & "Sons" <b>`,
+          meta: [
+            { name: 'description', content: `It's "big" & <new>` },
+            { property: 'og:title', content: `O'Neil & Sons` },
+          ],
+          link: [],
+        },
+      }),
+    )
+    assertStringIncludes(
+      markup,
+      '<title>O&#x27;Neil &amp; &quot;Sons&quot; &lt;b&gt;</title>',
+    )
+    assertStringIncludes(
+      markup,
+      '<meta name="description" content="It&#x27;s &quot;big&quot; &amp; &lt;new&gt;">',
+    )
+    assertStringIncludes(markup, '<meta property="og:title" content="O&#x27;Neil &amp; Sons">')
+  },
+)

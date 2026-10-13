@@ -265,9 +265,10 @@ path segment is already one of `availableLangs` falls through unchanged; otherwi
 language — a persisted `X-Znx-Lang` cookie, then `Accept-Language`, then `defaultLang` — and
 301-redirects to that same path with it prepended (`/products` → `/en/products`, `/` → `/en`),
 setting the cookie on that same response. Never redirects a framework-internal route (`/health`,
-`/ready`, `/assets/`, `/icons/`, `/manifest.webmanifest`, `/sw.js`, `/sitemap.xml`, `/robots.txt`) —
-a crawler-facing route needs one canonical, unprefixed URL, never a per-language duplicate —
-`ignorePrefixes` extends that list for an app's own non-i18n routes, never replaces it.
+`/ready`, `/assets/`, `/icons/`, `/manifest.webmanifest`, `/sw.js`, `/favicon.ico`,
+`/apple-touch-icon.png`, `/sitemap.xml`, `/robots.txt`) — a crawler-facing route needs one
+canonical, unprefixed URL, never a per-language duplicate — `ignorePrefixes` extends that list for
+an app's own non-i18n routes, never replaces it.
 
 The `PreHandler` alone only ever updates the cookie on an actual redirect — it can only return a
 full `Response` or `null`, so an already-correctly-prefixed request (the common case: someone

@@ -1,6 +1,6 @@
 {
   "name": "@zanix/space",
-  "version": "1.18.7",
+  "version": "1.19.0",
   "zanix": {
     "project": "library"
   },
@@ -94,7 +94,7 @@
     // `modules/client/client-logger.ts`'s own doc for why client-bundled code imports THIS alias
     // instead of `@zanix/logger` above, which pulls in `WorkerManager`/`Deno.readTextFile`.
     "@zanix/logger/client": "jsr:@zanix/utils@^4.1.0/logger/client",
-    "@zanix/helpers": "jsr:@zanix/utils@^4.1.0/helpers",
+    "@zanix/helpers": "jsr:@zanix/utils@^4.11.0/helpers",
     "@zanix/workers": "jsr:@zanix/utils@^4.1.0/workers",
     "@zanix/validator": "jsr:@zanix/utils@^4.1.0/validator",
     "@zanix/types": "jsr:@zanix/utils@^4.1.0/types",

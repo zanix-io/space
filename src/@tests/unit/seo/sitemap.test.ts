@@ -137,3 +137,9 @@ Deno.test('getSitemapDeclaration: a literal array round-trips exactly, same refe
     setSitemapDeclaration(undefined)
   }
 })
+
+Deno.test('buildSitemapXml: an apostrophe and an ampersand in a loc become numeric/named entities', () => {
+  const xml = buildSitemapXml([{ loc: `/o'neil&sons` }], 'https://example.com')
+
+  assert(xml.includes('<loc>https://example.com/o&#x27;neil&amp;sons</loc>'), xml)
+})

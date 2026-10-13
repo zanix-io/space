@@ -19,27 +19,11 @@
  *
  * @module
  */
+import { escapeHtml } from '@zanix/helpers'
 import type { DocumentModel } from './document-model.ts'
 import type { HeadLinkTag, HeadMetaTag } from '../router/head-descriptor.ts'
 import type { StylesheetRef } from './css-manifest.ts'
 import { BUILTIN_CSS } from './builtin-css.ts'
-
-/** Escapes a value for use inside a double-quoted HTML attribute. */
-function escapeAttribute(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-}
-
-/** Escapes a value for use as HTML text content. */
-function escapeText(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-}
 
 /**
  * Whether an attribute name is safe to emit verbatim. `HeadLinkTag` accepts arbitrary extra
@@ -54,7 +38,7 @@ function isSafeAttributeName(name: string): boolean {
 function renderAttributes(attributes: Record<string, string | undefined>): string {
   return Object.entries(attributes)
     .filter(([name, value]) => value !== undefined && isSafeAttributeName(name))
-    .map(([name, value]) => ` ${name}="${escapeAttribute(value as string)}"`)
+    .map(([name, value]) => ` ${name}="${escapeHtml(value as string)}"`)
     .join('')
 }
 
@@ -94,7 +78,7 @@ export function serializeHeadMarkup(model: DocumentModel): string {
   const { head, cssHrefs, themeStyle, pwa, nonce } = model
   const parts: string[] = []
 
-  if (head.title !== undefined) parts.push(`<title>${escapeText(head.title)}</title>`)
+  if (head.title !== undefined) parts.push(`<title>${escapeHtml(head.title)}</title>`)
   for (const tag of head.meta) parts.push(renderMetaTag(tag))
   for (const tag of head.link) parts.push(renderLinkTag(tag))
   // Unconditional, always first — see `builtin-css.ts`'s own doc for why this must be a real

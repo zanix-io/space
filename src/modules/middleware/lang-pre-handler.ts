@@ -1,5 +1,5 @@
 import type { PreHandler } from '@zanix/server'
-import { assertZnxCookieName, PUBLIC_COOKIE_ATTRIBUTES } from '@zanix/helpers'
+import { assertZnxCookieName, parseAcceptLanguage, PUBLIC_COOKIE_ATTRIBUTES } from '@zanix/helpers'
 import { getLangRegistration, type LangRegistration, setLangRegistration } from './lang-registry.ts'
 
 /** Path prefixes `langPreHandler` never redirects, regardless of `ignorePrefixes` — every
@@ -12,6 +12,8 @@ const FRAMEWORK_PREFIXES: readonly string[] = [
   '/icons/',
   '/manifest.webmanifest',
   '/sw.js',
+  '/favicon.ico',
+  '/apple-touch-icon.png',
   '/sitemap.xml',
   '/robots.txt',
 ]
@@ -45,22 +47,14 @@ export type LangPreHandlerOptions = {
   cookieName?: string
 }
 
+/** First `Accept-Language` tag, in preference order, that names one of `availableLangs` — the tag
+ * itself, else its lowercase base subtag. Tags `parseAcceptLanguage` drops (malformed, `*`,
+ * `q=0`) never match. */
 function resolveAcceptLanguage(
   header: string | null,
   availableLangs: string[],
 ): string | undefined {
-  if (!header) return undefined
-
-  const candidates = header
-    .split(',')
-    .map((part) => {
-      const [tag, qPart] = part.trim().split(';q=')
-      const quality = qPart ? parseFloat(qPart) : 1
-      return { tag: tag.trim(), quality: Number.isFinite(quality) ? quality : 1 }
-    })
-    .sort((a, b) => b.quality - a.quality)
-
-  for (const { tag } of candidates) {
+  for (const tag of parseAcceptLanguage(header)) {
     if (availableLangs.includes(tag)) return tag
     const base = tag.split('-')[0].toLowerCase()
     if (availableLangs.includes(base)) return base
@@ -142,7 +136,8 @@ function resolveLang(
  * reverting on the next un-prefixed URL — applies to language exactly as much.
  *
  * Never redirects a framework-internal route (`/health`, `/ready`, `/assets/`, `/icons/`,
- * `/manifest.webmanifest`, `/sw.js`, `/sitemap.xml`, `/robots.txt`) — a crawler-facing route needs
+ * `/manifest.webmanifest`, `/sw.js`, `/favicon.ico`, `/apple-touch-icon.png`, `/sitemap.xml`,
+ * `/robots.txt`) — a crawler-facing route needs
  * one canonical, unprefixed URL, never a per-language duplicate — `ignorePrefixes` extends that
  * list, never replaces it.
  */

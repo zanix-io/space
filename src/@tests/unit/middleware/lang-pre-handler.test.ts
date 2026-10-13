@@ -106,6 +106,8 @@ Deno.test(
       '/icons/icon-192.png',
       '/sw.js',
       '/manifest.webmanifest',
+      '/favicon.ico',
+      '/apple-touch-icon.png',
       '/sitemap.xml',
       '/robots.txt',
     ]
@@ -343,4 +345,48 @@ Deno.test('resolveRequestLang: an invalid prefix falls through to cookie, Accept
   } finally {
     setLangRegistration(undefined)
   }
+})
+
+async function redirectFor(acceptLanguage: string): Promise<string | null> {
+  const handler = langPreHandler({ availableLangs: ['en', 'es'], defaultLang: 'en' })
+  const result = await handler(
+    new Request('http://localhost/products', { headers: { 'accept-language': acceptLanguage } }),
+    info,
+  )
+  assert(result instanceof Response)
+  return result.headers.get('Location')
+}
+
+Deno.test('langPreHandler: Accept-Language orders by q, not by written position', async () => {
+  assertEquals(await redirectFor('en;q=0.5,es;q=0.9'), 'http://localhost/es/products')
+})
+
+Deno.test('langPreHandler: equal q keeps written order', async () => {
+  assertEquals(await redirectFor('es,en'), 'http://localhost/es/products')
+  assertEquals(await redirectFor('en,es'), 'http://localhost/en/products')
+})
+
+Deno.test('langPreHandler: an uppercase region tag falls back to its lowercase base', async () => {
+  assertEquals(await redirectFor('ES-mx'), 'http://localhost/es/products')
+})
+
+Deno.test('langPreHandler: an Accept-Language q=0 entry is skipped (not acceptable)', async () => {
+  assertEquals(await redirectFor('es;q=0,en;q=0.5'), 'http://localhost/en/products')
+  assertEquals(await redirectFor('es;q=0'), 'http://localhost/en/products')
+})
+
+Deno.test('langPreHandler: a malformed or wildcard Accept-Language falls back to defaultLang', async () => {
+  assertEquals(await redirectFor('*'), 'http://localhost/en/products')
+  assertEquals(await redirectFor(';;;,,,'), 'http://localhost/en/products')
+  assertEquals(await redirectFor('not a tag!!'), 'http://localhost/en/products')
+})
+
+Deno.test('langPreHandler: a malformed entry does not hide a valid later one', async () => {
+  const handler = langPreHandler({ availableLangs: ['es', 'en'], defaultLang: 'en' })
+  const result = await handler(
+    new Request('http://localhost/x', { headers: { 'accept-language': '@@@,es' } }),
+    info,
+  )
+  assert(result instanceof Response)
+  assertEquals(result.headers.get('Location'), 'http://localhost/es/x')
 })

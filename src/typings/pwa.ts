@@ -93,4 +93,17 @@ export interface PwaConfig {
    * @default [192, 512]
    */
   iconSizes?: number[]
+  /**
+   * Path to the site's `.ico` favicon, relative to the project root, served at `/favicon.ico` —
+   * the URL a browser requests by convention when a response names no icon (a non-HTML response,
+   * an error page without the app layout). Read on each request. Omit it and `/favicon.ico`
+   * answers `404`.
+   */
+  favicon?: string
+  /**
+   * Path to the site's Apple touch icon (a PNG, 180×180), relative to the project root, served at
+   * `/apple-touch-icon.png`, the URL iOS requests by convention. Read on each request. Omit it and
+   * `/apple-touch-icon.png` answers `404`.
+   */
+  appleTouchIcon?: string
 }

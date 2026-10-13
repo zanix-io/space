@@ -4,7 +4,13 @@ import { getTemporaryFolder } from '@zanix/helpers'
 import logger from '@zanix/logger'
 import { registerPwa } from 'modules/pwa/register-pwa.ts'
 import { setPwaBuildOutput } from 'modules/pwa/pwa-registry.ts'
-import { iconRoute, MANIFEST_ROUTE, SW_ROUTE } from 'modules/pwa/web-manifest.ts'
+import {
+  APPLE_TOUCH_ICON_ROUTE,
+  FAVICON_ROUTE,
+  iconRoute,
+  MANIFEST_ROUTE,
+  SW_ROUTE,
+} from 'modules/pwa/web-manifest.ts'
 
 const TMP_ROOT = getTemporaryFolder(import.meta.url)
 
@@ -404,3 +410,78 @@ Deno.test(
     }
   },
 )
+
+/** Serves `favicon.ico` and `apple-touch-icon.png` through a real server and returns both
+ * responses, plus the status of a request for each when the files are absent. */
+async function fetchSiteIcons(
+  port: number,
+  config: { favicon?: string; appleTouchIcon?: string },
+): Promise<{ favicon: Response; apple: Response }> {
+  registerPwa({ name: 'Storefront', icon: './icon-source.png', iconSizes: [192], ...config })
+  const servers = await bootstrapServers({ ssr: { port } })
+  try {
+    return {
+      favicon: await fetch(`http://localhost:${port}${FAVICON_ROUTE}`),
+      apple: await fetch(`http://localhost:${port}${APPLE_TOUCH_ICON_ROUTE}`),
+    }
+  } finally {
+    await webServerManager.stop(servers)
+  }
+}
+
+for (const withBuild of [true, false]) {
+  Deno.test(
+    `registerPwa: serves the configured favicon and apple touch icon ${
+      withBuild ? 'with' : 'without'
+    } a build output`,
+    async () => {
+      const root = await Deno.makeTempDir({ dir: TMP_ROOT })
+      try {
+        const ico = new Uint8Array([0, 0, 1, 0, 9])
+        const png = new Uint8Array([137, 80, 78, 71, 7])
+        await Deno.writeFile(`${root}/favicon.ico`, ico)
+        await Deno.writeFile(`${root}/apple-touch-icon.png`, png)
+        if (withBuild) setPwaBuildOutput(root)
+
+        const { favicon, apple } = await fetchSiteIcons(withBuild ? 20990 : 20991, {
+          favicon: `${root}/favicon.ico`,
+          appleTouchIcon: `${root}/apple-touch-icon.png`,
+        })
+
+        assertEquals(favicon.status, 200)
+        assertEquals(favicon.headers.get('content-type'), 'image/x-icon')
+        assertEquals(new Uint8Array(await favicon.arrayBuffer()), ico)
+        assertEquals(apple.status, 200)
+        assertEquals(apple.headers.get('content-type'), 'image/png')
+        assertEquals(new Uint8Array(await apple.arrayBuffer()), png)
+      } finally {
+        setPwaBuildOutput(undefined)
+        await Deno.remove(root, { recursive: true })
+      }
+    },
+  )
+}
+
+Deno.test('registerPwa: favicon and apple touch icon answer 404 when not configured', async () => {
+  const { favicon, apple } = await fetchSiteIcons(20992, {})
+  assertEquals(favicon.status, 404)
+  assertEquals(apple.status, 404)
+  await favicon.body?.cancel()
+  await apple.body?.cancel()
+})
+
+Deno.test('registerPwa: a configured favicon whose file is missing answers 404', async () => {
+  const root = await Deno.makeTempDir({ dir: TMP_ROOT })
+  try {
+    const { favicon, apple } = await fetchSiteIcons(20993, {
+      favicon: `${root}/missing.ico`,
+      appleTouchIcon: `${root}/missing.png`,
+    })
+    assertEquals(favicon.status, 404)
+    assertEquals(apple.status, 404)
+    await favicon.body?.cancel()
+    await apple.body?.cancel()
+  } finally {
+    await Deno.remove(root, { recursive: true })
+  }
+})

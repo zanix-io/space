@@ -4,7 +4,14 @@ import { InternalError } from '@zanix/errors'
 import { resolve } from '@std/path'
 import type { PwaConfig } from 'typings/pwa.ts'
 import { buildServiceWorkerSource } from '../bundler/service-worker-source.ts'
-import { buildWebManifest, iconRoute, MANIFEST_ROUTE, SW_ROUTE } from './web-manifest.ts'
+import {
+  APPLE_TOUCH_ICON_ROUTE,
+  buildWebManifest,
+  FAVICON_ROUTE,
+  iconRoute,
+  MANIFEST_ROUTE,
+  SW_ROUTE,
+} from './web-manifest.ts'
 import { DEFAULT_ICON_SIZES, iconFileName, SW_FILE_NAME } from './icon-naming.ts'
 import { requestsServiceWorkerLogic, resolvePwaPush } from './push-config.ts'
 import { getPwaBuildOutput } from './pwa-registry.ts'
@@ -160,7 +167,10 @@ function registerRuntimeIconRoutes(config: PwaConfig, sizes: number[]): void {
  * `getPwaBuildOutput()` (`pwa-registry.ts`) already has a build output directory registered —
  * {@linkcode SW_ROUTE} (reading `<buildOutput>/sw.js`) — and one route per configured icon size
  * (`iconRoute`), reading the file `pwaPlugin` wrote under `<buildOutput>/icons/` or, with no build
- * output, resizing `config.icon`.
+ * output, resizing `config.icon`. The site's `.ico` favicon and Apple touch icon, when `config`
+ * names them (`favicon`, `appleTouchIcon`), are served at {@linkcode FAVICON_ROUTE} and
+ * {@linkcode APPLE_TOUCH_ICON_ROUTE}, with or without a build, read from the project root on each
+ * request.
  *
  * Call from `defineSpaceApp`'s own `setup`, same timing as `loadRoutes()` — route registration
  * only works during app composition, never after it's finished. This reads
@@ -189,6 +199,17 @@ export function registerPwa(config: PwaConfig): void {
         headers: { 'content-type': 'application/manifest+json' },
       }),
   )
+
+  if (config.favicon) {
+    registerFileRoute(FAVICON_ROUTE, resolve(Deno.cwd(), config.favicon), 'image/x-icon')
+  }
+  if (config.appleTouchIcon) {
+    registerFileRoute(
+      APPLE_TOUCH_ICON_ROUTE,
+      resolve(Deno.cwd(), config.appleTouchIcon),
+      'image/png',
+    )
+  }
 
   const sizes = config.iconSizes ?? DEFAULT_ICON_SIZES
   const buildOutput = getPwaBuildOutput()

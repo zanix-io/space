@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.19.0] - 2026-10-12
+
+### Added
+
+- **`pwa.favicon` and `pwa.appleTouchIcon`.** `registerPwa` serves the configured `.ico` at
+  `/favicon.ico` and the configured 180×180 PNG at `/apple-touch-icon.png`, with or without a build
+  output. An option left unset, or a file that does not exist, answers `404`.
+
+### Fixed
+
+- **`/favicon.ico` and `/apple-touch-icon.png` are no longer redirected by `langPreHandler`.** Both
+  are framework-internal routes now, so a browser's root-level request no longer ends at
+  `/{lang}/favicon.ico` with a `404`.
+
+### Changed
+
+- **`langPreHandler` / `resolveRequestLang` parse `Accept-Language` with `parseAcceptLanguage`.**
+  The hand-written parser is replaced by `parseAcceptLanguage` from `@zanix/utils/helpers` (the
+  `@zanix/helpers` floor is now `^4.10.0`). The matching rule is unchanged: for each tag in
+  preference order, the tag itself if it is an available language, else its lowercase base subtag;
+  the first hit wins. One observable difference: an entry with `q=0` ("not acceptable"), `*`, or a
+  malformed tag is now left out instead of being matched, so `es;q=0, en` resolves to `en` rather
+  than `es`.
+- **HTML and XML escaping comes from `escapeHtml` in `@zanix/utils/helpers`.** The private escapers
+  of the head serializer (`<title>`, `<meta>`, `<link>` values) and of the sitemap builder are
+  replaced by the shared helper (the `@zanix/helpers` floor is now `^4.11.0`). The output is
+  semantically equivalent but differs in bytes: `'` is now written `&#x27;` (the sitemap used
+  `&apos;`), and `"` is also escaped in `<title>` text. `extractDocumentSemantics` decodes `&#x27;`
+  as well as `&#39;`.
+
 ## [1.18.7] - 2026-10-09
 
 ### Fixed

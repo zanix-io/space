@@ -1,3 +1,4 @@
+import { escapeHtml } from '@zanix/helpers'
 import type { HandlerContext } from '@zanix/server'
 import { Get, SsrController, ZanixSsrController } from '@zanix/server'
 import { isDevClientEnabled } from 'modules/dev/dev-client-registry.ts'
@@ -121,15 +122,6 @@ function resolveEntries(source: SitemapSource): SitemapEntry[] | Promise<Sitemap
   return promise
 }
 
-function escapeXml(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&apos;')
-}
-
 function resolveUrl(value: string, origin: string): string {
   return new URL(value, origin).href
 }
@@ -152,14 +144,14 @@ function resolveUrl(value: string, origin: string): string {
 export function buildSitemapXml(entries: SitemapEntry[], origin: string): string {
   const urls = entries.map((entry) => {
     const loc = resolveUrl(entry.loc, origin)
-    const parts = [`    <loc>${escapeXml(loc)}</loc>`]
-    if (entry.lastmod) parts.push(`    <lastmod>${escapeXml(entry.lastmod)}</lastmod>`)
+    const parts = [`    <loc>${escapeHtml(loc)}</loc>`]
+    if (entry.lastmod) parts.push(`    <lastmod>${escapeHtml(entry.lastmod)}</lastmod>`)
     if (entry.changefreq) parts.push(`    <changefreq>${entry.changefreq}</changefreq>`)
     if (entry.priority !== undefined) parts.push(`    <priority>${entry.priority}</priority>`)
     for (const alt of entry.alternates ?? []) {
-      const href = escapeXml(resolveUrl(alt.href, origin))
+      const href = escapeHtml(resolveUrl(alt.href, origin))
       parts.push(
-        `    <xhtml:link rel="alternate" hreflang="${escapeXml(alt.lang)}" href="${href}"/>`,
+        `    <xhtml:link rel="alternate" hreflang="${escapeHtml(alt.lang)}" href="${href}"/>`,
       )
     }
     return `  <url>\n${parts.join('\n')}\n  </url>`

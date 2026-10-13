@@ -180,3 +180,10 @@ Deno.test('extractDocumentSemantics: titles, links and h1Count on a realistic do
   assertEquals(semantics.h1Count, 1)
   assertEquals(semantics.hasTextContent, true)
 })
+
+Deno.test('extractDocumentSemantics: decodes both `&#39;` and `&#x27;` apostrophes', () => {
+  const semantics = extractDocumentSemantics(
+    doc('<meta name="description" content="It&#x27;s O&#39;Neil &amp; &quot;Sons&quot;">'),
+  )
+  assertEquals(semantics.meta['name:description'], `It's O'Neil & "Sons"`)
+})

@@ -70,6 +70,25 @@ into the same cache the first time it's actually fetched, so this app's own hydr
 survives a later fully offline visit instead of only ever living in the browser's separate,
 unreliable disk cache.
 
+### Favicon and Apple touch icon
+
+Browsers request `/favicon.ico` and iOS requests `/apple-touch-icon.png` at the site root without
+reading any `<link>`. `pwa.favicon` (a `.ico`) and `pwa.appleTouchIcon` (a 180×180 PNG) are paths
+relative to the project root; `registerPwa` serves each at its fixed URL with or without a build
+output, reading the file on each request.
+
+```ts
+pwa: {
+  name: 'Storefront',
+  icon: './public/icon-source.png',
+  favicon: './public/favicon.ico',
+  appleTouchIcon: './public/apple-touch-icon.png',
+}
+```
+
+An option left unset, or a file that does not exist, answers `404`. `langPreHandler` never redirects
+either URL to a language prefix.
+
 ### Web Push and a worker script of your own
 
 `pwa.push` adds `push` and `notificationclick` handlers to the generated worker. The worker only

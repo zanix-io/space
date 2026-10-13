@@ -12,6 +12,12 @@ export function iconRoute(size: number): string {
  * (never configurable), the standard convention for maximum service-worker scope. */
 export const SW_ROUTE = '/sw.js'
 
+/** The URL a browser requests by convention for the site's `.ico` favicon. */
+export const FAVICON_ROUTE = '/favicon.ico'
+
+/** The URL iOS requests by convention for the site's Apple touch icon. */
+export const APPLE_TOUCH_ICON_ROUTE = '/apple-touch-icon.png'
+
 /**
  * Builds the Web App Manifest JSON body from `config` — a pure function, no I/O. Icon entries
  * reference {@linkcode iconRoute}'s own paths, matching exactly what `registerPwa` serves at

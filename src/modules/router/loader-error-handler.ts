@@ -13,7 +13,7 @@ import logger from '@zanix/logger'
 import { httpErrorResponse } from '@zanix/server'
 import type { ClassConstructor } from '@zanix/server'
 import type { PageContext } from 'typings/page.ts'
-import { resolveRequestLang } from 'modules/middleware/lang-pre-handler.ts'
+import { hasUnavailableLang, resolveRequestLang } from 'modules/middleware/lang-pre-handler.ts'
 import { findNearestErrorBoundary, getPageTree } from './page-tree-registry.ts'
 import { getRootLayout } from './app-shell-registry.ts'
 import { getActiveRenderer } from './active-renderer.ts'
@@ -216,7 +216,10 @@ async function renderThrownPageError(
   // doc for the full contract.
   const messages = getMessagesDir() !== undefined
     ? await loadMessages({
-      lang: params.lang ?? DEFAULT_IMPLICIT_LANG,
+      // A `:lang` that is no registered language never names a catalog; resolving it as the
+      // request's language keeps the error page itself from failing on a bad tag.
+      lang: (hasUnavailableLang(params) ? resolveRequestLang(pageCtx.request) : params.lang) ??
+        DEFAULT_IMPLICIT_LANG,
       population: pageCtx.population,
     })
     : undefined

@@ -1,5 +1,6 @@
 import type { GuardContext, MiddlewareGuard } from '@zanix/server'
 import { assertZnxCookieName, PUBLIC_COOKIE_ATTRIBUTES } from '@zanix/helpers'
+import { getLangRegistration } from './lang-registry.ts'
 
 /** Options for {@linkcode langGuard}. */
 export type LangGuardOptions = {
@@ -50,6 +51,10 @@ export function langGuard(options: LangGuardOptions = {}): MiddlewareGuard {
     const params = ctx.payload.params as Record<string, string> | undefined
     const current = params?.[paramName]
     if (!current || ctx.cookies[cookieName] === current) return {}
+    // A segment that is not a registered language (an unregistered `/robots.txt` reaching
+    // `routes/[lang]/...`) is answered with the not-found page by the page; it must not persist.
+    const registration = getLangRegistration()
+    if (registration && !registration.availableLangs.includes(current)) return {}
 
     return {
       headers: {

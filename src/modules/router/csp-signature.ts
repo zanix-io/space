@@ -55,12 +55,25 @@ export const CSP_SIGNATURE_NONE = '∅'
  * page as "a different policy," permanently defeating Orbit's own fast path for the overwhelming
  * common case (no real CSP difference at all).
  *
+ * The result is also canonical in the order of directives and of the sources inside each one: a
+ * policy is a set of directives, each a set of sources, so two headers that differ only in that
+ * order (two `img-src` origins listed in opposite order by two pages) enforce the same policy and
+ * must not force a real navigation. Directive names are lowercased, repeated sources collapse, and
+ * only the first occurrence of a directive counts, as in a browser.
+ *
  * `null` (no header) normalizes to {@linkcode CSP_SIGNATURE_NONE} — see that constant's own doc for
  * why it, not `''`, is what a missing header maps to.
  */
 export function normalizeCspSignature(header: string | null): string {
   if (header === null) return CSP_SIGNATURE_NONE
-  return header.replace(/'nonce-[^']*'/g, "'nonce-*'")
+  const directives = new Map<string, string>()
+  for (const part of header.replace(/'nonce-[^']*'/g, "'nonce-*'").split(';')) {
+    const [name, ...sources] = part.trim().split(/\s+/).filter(Boolean)
+    if (name === undefined || directives.has(name.toLowerCase())) continue
+    directives.set(name.toLowerCase(), [...new Set(sources)].sort().join(' '))
+  }
+  return [...directives].map(([name, sources]) => (sources ? `${name} ${sources}` : name)).sort()
+    .join('; ')
 }
 
 /**

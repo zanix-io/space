@@ -18,12 +18,14 @@ import type { SecurityHeadersOptions } from '../middleware/security-headers-guar
 import { CSRF_TOKEN_LOCALS_KEY } from '../middleware/csrf-guard.ts'
 import { POPULATION_LOCALS_KEY } from '../middleware/population-guard.ts'
 import { getThemeResolver } from '../theme/theme-registry.ts'
+import { hasUnavailableLang, resolveRequestLang } from '../middleware/lang-pre-handler.ts'
 import { createDedupeCache } from './request-dedupe.ts'
 import {
   renderActionErrorPage,
   renderLoaderErrorPage,
   renderMethodNotAllowedPage,
 } from './loader-error-handler.ts'
+import { renderNotFoundResponse } from './not-found-handler.ts'
 
 /** `Page()`'s combined header options — `SecurityHeadersOptions`'s own flat fields (`frameOptions`,
  * `referrerPolicy`, ...) plus `csp`, all under one `headers` option. `csp` is kept as its own field
@@ -401,6 +403,14 @@ export abstract class SpacePageController<
     const Ctor = this.constructor as typeof SpacePageController
     const pageCtx = toPageContext<Params>(ctx)
     const fragmentOnly = ctx.req.headers.has(ORBIT_FRAGMENT_HEADER)
+    // A `[lang]` segment that is no registered language (e.g. an unregistered `/manifest.webmanifest`
+    // falling through `langPreHandler` into this app's `routes/[lang]/...` page) is an unknown URL.
+    // Checked first in the handler, before the redirect, `loader` and layout segments run on a
+    // garbage language: guards already ran at this point (they run after route matching, and a
+    // per-route check cannot move ahead of them), so none of them is bypassed or reordered.
+    if (hasUnavailableLang(pageCtx.params)) {
+      return renderNotFoundResponse(fragmentOnly, resolveRequestLang(ctx.req))
+    }
     // Security headers, CSP nonce and theme overrides, resolved in one place shared with the
     // failed-action re-render so the two can never drift — see `resolvePageChrome`'s own doc.
     const { applySecurity, nonce, themeStyle, cspSignature } = await resolvePageChrome(
@@ -523,6 +533,9 @@ export abstract class SpacePageController<
    * error response.
    */
   public async handlePost(ctx: HandlerContext): Promise<Response> {
+    if (hasUnavailableLang(ctx.payload.params)) {
+      return renderNotFoundResponse(false, resolveRequestLang(ctx.req))
+    }
     const { action } = this
     const Ctor = this.constructor as typeof SpacePageController
     if (!action) {

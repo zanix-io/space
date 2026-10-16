@@ -1,6 +1,7 @@
 import { assert, assertEquals, assertThrows } from '@std/assert'
 import type { GuardContext } from '@zanix/server'
 import { langGuard } from 'modules/middleware/lang-guard.ts'
+import { setLangRegistration } from 'modules/middleware/lang-registry.ts'
 
 function mockGuardContext(overrides: {
   params?: Record<string, string>
@@ -77,4 +78,21 @@ Deno.test('langGuard: a custom paramName/cookieName is respected', async () => {
 Deno.test('langGuard: a cookieName missing the X-Znx- prefix throws at construction', () => {
   const error = assertThrows(() => langGuard({ cookieName: 'locale' })) as { code?: string }
   assertEquals(error.code, 'UTILS_COOKIES_INVALID_PREFIX')
+})
+
+Deno.test('langGuard: a :lang value that is no registered language never becomes the cookie', async () => {
+  setLangRegistration({
+    availableLangs: ['en', 'es'],
+    paramName: 'lang',
+    defaultLang: 'en',
+    cookieName: 'X-Znx-Lang',
+  })
+  try {
+    const bad = await langGuard()(mockGuardContext({ params: { lang: 'robots.txt' } }))
+    assertEquals(bad.headers, undefined)
+    const good = await langGuard()(mockGuardContext({ params: { lang: 'es' } }))
+    assert(good.headers?.['Set-Cookie']?.includes('X-Znx-Lang=es'))
+  } finally {
+    setLangRegistration(undefined)
+  }
 })

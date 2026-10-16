@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/) and this project
 adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.19.2] - 2026-10-15
+
+### Fixed
+
+- **Two pages whose Content-Security-Policy differs only in the order of directives or sources no
+  longer force a real navigation.** Orbit swaps a fragment in only when its policy, with the nonce
+  removed, equals the policy of the open document; `normalizeCspSignature` compared the two as
+  strings, so `img-src` listing the same two origins in opposite order counted as a different policy
+  and the navigation degraded to a full page load. The signature is now canonical in the order of
+  directives and of the sources inside each one, directive names are lowercased, repeated sources
+  collapse and only the first occurrence of a directive counts, as in a browser. A different set of
+  sources is still a different policy.
+- **An unregistered framework path under a `[lang]` route answers `404`, not `500`.** With
+  `langPreHandler`, a request such as `/manifest.webmanifest`, `/sw.js` or `/robots.txt` for a route
+  the app did not register fell through to its top-level `routes/[lang]/...` page with the file name
+  as `params.lang`, and the page ran on that value (a `500` from the language tag). A page whose
+  `:lang` param is not one of `availableLangs` now answers the app's not-found page before its
+  redirect, `loader` and layouts run. `langGuard` no longer writes such a value to the language
+  cookie, and a `loader` error page resolves its messages with the request's language instead of the
+  invalid segment. Apps without `langPreHandler` are unchanged.
+
 ## [1.19.1] - 2026-10-12
 
 ### Added

@@ -47,6 +47,36 @@ Deno.test(
   },
 )
 
+Deno.test(
+  'normalizeCspSignature: policies that differ only in the order of directives or sources compare equal',
+  () => {
+    const a =
+      "default-src 'self'; script-src 'self' 'nonce-A'; img-src 'self' https://p.test/a/ https://m.test/a/"
+    const b =
+      "img-src 'self' https://m.test/a/ https://p.test/a/; script-src 'nonce-B' 'self'; default-src 'self'"
+    assertEquals(normalizeCspSignature(a), normalizeCspSignature(b))
+  },
+)
+
+Deno.test(
+  'normalizeCspSignature: a different source set is still a different policy, order aside',
+  () => {
+    const a = "default-src 'self'; img-src 'self' https://p.test/a/"
+    const b = "default-src 'self'; img-src 'self' https://p.test/a/ https://m.test/a/"
+    assertNotEquals(normalizeCspSignature(a), normalizeCspSignature(b))
+  },
+)
+
+Deno.test(
+  'normalizeCspSignature: a valueless directive survives and only the first occurrence of a directive counts',
+  () => {
+    assertEquals(
+      normalizeCspSignature("upgrade-insecure-requests; img-src 'self'; img-src data:"),
+      "img-src 'self'; upgrade-insecure-requests",
+    )
+  },
+)
+
 function emptyHead(): ResolvedHead {
   return { meta: [], link: [] }
 }

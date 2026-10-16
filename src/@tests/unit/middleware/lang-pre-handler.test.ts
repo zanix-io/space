@@ -1,5 +1,9 @@
 import { assert, assertEquals, assertThrows } from '@std/assert'
-import { langPreHandler, resolveRequestLang } from 'modules/middleware/lang-pre-handler.ts'
+import {
+  hasUnavailableLang,
+  langPreHandler,
+  resolveRequestLang,
+} from 'modules/middleware/lang-pre-handler.ts'
 import { getLangRegistration, setLangRegistration } from 'modules/middleware/lang-registry.ts'
 
 const info = {} as Deno.ServeHandlerInfo<Deno.NetAddr>
@@ -389,4 +393,24 @@ Deno.test('langPreHandler: a malformed entry does not hide a valid later one', a
   )
   assert(result instanceof Response)
   assertEquals(result.headers.get('Location'), 'http://localhost/es/x')
+})
+
+Deno.test('hasUnavailableLang: only a registered app with a non-registered :lang value is true', () => {
+  setLangRegistration(undefined)
+  assertEquals(hasUnavailableLang({ lang: 'manifest.webmanifest' }), false)
+
+  setLangRegistration({
+    availableLangs: ['en', 'es'],
+    paramName: 'lang',
+    defaultLang: 'en',
+    cookieName: 'X-Znx-Lang',
+  })
+  try {
+    assertEquals(hasUnavailableLang({ lang: 'manifest.webmanifest' }), true)
+    assertEquals(hasUnavailableLang({ lang: 'es' }), false)
+    assertEquals(hasUnavailableLang({ id: '1' }), false)
+    assertEquals(hasUnavailableLang(undefined), false)
+  } finally {
+    setLangRegistration(undefined)
+  }
 })

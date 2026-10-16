@@ -203,3 +203,21 @@ export function resolveRequestLang(request: Request): string | undefined {
 
   return resolveLang(request, new URL(request.url).pathname, registration)
 }
+
+/**
+ * Whether a matched route's params carry a language segment that is not one of the registered
+ * `availableLangs`. `langPreHandler` never redirects a framework path (`/manifest.webmanifest`,
+ * `/sw.js`, `/robots.txt`, ...), so when the app did not register that route, the request falls
+ * through to its own top-level `routes/[lang]/...` page with the file name as `params.lang`.
+ * Pages call this before anything else runs for them, and answer the not-found page instead.
+ *
+ * Always `false` when no `langPreHandler(...)` was called (no i18n routing, nothing to validate)
+ * and for a route with no `:lang` param.
+ */
+export function hasUnavailableLang(params: unknown): boolean {
+  const registration = getLangRegistration()
+  if (!registration) return false
+
+  const current = (params as Record<string, unknown> | undefined)?.[registration.paramName]
+  return typeof current === 'string' && !registration.availableLangs.includes(current)
+}

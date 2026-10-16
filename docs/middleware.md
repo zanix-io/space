@@ -268,7 +268,10 @@ setting the cookie on that same response. Never redirects a framework-internal r
 `/ready`, `/assets/`, `/icons/`, `/manifest.webmanifest`, `/sw.js`, `/favicon.ico`,
 `/apple-touch-icon.png`, `/sitemap.xml`, `/robots.txt`) — a crawler-facing route needs one
 canonical, unprefixed URL, never a per-language duplicate — `ignorePrefixes` extends that list for
-an app's own non-i18n routes, never replaces it.
+an app's own non-i18n routes, never replaces it. When the app did not register one of those routes
+(no `pwa`, no `sitemap`, ...), the request reaches the `routes/[lang]/...` page with the file name
+as `:lang`; a page whose `:lang` is not one of `availableLangs` answers the not-found page (`404`)
+before its `loader` runs.
 
 The `PreHandler` alone only ever updates the cookie on an actual redirect — it can only return a
 full `Response` or `null`, so an already-correctly-prefixed request (the common case: someone
